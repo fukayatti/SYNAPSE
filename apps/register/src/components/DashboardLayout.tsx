@@ -1,0 +1,150 @@
+import { ReactNode } from "react";
+import { useLocation } from "react-router-dom";
+import Link from "@/components/link";
+import { cn } from "@/lib/utils";
+import {
+  LayoutDashboard,
+  UtensilsCrossed,
+  Package,
+  TrendingUp,
+  Users,
+  Settings,
+  UserCheck,
+  QrCode,
+  Grid,
+  Shield,
+  Calendar,
+  Lock,
+  Smartphone
+} from "lucide-react";
+
+interface MenuItem {
+  title: string;
+  href?: string;
+  tab?: string;
+  icon: any;
+}
+
+interface DashboardLayoutProps {
+  children: ReactNode;
+  title: string;
+  subtitle?: string;
+  type: "circle" | "event" | "system";
+  activeTab?: string; // event/system でタブ制御する場合
+  onTabChange?: (tab: string) => void;
+}
+
+export default function DashboardLayout({
+  children,
+  title,
+  subtitle,
+  type,
+  activeTab,
+  onTabChange
+}: DashboardLayoutProps) {
+  const location = useLocation();
+
+  // サークル管理のメニュー項目
+  const circleMenuItems: MenuItem[] = [
+    { title: "ダッシュボード", href: "/circle/dashboard", icon: LayoutDashboard },
+    { title: "メニュー管理", href: "/circle/dashboard/menu", icon: UtensilsCrossed },
+    { title: "在庫管理", href: "/circle/dashboard/stock", icon: Package },
+    { title: "売上管理", href: "/circle/dashboard/sales", icon: TrendingUp },
+    { title: "スタッフ管理", href: "/circle/dashboard/staff", icon: UserCheck },
+    { title: "サークル設定", href: "/circle/dashboard/circle", icon: Settings },
+    { title: "メンバー管理", href: "/circle/dashboard/members", icon: Users },
+    { title: "モバイルオーダーQR", href: "/circle/dashboard/qr", icon: QrCode },
+    { title: "拡張機能 (モッド)", href: "/circle/dashboard/mods", icon: Grid },
+  ];
+
+  // イベント管理のメニュー項目 (タブ切り替え)
+  const eventMenuItems: MenuItem[] = [
+    { title: "サークル管理", tab: "circles", icon: Grid },
+    { title: "全体売上管理", tab: "sales", icon: TrendingUp },
+    { title: "スタッフ管理", tab: "staff", icon: Users },
+    { title: "イベント設定", tab: "settings", icon: Settings },
+    { title: "リストバンド紛失処理", tab: "wristbands", icon: Lock },
+    { title: "スマホリストバンド発行", tab: "issue", icon: Smartphone },
+  ];
+
+  // システム管理のメニュー項目
+  const systemMenuItems: MenuItem[] = [
+    { title: "イベント一覧", tab: "events", icon: Calendar },
+  ];
+
+  const menuItems =
+    type === "circle"
+      ? circleMenuItems
+      : type === "event"
+      ? eventMenuItems
+      : systemMenuItems;
+
+  return (
+    <div className="max-w-7xl mx-auto p-4 md:p-6 font-mono bg-background text-foreground">
+      {/* 共通ヘッダー */}
+      <div className="flex items-end justify-between border-b-[2px] border-border pb-3 mb-6">
+        <div>
+          <h1 className="text-[28px] md:text-[36px] font-headline uppercase tracking-tight leading-[1.0] flex items-center gap-2">
+            {type === "system" && <Shield className="h-8 w-8 text-foreground" />}
+            {type === "event" && <Calendar className="h-8 w-8 text-foreground" />}
+            {title}
+          </h1>
+          {subtitle && (
+            <p className="font-mono text-[11px] md:text-[13px] uppercase tracking-[1px] mt-1 text-muted-foreground">
+              {subtitle}
+            </p>
+          )}
+        </div>
+      </div>
+
+      {/* 2カラムレイアウト */}
+      <div className="flex flex-col md:flex-row gap-6 items-start">
+        {/* 左サイドバー: PCでは縦並び、モバイルでは横スクロールメニュー */}
+        <aside className="w-full md:w-64 shrink-0 border-[1px] border-border bg-background p-2 rounded-none shadow-none md:sticky md:top-4">
+          <nav className="flex md:flex-col overflow-x-auto md:overflow-x-visible no-scrollbar gap-1 pb-2 md:pb-0">
+            {menuItems.map((item, idx) => {
+              const Icon = item.icon;
+              const isCircleActive = type === "circle" && location.pathname === item.href;
+              const isTabActive = type !== "circle" && activeTab === item.tab;
+              const isActive = isCircleActive || isTabActive;
+
+              const baseClass = cn(
+                "flex items-center gap-2 px-3 py-2 text-[12px] font-bold uppercase rounded-none transition-all border border-transparent whitespace-nowrap md:w-full select-none cursor-pointer",
+                isActive
+                  ? "bg-primary text-primary-foreground border-primary"
+                  : "hover:bg-muted text-muted-foreground hover:text-foreground hover:border-border"
+              );
+
+              if (type === "circle" && item.href) {
+                return (
+                  <Link key={idx} href={item.href as any} className="block md:w-full">
+                    <span className={baseClass}>
+                      <Icon className="h-4 w-4 shrink-0" />
+                      {item.title}
+                    </span>
+                  </Link>
+                );
+              } else {
+                return (
+                  <button
+                    key={idx}
+                    onClick={() => item.tab && onTabChange && onTabChange(item.tab)}
+                    className={baseClass}
+                  >
+                    <Icon className="h-4 w-4 shrink-0" />
+                    {item.title}
+                  </button>
+                );
+              }
+            })}
+          </nav>
+        </aside>
+
+        {/* 右メインコンテンツ */}
+        <main className="flex-1 w-full border-[1px] border-border p-4 md:p-6 bg-background rounded-none shadow-none min-h-[500px]">
+          {children}
+        </main>
+      </div>
+    </div>
+  );
+}

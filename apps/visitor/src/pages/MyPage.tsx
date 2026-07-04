@@ -2,7 +2,8 @@
 import { useState, useEffect } from "react";
 import Script from "@/components/script";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { preOrderApi, wristbandApi, orderApi, circleApi } from "@/lib/api";
+import { preOrderApi, wristbandApi, orderApi, circleApi, eventApi } from "@/lib/api";
+import { useVisitor } from "@/hooks/useVisitor";
 import { ModSandbox } from "@/components/ModSandbox";
 import { useGuestUser } from "@/hooks/useGuestUser";
 import { Button } from "@/components/ui/button";
@@ -28,6 +29,14 @@ export default function MyOrderPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const { userId: guestUserId, isLoaded: isGuestLoaded } = useGuestUser();
+  const { session } = useVisitor();
+  const eventId = session?.eventId;
+
+  const { data: eventData } = useQuery({
+    queryKey: ["event", eventId],
+    queryFn: () => eventApi.get(eventId!),
+    enabled: !!eventId,
+  });
   const { userId: authUserId, isAuthenticated, isLoading: authLoading } = useAuth();
   const [isRegisterOpen, setIsRegisterOpen] = useState(false);
   const [newWristbandId, setNewWristbandId] = useState("");
@@ -194,6 +203,16 @@ export default function MyOrderPage() {
 
   return (
     <div className="max-w-3xl mx-auto p-3 sm:p-4 space-y-4 sm:space-y-6 pb-24 font-mono">
+      {eventData?.logoUrl && (
+        <div className="border-[3px] border-border p-2 bg-background mb-4">
+          <img
+            src={eventData.logoUrl}
+            alt={eventData.eventName}
+            className="w-full h-auto max-h-32 object-contain mx-auto block"
+          />
+        </div>
+      )}
+
       <button
         onClick={() => router.push("/menu")}
         className="text-xs uppercase tracking-widest underline hover:text-info flex items-center gap-1"

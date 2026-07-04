@@ -1,8 +1,8 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { visitorApi } from "@/lib/api";
+import { visitorApi, eventApi } from "@/lib/api";
 import { getVisitor, saveVisitor, useVisitor } from "@/hooks/useVisitor";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -53,11 +53,31 @@ export default function Onboarding() {
     onError: (e: any) => toast.error(e?.message || "登録に失敗しました"),
   });
 
+  const v = getVisitor();
+  const eventId = v?.eventId;
+
+  const { data: eventData } = useQuery({
+    queryKey: ["event", eventId],
+    queryFn: () => eventApi.get(eventId!),
+    enabled: !!eventId,
+  });
+
   return (
     <div className="mx-auto max-w-md px-4 py-10 font-mono">
+      {eventData?.logoUrl && (
+        <div className="mb-6 border-[3px] border-border p-2 bg-background">
+          <img
+            src={eventData.logoUrl}
+            alt={eventData.eventName}
+            className="w-full h-auto max-h-32 object-contain mx-auto block"
+          />
+        </div>
+      )}
       <div className="border-[3px] border-border p-6 space-y-6">
         <div className="space-y-1">
-          <h1 className="text-2xl font-black uppercase tracking-wider">ようこそ</h1>
+          <h1 className="text-2xl font-black uppercase tracking-wider">
+            {eventData ? `[${eventData.eventName}]` : "ようこそ"}
+          </h1>
           <p className="text-sm text-muted-foreground">
             はじめにニックネームを登録してください。スタンプラリーや抽選に使います。
           </p>

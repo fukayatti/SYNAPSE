@@ -109,7 +109,7 @@ eventRoutes.delete("/:id", async (c) => {
   return c.json({ success: true });
 });
 
-// テーマパック設定の更新
+// テーマ・基本設定の更新
 eventRoutes.put(
   "/:id/theme",
   zValidator(
@@ -124,9 +124,11 @@ eventRoutes.put(
       accentTextColor: z.string().optional(),
       backgroundColor: z.string().optional(),
       textColor: z.string().optional(),
+      eventName: z.string().optional(),
+      description: z.string().nullable().optional(),
+      startDate: z.string().nullable().optional(),
+      endDate: z.string().nullable().optional(),
     })
-
-
   ),
   async (c) => {
     const session = await getAdminSession(c);
@@ -137,19 +139,31 @@ eventRoutes.put(
     const id = c.req.param("id");
     const input = c.req.valid("json");
 
+    const updateData: any = { ...input };
+    if (input.startDate) {
+      updateData.startDate = new Date(input.startDate);
+    } else if (input.startDate === null) {
+      updateData.startDate = null;
+    }
+    if (input.endDate) {
+      updateData.endDate = new Date(input.endDate);
+    } else if (input.endDate === null) {
+      updateData.endDate = null;
+    }
+
     const existing = await db.select().from(event).where(eq(event.id, id));
     if (existing.length === 0) {
       // イベントが存在しない場合（デフォルトイベント等）、自動作成
       await db.insert(event).values({
         id,
-        eventName: "メインイベント (学園祭・フェス)",
-        ...input,
+        eventName: input.eventName || "メインイベント (学園祭・フェス)",
+        ...updateData,
       });
     } else {
       await db
         .update(event)
         .set({
-          ...input,
+          ...updateData,
           updatedAt: new Date(),
         })
         .where(eq(event.id, id));

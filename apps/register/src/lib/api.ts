@@ -347,6 +347,10 @@ export interface EventTheme {
   accentTextColor?: string;
   backgroundColor?: string;
   textColor?: string;
+  eventName?: string;
+  description?: string | null;
+  startDate?: string | Date | null;
+  endDate?: string | Date | null;
 }
 
 
@@ -685,6 +689,11 @@ export const wristbandApi = {
       `/api/wristbands/${encodeURIComponent(wristbandId)}/report-lost`,
       { method: "POST" }
     ),
+  issue: (eventId: string, wristbandId?: string) =>
+    fetchApi<{ userId: string; displayId: number; wristbandId: string | null }>("/api/wristbands/issue", {
+      method: "POST",
+      body: { eventId, wristbandId },
+    }),
 };
 
 
