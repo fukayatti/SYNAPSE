@@ -412,27 +412,24 @@ export function PermissionGuard({
   return <>{children}</>;
 }
 
-// 認証ガードコンポーネント（後方互換性維持 — event_adminもアクセス可能に）
+// 認証ガードコンポーネント (2026-07-04 SaaS簡素化)
 export function CircleAuthGuard({ children }: { children: React.ReactNode }) {
   const navigate = useNavigate();
   const [circleId, setCircleId] = useState<string | null>(null);
-  const [isEventAdmin, setIsEventAdmin] = useState(false);
+  const [isBypassAdmin, setIsBypassAdmin] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     const authInfo = getAuthInfo();
-    const effectiveAdmin =
-      authInfo?.isEventAdmin ||
-      authInfo?.role === "event_manager" ||
-      authInfo?.role === "super_admin";
+    const isBypass = authInfo?.role === "super_admin" || authInfo?.role === "event_manager";
 
     if (authInfo?.circleId) {
       setCircleId(authInfo.circleId);
-      setIsEventAdmin(!!effectiveAdmin);
-    } else if (effectiveAdmin) {
-      // event_manager / super_admin は circleId がなくてもアクセス可能
+      setIsBypassAdmin(isBypass);
+    } else if (isBypass) {
+      // 管理者はサークル選択がなくてもバイパス可能にする
       setCircleId(null);
-      setIsEventAdmin(true);
+      setIsBypassAdmin(true);
     } else {
       navigate("/login");
     }
@@ -447,7 +444,7 @@ export function CircleAuthGuard({ children }: { children: React.ReactNode }) {
     );
   }
 
-  if (!circleId && !isEventAdmin) {
+  if (!circleId && !isBypassAdmin) {
     return null;
   }
 
@@ -486,16 +483,16 @@ export function RoleGuard({
   return <>{children}</>;
 }
 
-// 管理者専用認証ガード
-export function AdminAuthGuard({ children }: { children: React.ReactNode }) {
+// システム最高管理者専用ガード (2026-07-04 SaaS権限分離)
+export function SystemAdminGuard({ children }: { children: React.ReactNode }) {
   const navigate = useNavigate();
-  const { role, isLoading, isAuthenticated, isEventAdmin } = useAuth();
+  const { role, isLoading, isAuthenticated } = useAuth();
 
   useEffect(() => {
-    if (!isLoading && (!isAuthenticated || !isEventAdmin)) {
-      navigate("/dashboard");
+    if (!isLoading && (!isAuthenticated || role !== "super_admin")) {
+      navigate("/login");
     }
-  }, [isLoading, isAuthenticated, isEventAdmin, navigate]);
+  }, [isLoading, isAuthenticated, role, navigate]);
 
   if (isLoading) {
     return (
@@ -505,7 +502,44 @@ export function AdminAuthGuard({ children }: { children: React.ReactNode }) {
     );
   }
 
-  if (!isAuthenticated || !isEventAdmin) {
+  if (!isAuthenticated || role !== "super_admin") {
+    return (
+      <div className="flex min-h-[400px] flex-col items-center justify-center gap-4 text-center p-4">
+        <h2 className="text-[32px] font-headline uppercase tracking-tight leading-[1.1]">
+          アクセス権限がありません
+        </h2>
+        <p className="font-body text-[14px] leading-[1.5]">
+          システム管理機能を利用するには、システム最高管理者（super_admin）アカウントでログインする必要があります。
+        </p>
+      </div>
+    );
+  }
+
+  return <>{children}</>;
+}
+
+// イベント管理者専用ガード (2026-07-04 SaaS権限分離)
+export function EventAdminGuard({ children }: { children: React.ReactNode }) {
+  const navigate = useNavigate();
+  const { role, isLoading, isAuthenticated } = useAuth();
+
+  useEffect(() => {
+    const isAllowed = role === "event_manager" || role === "super_admin";
+    if (!isLoading && (!isAuthenticated || !isAllowed)) {
+      navigate("/login");
+    }
+  }, [isLoading, isAuthenticated, role, navigate]);
+
+  if (isLoading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center">
+        <Loader />
+      </div>
+    );
+  }
+
+  const isAllowed = role === "event_manager" || role === "super_admin";
+  if (!isAuthenticated || !isAllowed) {
     return (
       <div className="flex min-h-[400px] flex-col items-center justify-center gap-4 text-center p-4">
         <h2 className="text-[32px] font-headline uppercase tracking-tight leading-[1.1]">

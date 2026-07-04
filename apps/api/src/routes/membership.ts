@@ -13,35 +13,16 @@ const membershipRoutes = new Hono();
 // ロール定義 (SaaS対応 - 2026-07-04)
 const ROLES = [
   "super_admin",
-  "system_manager",
-  "system_staff",
   "event_manager",
-  "event_staff",
   "circle_manager",
   "circle_staff",
 ] as const;
 
 type Role = (typeof ROLES)[number];
 
-// ロールの権限マッピング
+// ロールの権限マッピング (SaaS簡素化)
 const ROLE_PERMISSIONS: Record<Role, string[]> = {
   super_admin: ["*"], // 全権限
-  system_manager: [
-    "system:read",
-    "system:write",
-    "event:read",
-    "event:write",
-    "circle:read",
-    "circle:write",
-    "menu:read",
-    "order:read",
-    "sales:read",
-  ],
-  system_staff: [
-    "system:read",
-    "event:read",
-    "circle:read",
-  ],
   event_manager: [
     "event:read",
     "event:write",
@@ -63,12 +44,6 @@ const ROLE_PERMISSIONS: Record<Role, string[]> = {
     "member:read",
     "member:write",
     "member:delete",
-  ],
-  event_staff: [
-    "event:read",
-    "circle:read",
-    "order:read",
-    "member:read",
   ],
   circle_manager: [
     "circle:read",
@@ -138,7 +113,7 @@ async function checkMemberWritePermission(
           eq(membership.isActive, true)
         )
       );
-    if (systemMembers.some((m) => m.role === "super_admin" || m.role === "system_manager")) {
+    if (systemMembers.some((m) => m.role === "super_admin")) {
       isSystemAdmin = true;
     }
   }
@@ -146,13 +121,13 @@ async function checkMemberWritePermission(
   if (isSystemAdmin) return null;
 
   // 2. システムロールの操作はシステム管理者のみ可能
-  const isSystemRole = (role: string) => ["super_admin", "system_manager", "system_staff"].includes(role);
+  const isSystemRole = (role: string) => role === "super_admin";
   if (isSystemRole(targetCurrentRole) || (targetNewRole && isSystemRole(targetNewRole))) {
     return { error: "システム管理者権限を操作する権限がありません", status: 403 as const };
   }
 
-  // 3. イベントレベル (event_manager / event_staff) の操作は、そのイベントの event_manager のみ可能
-  const isEventRole = (role: string) => ["event_manager", "event_staff"].includes(role);
+  // 3. イベントレベル (event_manager) の操作は、そのイベントの event_manager のみ可能
+  const isEventRole = (role: string) => role === "event_manager";
   if (!targetCircleId || isEventRole(targetCurrentRole) || (targetNewRole && isEventRole(targetNewRole))) {
     let checkEventId = targetEventId;
     if (!checkEventId && targetCircleId) {

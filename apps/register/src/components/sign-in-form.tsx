@@ -36,8 +36,8 @@ export default function SignInForm({
 						try {
 							const memberships = await membershipApi.listMy(value.email);
 							
-							const systemMembership = memberships.find((m) => ["super_admin", "system_manager", "system_staff"].includes(m.role));
-							const eventMembership = memberships.find((m) => ["event_manager", "event_staff"].includes(m.role));
+							const systemMembership = memberships.find((m) => m.role === "super_admin");
+							const eventMembership = memberships.find((m) => m.role === "event_manager");
 							const circleMembership = memberships.find((m) => m.circleId);
 
 							if (systemMembership) {
@@ -51,7 +51,7 @@ export default function SignInForm({
 									circleName: null,
 									isEventAdmin: true,
 								});
-								navigate((callbackUrl as any) || "/admin");
+								navigate((callbackUrl as any) || "/admin/dashboard");
 								toast.success(`システム管理スペースにログインしました (${systemMembership.role})`);
 							} else if (eventMembership) {
 								saveAuthInfo({
@@ -64,7 +64,7 @@ export default function SignInForm({
 									circleName: null,
 									isEventAdmin: true,
 								});
-								navigate((callbackUrl as any) || "/admin");
+								navigate((callbackUrl as any) || "/event/dashboard");
 								toast.success(`イベント管理スペースにログインしました (${eventMembership.role})`);
 							} else if (circleMembership) {
 								saveAuthInfo({
@@ -81,14 +81,14 @@ export default function SignInForm({
 									localStorage.setItem("circleName", circleMembership.circle.name);
 								}
 
-								navigate((callbackUrl as any) || "/dashboard");
+								navigate((callbackUrl as any) || "/circle/dashboard");
 								toast.success(`${circleMembership.userName}さんとして [${circleMembership.circle?.name || "サークル"}] にログインしました`);
 							} else {
-								navigate((callbackUrl as any) || "/dashboard");
+								navigate((callbackUrl as any) || "/visitor/menu");
 								toast.success("ログインしました");
 							}
 						} catch (error) {
-							navigate((callbackUrl as any) || "/dashboard");
+							navigate((callbackUrl as any) || "/visitor/menu");
 							toast.success("ログインしました");
 						}
 					},

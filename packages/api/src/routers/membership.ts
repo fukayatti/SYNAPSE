@@ -17,10 +17,7 @@ import bcrypt from "bcryptjs";
 // ロールのZodスキーマ
 const roleSchema = z.enum([
   "super_admin",
-  "system_manager",
-  "system_staff",
   "event_manager",
-  "event_staff",
   "circle_manager",
   "circle_staff",
 ]);
@@ -38,10 +35,7 @@ export function canManageRole(
 ): boolean {
   const hierarchy: Record<RoleType, number> = {
     [ROLES.SUPER_ADMIN]: 100,
-    [ROLES.SYSTEM_MANAGER]: 95,
-    [ROLES.SYSTEM_STAFF]: 90,
     [ROLES.EVENT_MANAGER]: 80,
-    [ROLES.EVENT_STAFF]: 70,
     [ROLES.CIRCLE_MANAGER]: 60,
     [ROLES.CIRCLE_STAFF]: 50,
   };
@@ -425,21 +419,9 @@ export const membershipRouter = router({
           name: "システム最高管理者",
           description: "システム全体の管理権限を持つ最上位の管理者",
         },
-        [ROLES.SYSTEM_MANAGER]: {
-          name: "システムマネージャー",
-          description: "システム全体の設定や売上閲覧などを行う管理者",
-        },
-        [ROLES.SYSTEM_STAFF]: {
-          name: "システムスタッフ",
-          description: "システム全体の閲覧が可能なスタッフ",
-        },
         [ROLES.EVENT_MANAGER]: {
           name: "イベントマネージャー",
           description: "イベント全体の管理権限を持つ主催者管理者",
-        },
-        [ROLES.EVENT_STAFF]: {
-          name: "イベントスタッフ",
-          description: "イベント運営を補助するスタッフ",
         },
         [ROLES.CIRCLE_MANAGER]: {
           name: "サークルマネージャー",

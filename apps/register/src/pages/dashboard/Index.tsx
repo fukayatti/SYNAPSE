@@ -23,58 +23,58 @@ function DashboardContent() {
     {
       title: "メニュー管理",
       description: "メニューとトッピングの追加・編集",
-      href: "/dashboard/menu",
+      href: "/circle/dashboard/menu",
       index: "01",
       permission: "menu:read" as const,
     },
     {
       title: "在庫管理",
       description: "在庫の確認と更新",
-      href: "/dashboard/stock",
+      href: "/circle/dashboard/stock",
       index: "02",
       permission: "stock:read" as const,
     },
     {
       title: "売上管理",
       description: "売上データの確認と分析",
-      href: "/dashboard/sales",
+      href: "/circle/dashboard/sales",
       index: "03",
       permission: "sales:read" as const,
     },
     {
       title: "スタッフ管理",
       description: "シフトとスタッフの管理",
-      href: "/dashboard/staff",
+      href: "/circle/dashboard/staff",
       index: "04",
       permission: "staff:read" as const,
     },
     {
       title: "サークル設定",
       description: "サークル情報の編集",
-      href: "/dashboard/circle",
+      href: "/circle/dashboard/circle",
       index: "05",
       permission: "circle:read" as const,
     },
     {
       title: "メンバー管理",
       description: "メンバーの追加・権限設定",
-      href: "/dashboard/members",
+      href: "/circle/dashboard/members",
       index: "06",
       permission: "member:read" as const,
     },
     {
       title: "モバイルオーダーQR",
       description: "店頭掲示用POPシートの表示・印刷",
-      href: "/dashboard/qr",
+      href: "/circle/dashboard/qr",
       index: "07",
       permission: "circle:read" as const,
     },
     {
       title: "拡張機能 (モッド)",
       description: "サークル専用の拡張機能の管理・有効化",
-      href: "/dashboard/mods",
+      href: "/circle/dashboard/mods",
       index: "08",
-      permission: "circle:write" as const,
+      permission: "circle:read" as const,
     },
   ];
 
@@ -134,26 +134,26 @@ function DashboardContent() {
           </CardHeader>
           <CardContent className="space-y-sp-2">
             <PermissionGuard permission="order:write">
-              <Link href="/register">
+              <Link href="/circle/register">
                 <Button className="w-full" variant="outline">
                   レジを開く
                 </Button>
               </Link>
             </PermissionGuard>
             <PermissionGuard permission="order:read">
-              <Link href="/backyard">
+              <Link href="/circle/backyard">
                 <Button className="w-full" variant="outline">
                   厨房ビューを開く
                 </Button>
               </Link>
             </PermissionGuard>
-            <Link href="/menu">
+            <Link href="/visitor/menu">
               <Button className="w-full" variant="outline">
                 メニューを見る
               </Button>
             </Link>
             <PermissionGuard permission="circle:read">
-              <Link href="/dashboard/qr">
+              <Link href="/circle/dashboard/qr">
                 <Button className="w-full bg-primary text-primary-foreground hover:bg-background hover:text-foreground font-bold">
                   モバイルオーダーQRを表示・印刷
                 </Button>

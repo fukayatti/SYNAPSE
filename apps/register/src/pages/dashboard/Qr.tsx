@@ -59,7 +59,7 @@ function CircleQrContent() {
     );
   }
 
-  const mobileOrderUrl = `${origin}/menu?circleId=${circleId}`;
+  const mobileOrderUrl = `${origin}/visitor/menu?circleId=${circleId}`;
 
   const handlePrint = () => {
     window.print();
@@ -137,7 +137,7 @@ function CircleQrContent() {
       <div className="print:hidden flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b-thick border-border pb-4">
         <div>
           <Link
-            href="/dashboard"
+            href="/circle/dashboard"
             className="font-mono text-xs uppercase tracking-widest underline hover:text-info flex items-center gap-1 mb-2"
           >
             <ArrowLeft className="h-4 w-4" />

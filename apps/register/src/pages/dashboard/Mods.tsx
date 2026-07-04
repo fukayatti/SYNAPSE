@@ -234,7 +234,7 @@ function ModsSettingsContent() {
     <div className="max-w-4xl mx-auto p-sp-4 space-y-sp-5">
       {/* 戻るリンク */}
       <Link
-        href="/dashboard"
+        href="/circle/dashboard"
         className="font-mono text-[13px] uppercase tracking-[1px] underline hover:text-info flex items-center gap-1"
       >
         <ArrowLeft className="h-4 w-4" /> ダッシュボードに戻る
