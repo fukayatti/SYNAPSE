@@ -1,25 +1,25 @@
 {
-  "name": "server",
+  "name": "api",
   "main": "src/index.ts",
   "type": "module",
   "scripts": {
-    "build": "tsdown",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
     "check-types": "tsc -b",
-    "compile": "bun build --compile --minify --sourcemap --bytecode ./src/index.ts --outfile server",
-    "dev": "tsx watch src/index.ts",
-    "start": "node dist/index.js"
+    "cf-typegen": "wrangler types",
+    "db:migrate:local": "wrangler d1 migrations apply fesflow-db --local",
+    "db:migrate:remote": "wrangler d1 migrations apply fesflow-db --remote"
   },
   "dependencies": {
-    "@hono/node-server": "^1.14.4",
     "@hono/trpc-server": "^0.4.0",
     "@hono/zod-validator": "^0.7.5",
     "@fesflow/api": "workspace:*",
     "@fesflow/auth": "workspace:*",
     "@fesflow/db": "workspace:*",
+    "@fesflow/storage": "workspace:*",
     "@trpc/server": "catalog:",
     "bcryptjs": "^2.4.3",
     "better-auth": "catalog:",
-    "dotenv": "catalog:",
     "drizzle-orm": "^0.45.0",
     "hono": "catalog:",
     "nanoid": "^5.0.9",
@@ -27,10 +27,10 @@
   },
   "devDependencies": {
     "@fesflow/config": "workspace:*",
+    "@cloudflare/workers-types": "^4.20250620.0",
     "@types/bcryptjs": "^2.4.6",
     "@types/node": "^22.13.11",
-    "tsdown": "^0.16.5",
-    "tsx": "^4.19.2",
-    "typescript": "^5.8.2"
+    "typescript": "^5.8.2",
+    "wrangler": "^4.20.0"
   }
 }

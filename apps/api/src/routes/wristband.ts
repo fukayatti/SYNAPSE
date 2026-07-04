@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
-import { db, wristband, eventUser } from "@fesflow/db";
+import { db, wristband, eventUser, getEnv } from "@fesflow/db";
 import { eq, and, desc } from "drizzle-orm";
 
 
@@ -72,7 +72,7 @@ wristbandRoutes.get("/lookup/:code", async (c) => {
     .where(eq(eventUser.id, code));
 
   // 管理者ID・メールアドレスの場合の自動補完・同等扱い
-  const adminEmail = process.env.INITIAL_SUPER_ADMIN_EMAIL || "me@fukayatti0.dev";
+  const adminEmail = getEnv().INITIAL_SUPER_ADMIN_EMAIL || "me@fukayatti0.dev";
   if (users.length === 0 && (code === adminEmail || code === "lTkBEJtn1G88NFZ2bsLdATuSrjjLuaTG" || code.startsWith("usr_"))) {
     const newDisplayId = code === adminEmail || code === "lTkBEJtn1G88NFZ2bsLdATuSrjjLuaTG" ? 999 : Math.floor(100 + Math.random() * 900);
     await db.insert(eventUser).values({

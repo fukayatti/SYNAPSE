@@ -1,0 +1,34 @@
+{
+	// FesFlow API Worker の設定。
+	// D1 (DB) と R2 (BUCKET) をバインドし、nodejs_compat で
+	// AsyncLocalStorage (node:async_hooks) を有効化する。
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "fesflow-api",
+	"main": "src/index.ts",
+	"compatibility_date": "2025-06-01",
+	"compatibility_flags": ["nodejs_compat"],
+	"observability": {
+		"enabled": true
+	},
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "fesflow-db",
+			// `wrangler d1 create fesflow-db` 実行後に表示される id に置き換える。
+			// ローカル (--local) では任意の値で動作する。
+			"database_id": "REPLACE_WITH_D1_DATABASE_ID",
+			"migrations_dir": "../../packages/db/src/migrations"
+		}
+	],
+	"r2_buckets": [
+		{
+			"binding": "BUCKET",
+			"bucket_name": "fesflow-uploads"
+		}
+	],
+	"vars": {
+		// 非機密の設定値。機密は .dev.vars (ローカル) / wrangler secret (本番) で管理。
+		"PRODUCT_NAME": "FesFlow",
+		"R2_PUBLIC_URL": "http://localhost:8787/uploads"
+	}
+}

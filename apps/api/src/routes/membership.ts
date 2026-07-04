@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
-import { db, membership, inviteToken, circle, event, user } from "@fesflow/db";
+import { db, membership, inviteToken, circle, event, user, getEnv } from "@fesflow/db";
 import { eq, and, inArray, gt } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import bcrypt from "bcryptjs";
@@ -99,7 +99,7 @@ async function checkMemberWritePermission(
   }
 
   const email = session.user.email.toLowerCase();
-  const initialAdminEmail = process.env.INITIAL_SUPER_ADMIN_EMAIL;
+  const initialAdminEmail = getEnv().INITIAL_SUPER_ADMIN_EMAIL;
 
   let isEventAdmin = false;
   if (initialAdminEmail && email === initialAdminEmail.toLowerCase()) {
@@ -173,7 +173,7 @@ membershipRoutes.get("/my", async (c) => {
     return c.json({ error: "userEmailが必要です" }, 400);
   }
 
-  const initialAdminEmail = process.env.INITIAL_SUPER_ADMIN_EMAIL;
+  const initialAdminEmail = getEnv().INITIAL_SUPER_ADMIN_EMAIL;
   if (initialAdminEmail && userEmail.toLowerCase() === initialAdminEmail.toLowerCase()) {
     const existingAdmin = await db
       .select()

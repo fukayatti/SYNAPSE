@@ -22,13 +22,14 @@
     "dev": "turbo dev",
     "build": "turbo build",
     "check-types": "turbo check-types",
-    "dev:api": "turbo -F @fesflow/api dev",
+    "dev:api": "turbo -F api dev",
     "dev:register": "turbo -F register dev",
     "dev:visitor": "turbo -F visitor dev",
-    "db:push": "turbo -F @fesflow/db db:push",
-    "db:studio": "turbo -F @fesflow/db db:studio",
+    "deploy": "turbo deploy",
     "db:generate": "turbo -F @fesflow/db db:generate",
-    "db:migrate": "turbo -F @fesflow/db db:migrate"
+    "db:studio": "turbo -F @fesflow/db db:studio",
+    "db:migrate:local": "turbo -F api db:migrate:local",
+    "db:migrate:remote": "turbo -F api db:migrate:remote"
   },
   "dependencies": {
     "zod": "^4.1.13"

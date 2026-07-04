@@ -10,14 +10,13 @@
     }
   },
   "scripts": {
-    "db:local": "turso dev --db-file local.db",
-    "db:push": "drizzle-kit push",
-    "db:studio": "drizzle-kit studio",
+    "check-types": "tsc -b",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate"
+    "db:studio": "drizzle-kit studio"
   },
   "devDependencies": {
     "drizzle-kit": "^0.31.8",
+    "@cloudflare/workers-types": "^4.20250620.0",
     "@fesflow/config": "workspace:*"
   },
   "peerDependencies": {
@@ -27,7 +26,6 @@
     "drizzle-orm": "^0.45.0",
     "@libsql/client": "catalog:",
     "libsql": "catalog:",
-    "dotenv": "catalog:",
     "zod": "catalog:"
   }
 }

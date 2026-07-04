@@ -1,0 +1,15 @@
+# ローカル開発用の機密環境変数のサンプル。
+# このファイルを `.dev.vars` にコピーして値を設定する (.dev.vars は gitignore)。
+# 本番は `wrangler secret put <NAME>` で登録する。
+
+BETTER_AUTH_SECRET="ローカル用の任意の長いランダム文字列"
+BETTER_AUTH_URL="http://localhost:8787"
+CORS_ORIGIN="http://localhost:3000"
+INITIAL_SUPER_ADMIN_EMAIL="you@example.com"
+
+# R2 を使わず MinIO でローカル検証する場合のみ設定 (wrangler の R2 エミュを使うなら不要):
+# S3_ENDPOINT="http://localhost:9000"
+# S3_BUCKET="fesflow-uploads"
+# S3_ACCESS_KEY_ID="minioadmin"
+# S3_SECRET_ACCESS_KEY="minioadmin"
+# S3_PUBLIC_URL="http://localhost:9000/fesflow-uploads"

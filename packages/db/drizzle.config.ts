@@ -1,28 +1,17 @@
 import { defineConfig } from "drizzle-kit";
-import dotenv from "dotenv";
-import path from "path";
-import { fileURLToPath } from "url";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-dotenv.config({
-	path: path.resolve(__dirname, "../../apps/server/.env"),
-});
-
-let databaseUrl = process.env.DATABASE_URL || "";
-if (databaseUrl.startsWith("file:")) {
-	const relativePath = databaseUrl.replace(/^file:/, "");
-	const absolutePath = path.resolve(__dirname, "../../apps/server", relativePath);
-	databaseUrl = `file:${absolutePath}`;
-}
-
+/**
+ * drizzle-kit 設定 (2026-07-04 D1 対応に変更)
+ *
+ * - 本番 DB は Cloudflare D1 (SQLite)。マイグレーションの「適用」は
+ *   wrangler d1 migrations apply が担うため、ここでは主に
+ *   `drizzle-kit generate` によるスキーマ→SQL 生成に使う。
+ * - dialect は turso から sqlite へ変更 (D1 も SQLite 方言)。
+ * - 生成物 (./src/migrations) は apps/api/wrangler.jsonc の
+ *   migrations_dir から参照される。
+ */
 export default defineConfig({
 	schema: "./src/schema",
 	out: "./src/migrations",
-	dialect: "turso",
-	dbCredentials: {
-		url: databaseUrl,
-	},
+	dialect: "sqlite",
 });
-

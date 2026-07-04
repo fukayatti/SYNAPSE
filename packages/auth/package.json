@@ -18,7 +18,6 @@
   },
   "dependencies": {
     "better-auth": "catalog:",
-    "dotenv": "catalog:",
     "zod": "catalog:",
     "@fesflow/db": "workspace:*"
   }

@@ -59,6 +59,13 @@ lerna-debug.log*
 # Turbo
 .turbo
 
+# Cloudflare Wrangler / Workers
+.wrangler
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
+worker-configuration.d.ts
+
 # Better-T-Stack
 .alchemy
 

@@ -1,5 +1,5 @@
 import { auth } from "@fesflow/auth";
-import { db, membership } from "@fesflow/db";
+import { db, membership, getEnv } from "@fesflow/db";
 import { eq, and } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { Context } from "hono";
@@ -23,7 +23,7 @@ export async function getAdminSession(c: Context) {
   }
 
   const email = session.user.email;
-  const initialAdminEmail = process.env.INITIAL_SUPER_ADMIN_EMAIL;
+  const initialAdminEmail = getEnv().INITIAL_SUPER_ADMIN_EMAIL;
 
   // 初期管理者メールアドレスに一致する場合、自動昇格/登録チェック
   if (initialAdminEmail && email.toLowerCase() === initialAdminEmail.toLowerCase()) {
