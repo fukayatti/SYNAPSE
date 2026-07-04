@@ -2,9 +2,8 @@ import { useState, useMemo } from "react";
 import { Link, useNavigate, useLocation } from "react-router-dom";
 import { Button } from "./ui/button";
 import { toast } from "sonner";
-import { Menu, X, ChevronDown, User, Bell, Shield, Calendar, Building2, LogOut as LeaveIcon } from "lucide-react";
+import { Menu, X, ChevronDown, User, Bell, Shield, Calendar, Building2 } from "lucide-react";
 import AccountModal from "./account-modal";
-import { ConfirmDialog } from "./ui/ConfirmDialog";
 import { PRODUCT_NAME } from "@fesflow/config";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { eventApi, notificationApi, accountApi } from "@/lib/api";
@@ -33,9 +32,6 @@ function toOrigin(url: string): string {
   }
 }
 
-// 実メンバーシップのみ退出可能
-const isRealMembership = (id: string) => !id.startsWith("super_");
-
 export default function Header() {
   const navigate = useNavigate();
   const pathname = useLocation().pathname;
@@ -57,24 +53,12 @@ export default function Header() {
   const [profileModalOpen, setProfileModalOpen] = useState(false);
   const [notifPopoverOpen, setNotifPopoverOpen] = useState(false);
   const [spacePopoverOpen, setSpacePopoverOpen] = useState(false);
-  // スペース退出確認 (native confirm を廃止しアプリ内ダイアログで確認 2026-07-04)
-  const [pendingLeave, setPendingLeave] = useState<{ id: string; name: string } | null>(null);
 
   // ログインユーザーのアカウント情報を取得 (アバター画像用)
   const { data: me } = useQuery({
     queryKey: ["accountMe"],
     queryFn: () => accountApi.me(),
     enabled: isAuthenticated && !!userEmail,
-  });
-
-  // 退出ミューテーション
-  const leaveMutation = useMutation({
-    mutationFn: (membershipId: string) => accountApi.leaveSpace(membershipId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["mySpaces"] });
-      toast.success("このスペースから退出しました");
-    },
-    onError: (e: any) => toast.error(e.message || "退出に失敗しました"),
   });
 
   // ロール名マッピング
@@ -489,37 +473,41 @@ export default function Header() {
                       </button>
                     </div>
 
-                    <div className="max-h-60 overflow-y-auto space-y-1">
+                    <div className="max-h-72 overflow-y-auto space-y-3">
                       {availableSpaces.length > 0 ? (
-                        availableSpaces.map((space) => (
-                          <div key={space.id} className="flex items-center gap-1 border-b border-border/10 last:border-b-0">
-                            <button
-                              onClick={() => {
-                                handleSwitchSpace(space);
-                                setSpacePopoverOpen(false);
-                              }}
-                              className="flex-1 text-left p-2 hover:bg-primary hover:text-primary-foreground transition-all cursor-pointer rounded-none"
-                            >
-                              <div className="flex items-center gap-1.5 text-[9px] text-muted-foreground font-black uppercase tracking-wider">
-                                {space.type === "system" && <Shield className="h-3 w-3" />}
-                                {space.type === "event" && <Calendar className="h-3 w-3" />}
-                                {space.type === "circle" && <Building2 className="h-3 w-3" />}
-                                {space.type.toUpperCase()} | {ROLE_NAMES[space.role as keyof typeof ROLE_NAMES] ?? space.role}
+                        ([
+                          { type: "system", label: "システム", Icon: Shield },
+                          { type: "event", label: "イベント", Icon: Calendar },
+                          { type: "circle", label: "サークル", Icon: Building2 },
+                        ] as const).map(({ type, label, Icon }) => {
+                          const group = availableSpaces.filter((s) => s.type === type);
+                          if (group.length === 0) return null;
+                          return (
+                            <div key={type} className="space-y-1">
+                              {/* グループ見出し (システム / イベント / サークル) */}
+                              <div className="flex items-center gap-1.5 text-[9px] font-black uppercase tracking-[1.5px] text-muted-foreground px-1 pb-1 border-b border-border/20">
+                                <Icon className="h-3 w-3" />
+                                {label}
+                                <span className="opacity-60">({group.length})</span>
                               </div>
-                              <div className="text-xs font-bold truncate mt-0.5">{space.name}</div>
-                            </button>
-                            {isRealMembership(space.id) && (
-                              <button
-                                title="このスペースから退出"
-                                onClick={() => setPendingLeave({ id: space.id, name: space.name })}
-                                disabled={leaveMutation.isPending}
-                                className="p-2 text-muted-foreground hover:text-destructive shrink-0 cursor-pointer"
-                              >
-                                <LeaveIcon className="h-3.5 w-3.5" />
-                              </button>
-                            )}
-                          </div>
-                        ))
+                              {group.map((space) => (
+                                <button
+                                  key={space.id}
+                                  onClick={() => {
+                                    handleSwitchSpace(space);
+                                    setSpacePopoverOpen(false);
+                                  }}
+                                  className="w-full text-left p-2 hover:bg-primary hover:text-primary-foreground transition-all cursor-pointer rounded-none"
+                                >
+                                  <div className="flex items-center gap-1.5 text-[9px] text-muted-foreground font-black uppercase tracking-wider">
+                                    {ROLE_NAMES[space.role as keyof typeof ROLE_NAMES] ?? space.role}
+                                  </div>
+                                  <div className="text-xs font-bold truncate mt-0.5">{space.name}</div>
+                                </button>
+                              ))}
+                            </div>
+                          );
+                        })
                       ) : (
                         <div className="text-center py-6 text-muted-foreground text-xs">
                           利用可能なスペースがありません
@@ -601,18 +589,6 @@ export default function Header() {
         open={profileModalOpen}
         onClose={() => setProfileModalOpen(false)}
         onLogout={handleLogout}
-      />
-
-      <ConfirmDialog
-        isOpen={!!pendingLeave}
-        title="[スペースから退出]"
-        description={`[${pendingLeave?.name ?? ""}] から退出しますか？この権限は削除されます。`}
-        confirmLabel="退出する"
-        onConfirm={() => {
-          if (pendingLeave) leaveMutation.mutate(pendingLeave.id);
-          setPendingLeave(null);
-        }}
-        onCancel={() => setPendingLeave(null)}
       />
     </header>
   );

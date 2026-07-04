@@ -14,13 +14,18 @@ import {
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { toast } from "sonner";
-import { CheckCircle, Clock, Users } from "lucide-react";
+import { CheckCircle, Clock, Users, XCircle } from "lucide-react";
 
 function BackyardPageContent() {
   const [circleId, setCircleId] = useState<string>("");
   const [selectedStatus, setSelectedStatus] = useState<string | undefined>(
     "pending"
+  );
+  // 注文キャンセルの確認ダイアログ用
+  const [pendingCancel, setPendingCancel] = useState<{ id: string; orderNumber: string } | null>(
+    null
   );
   const queryClient = useQueryClient();
 
@@ -77,6 +82,14 @@ function BackyardPageContent() {
 
   const handleComplete = (orderId: string) => {
     completeOrder.mutate({ id: orderId });
+  };
+
+  const handleCancel = () => {
+    if (!pendingCancel) return;
+    updateStatus.mutate(
+      { id: pendingCancel.id, status: "cancelled" },
+      { onSettled: () => setPendingCancel(null) }
+    );
   };
 
   const getStatusBadge = (status: string) => {
@@ -146,6 +159,13 @@ function BackyardPageContent() {
           className="border-thick border-border rounded-none font-mono uppercase text-xs sm:text-sm"
         >
           完成
+        </Button>
+        <Button
+          variant={selectedStatus === "cancelled" ? "default" : "outline"}
+          onClick={() => setSelectedStatus("cancelled")}
+          className="border-thick border-border rounded-none font-mono uppercase text-xs sm:text-sm"
+        >
+          キャンセル
         </Button>
         <Button
           variant={selectedStatus === undefined ? "default" : "outline"}
@@ -237,6 +257,24 @@ function BackyardPageContent() {
                     <CheckCircle className="mr-2 h-4 w-4" />完了済み
                   </Button>
                 )}
+                {order.status === "cancelled" && (
+                  <Button className="flex-1 min-w-[120px] h-12 border-thick border-border rounded-none font-mono uppercase" disabled variant="outline">
+                    <XCircle className="mr-2 h-4 w-4" />キャンセル済み
+                  </Button>
+                )}
+                {/* 未着手・調理中の注文はキャンセル可能 */}
+                {(order.status === "pending" || order.status === "preparing") && (
+                  <Button
+                    variant="outline"
+                    className="h-12 border-thick border-destructive text-destructive hover:bg-destructive hover:text-destructive-foreground rounded-none font-mono uppercase font-bold px-4"
+                    onClick={() =>
+                      setPendingCancel({ id: order.id, orderNumber: order.orderNumber })
+                    }
+                    disabled={updateStatus.isPending}
+                  >
+                    <XCircle className="mr-2 h-4 w-4" />キャンセル
+                  </Button>
+                )}
               </CardFooter>
             </Card>
           ))
@@ -250,6 +288,15 @@ function BackyardPageContent() {
           </Card>
         )}
       </div>
+
+      <ConfirmDialog
+        isOpen={!!pendingCancel}
+        title="[注文のキャンセル]"
+        description={`注文 #${pendingCancel?.orderNumber ?? ""} をキャンセルしますか？この操作は元に戻せません。`}
+        confirmLabel="キャンセルする"
+        onConfirm={handleCancel}
+        onCancel={() => setPendingCancel(null)}
+      />
     </div>
   );
 }

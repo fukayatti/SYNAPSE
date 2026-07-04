@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import { db, circle, event, membership } from "@fesflow/db";
-import { eq, and } from "drizzle-orm";
+import { eq, and, isNull } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import bcrypt from "bcryptjs";
 import { getAdminSession, hasPermission } from "../utils/auth";
@@ -20,6 +20,7 @@ circleRoutes.get("/", async (c) => {
       name: circle.name,
       description: circle.description,
       mods: circle.mods,
+      settings: circle.settings,
       createdAt: circle.createdAt,
       updatedAt: circle.updatedAt,
       managerEmail: membership.userEmail,
@@ -34,12 +35,12 @@ circleRoutes.get("/", async (c) => {
       )
     );
 
-  if (eventId) {
-    const circles = await query.where(eq(circle.eventId, eventId));
-    return c.json(circles);
-  }
+  // 論理削除済み(deletedAt != null)は常に除外する
+  const where = eventId
+    ? and(eq(circle.eventId, eventId), isNull(circle.deletedAt))
+    : isNull(circle.deletedAt);
 
-  const circles = await query;
+  const circles = await query.where(where);
   return c.json(circles);
 });
 
@@ -53,6 +54,7 @@ circleRoutes.get("/:id", async (c) => {
       name: circle.name,
       description: circle.description,
       mods: circle.mods,
+      settings: circle.settings,
       createdAt: circle.createdAt,
       updatedAt: circle.updatedAt,
       managerEmail: membership.userEmail,
@@ -66,7 +68,7 @@ circleRoutes.get("/:id", async (c) => {
         eq(membership.role, "circle_manager")
       )
     )
-    .where(eq(circle.id, id));
+    .where(and(eq(circle.id, id), isNull(circle.deletedAt)));
 
   if (circles.length === 0) {
     return c.json({ error: "サークルが見つかりません" }, 404);
@@ -252,17 +254,108 @@ circleRoutes.put(
   }
 );
 
-// サークル削除
+// サークル削除 (論理削除)
+// 上位管理者のみ実行可能: super_admin もしくは当該イベントの event_manager
+// (circle:delete 権限。circle_manager は自サークルを削除できない)
 circleRoutes.delete("/:id", async (c) => {
-  const session = await getAdminSession(c);
-  if (!session) {
-    return c.json({ error: "管理者権限が必要です" }, 403);
+  const id = c.req.param("id");
+
+  const allowed = await hasPermission(c, id, "circle:delete");
+  if (!allowed) {
+    return c.json({ error: "削除する権限がありません" }, 403);
   }
 
-  const id = c.req.param("id");
-  await db.delete(circle).where(eq(circle.id, id));
+  // 物理削除せず deletedAt に時刻を書き込む (論理削除)
+  await db.update(circle).set({ deletedAt: new Date() }).where(eq(circle.id, id));
   return c.json({ success: true });
 });
+
+// サークル運用設定 (注文モード・組み込み拡張のON/OFF等) の更新
+circleRoutes.patch(
+  "/:id/settings",
+  zValidator(
+    "json",
+    z.object({
+      settings: z.record(z.string(), z.any()),
+    })
+  ),
+  async (c) => {
+    const id = c.req.param("id");
+    const { settings } = c.req.valid("json");
+
+    const allowed = await hasPermission(c, id, "circle:write");
+    if (!allowed) {
+      return c.json({ error: "権限がありません" }, 403);
+    }
+
+    const existingCircle = await db.select().from(circle).where(eq(circle.id, id));
+    if (existingCircle.length === 0) {
+      return c.json({ error: "サークルが見つかりません" }, 404);
+    }
+
+    await db
+      .update(circle)
+      .set({ settings: JSON.stringify(settings) })
+      .where(eq(circle.id, id));
+
+    return c.json({ success: true });
+  }
+);
+
+// オーナー権限の譲渡: 指定メンバーを circle_manager に昇格し、既存の
+// circle_manager を circle_staff へ降格する。circle_manager 本人または
+// 上位管理者(event_manager / super_admin)のみ実行可能。
+circleRoutes.post(
+  "/:id/transfer-owner",
+  zValidator(
+    "json",
+    z.object({
+      membershipId: z.string(),
+    })
+  ),
+  async (c) => {
+    const id = c.req.param("id");
+    const { membershipId } = c.req.valid("json");
+
+    // 譲渡は「メンバーの権限変更」に相当するため circle:write 権限で判定
+    const allowed = await hasPermission(c, id, "circle:write");
+    if (!allowed) {
+      return c.json({ error: "権限がありません" }, 403);
+    }
+
+    // 譲渡先メンバーが当該サークルに所属しているか確認
+    const targets = await db
+      .select()
+      .from(membership)
+      .where(and(eq(membership.id, membershipId), eq(membership.circleId, id)));
+    if (targets.length === 0) {
+      return c.json({ error: "譲渡先のメンバーが見つかりません" }, 404);
+    }
+
+    // 既存の circle_manager を circle_staff に降格 (譲渡先自身は除く)
+    const currentManagers = await db
+      .select()
+      .from(membership)
+      .where(
+        and(eq(membership.circleId, id), eq(membership.role, "circle_manager"))
+      );
+    for (const m of currentManagers) {
+      if (m.id === membershipId) continue;
+      await db
+        .update(membership)
+        .set({ role: "circle_staff" })
+        .where(eq(membership.id, m.id));
+    }
+
+    // 譲渡先を circle_manager に昇格
+    await db
+      .update(membership)
+      .set({ role: "circle_manager" })
+      .where(eq(membership.id, membershipId));
+
+    return c.json({ success: true });
+  }
+);
 
 // サークルの拡張機能（モッド）設定の更新
 circleRoutes.patch(

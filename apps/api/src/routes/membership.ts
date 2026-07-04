@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import { db, membership, inviteToken, circle, event, user, getEnv, notification } from "@fesflow/db";
-import { eq, and, inArray, gt } from "drizzle-orm";
+import { eq, and, inArray, gt, isNull } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import bcrypt from "bcryptjs";
 import { auth } from "@fesflow/auth";
@@ -259,21 +259,36 @@ membershipRoutes.get("/my", async (c) => {
     .map((m) => m.eventId)
     .filter(Boolean) as string[];
 
+  // 論理削除済み(deletedAt != null)のサークル/イベントは取得対象から除外する
   const circles =
     circleIds.length > 0
-      ? await db.select().from(circle).where(inArray(circle.id, circleIds))
+      ? await db
+          .select()
+          .from(circle)
+          .where(and(inArray(circle.id, circleIds), isNull(circle.deletedAt)))
       : [];
 
   const events =
     eventIds.length > 0
-      ? await db.select().from(event).where(inArray(event.id, eventIds))
+      ? await db
+          .select()
+          .from(event)
+          .where(and(inArray(event.id, eventIds), isNull(event.deletedAt)))
       : [];
 
-  const result = memberships.map((m) => ({
-    ...m,
-    circle: circles.find((c) => c.id === m.circleId),
-    event: events.find((e) => e.id === m.eventId),
-  }));
+  const result = memberships
+    // 参照先が論理削除済みのメンバーシップはスペース一覧に出さない
+    // (circleId を持つなら生存サークル必須、eventId のみなら生存イベント必須)
+    .filter((m) => {
+      if (m.circleId) return circles.some((c) => c.id === m.circleId);
+      if (m.eventId) return events.some((e) => e.id === m.eventId);
+      return true; // super_admin 等 (circle/event 紐付けなし) は常に残す
+    })
+    .map((m) => ({
+      ...m,
+      circle: circles.find((c) => c.id === m.circleId),
+      event: events.find((e) => e.id === m.eventId),
+    }));
 
   return c.json(result);
 });

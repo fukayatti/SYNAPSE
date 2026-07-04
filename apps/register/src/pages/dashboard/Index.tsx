@@ -1,8 +1,11 @@
+import { useState, useEffect } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   CircleAuthGuard,
   PermissionGuard,
   useAuth,
 } from "@/hooks/useCircleAuth";
+import { circleApi, parseCircleSettings } from "@/lib/api";
 import Link from "@/components/link";
 import {
   Card,
@@ -18,64 +21,81 @@ import DashboardLayout from "@/components/DashboardLayout";
 function DashboardContent() {
   const { role, roleName, userName, circleName } = useAuth();
 
-  const menuItems = [
+  const [circleId, setCircleId] = useState<string>("");
+  useEffect(() => {
+    const stored = localStorage.getItem("circleId");
+    if (stored) setCircleId(stored);
+  }, []);
+  const { data: circle } = useQuery({
+    queryKey: ["circle", circleId],
+    queryFn: () => circleApi.get(circleId),
+    enabled: !!circleId,
+  });
+  const settings = parseCircleSettings(circle?.settings);
+
+  // 基本機能を先頭に、拡張機能(在庫/スタッフ/モッド)は末尾へ並べる。
+  // 在庫・スタッフは拡張機能としてON時のみ表示する。
+  const rawItems = [
     {
       title: "メニュー管理",
       description: "メニューとトッピングの追加・編集",
       href: "/circle/dashboard/menu",
-      index: "01",
       permission: "menu:read" as const,
-    },
-    {
-      title: "在庫管理",
-      description: "在庫の確認と更新",
-      href: "/circle/dashboard/stock",
-      index: "02",
-      permission: "stock:read" as const,
     },
     {
       title: "売上管理",
       description: "売上データの確認と分析 (グラフ表示対応)",
       href: "/circle/dashboard/sales",
-      index: "03",
       permission: "sales:read" as const,
     },
     {
-      title: "スタッフ管理",
-      description: "シフトとスタッフの管理",
-      href: "/circle/dashboard/staff",
-      index: "04",
-      permission: "staff:read" as const,
-    },
-    {
       title: "サークル設定",
-      description: "サークル情報の編集",
+      description: "注文モード・拡張機能・サークル情報の編集",
       href: "/circle/dashboard/circle",
-      index: "05",
       permission: "circle:read" as const,
     },
     {
       title: "メンバー管理",
       description: "メンバーの追加・権限設定",
       href: "/circle/dashboard/members",
-      index: "06",
       permission: "member:read" as const,
     },
     {
       title: "モバイルオーダーQR",
       description: "店頭掲示用POPシートの表示・印刷",
       href: "/circle/dashboard/qr",
-      index: "07",
       permission: "circle:read" as const,
     },
+    // --- ここから拡張機能 (末尾) ---
+    ...(settings.extensions.stock
+      ? [{
+          title: "在庫管理",
+          description: "在庫の確認と更新",
+          href: "/circle/dashboard/stock",
+          permission: "stock:read" as const,
+        }]
+      : []),
+    ...(settings.extensions.staff
+      ? [{
+          title: "スタッフ管理",
+          description: "シフトとスタッフの管理",
+          href: "/circle/dashboard/staff",
+          permission: "staff:read" as const,
+        }]
+      : []),
     {
       title: "拡張機能 (モッド)",
       description: "サークル専用の拡張機能の管理・有効化",
       href: "/circle/dashboard/mods",
-      index: "08",
       permission: "circle:read" as const,
     },
   ];
+
+  // 表示位置に応じて連番(01, 02, ...)を採番する
+  const menuItems = rawItems.map((item, i) => ({
+    ...item,
+    index: String(i + 1).padStart(2, "0"),
+  }));
 
   return (
     <DashboardLayout

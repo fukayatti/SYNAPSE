@@ -206,6 +206,23 @@ orderRoutes.post(
       }
       const eventId = circles[0]!.eventId;
 
+      // サークル設定から注文モードを解決する。
+      //   "pending"    : 未着手で受付 (既定・従来挙動、厨房が調理開始→完成)
+      //   "preparing"  : 最初から調理中として受付
+      //   "completed"  : 受付と同時に即完成 (厨房を経由しない模擬店向け)
+      let orderFlowMode: "pending" | "preparing" | "completed" = "pending";
+      try {
+        const parsed = JSON.parse(circles[0]!.settings || "{}");
+        if (
+          parsed?.orderFlowMode === "preparing" ||
+          parsed?.orderFlowMode === "completed"
+        ) {
+          orderFlowMode = parsed.orderFlowMode;
+        }
+      } catch (_) {
+        // 設定が壊れていても既定(pending)で継続する
+      }
+
       const existingUser = await db
         .select()
         .from(eventUser)
@@ -281,7 +298,8 @@ orderRoutes.post(
         totalPrice += subtotal;
       }
 
-      // 注文を作成
+      // 注文を作成 (注文モードに応じて初期ステータスを決定)
+      const isDirectComplete = orderFlowMode === "completed";
       await db.insert(order).values({
         id: orderId,
         circleId: input.circleId,
@@ -289,10 +307,32 @@ orderRoutes.post(
         userId: input.userId, // ゲストIDを保存
         orderNumber,
         peopleCount: input.peopleCount,
-        status: "pending",
+        status: orderFlowMode,
         totalPrice,
-        completed: false,
+        completed: isDirectComplete,
+        completedAt: isDirectComplete ? new Date() : undefined,
       });
+
+      // 未着手以外(調理中/即完成)で受け付けた場合、この時点でスタンプを付与する。
+      // 未着手受付の場合は従来どおり pending→preparing 遷移時に付与される。
+      if (orderFlowMode !== "pending" && input.userId) {
+        const existingStamp = await db
+          .select()
+          .from(userStamp)
+          .where(
+            and(
+              eq(userStamp.userId, input.userId),
+              eq(userStamp.circleId, input.circleId)
+            )
+          );
+        if (existingStamp.length === 0) {
+          await db.insert(userStamp).values({
+            id: nanoid(),
+            userId: input.userId,
+            circleId: input.circleId,
+          });
+        }
+      }
 
       // 注文アイテムを作成
       for (const item of orderItems) {

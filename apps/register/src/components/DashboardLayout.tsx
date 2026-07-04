@@ -1,7 +1,9 @@
-import { ReactNode, useState } from "react";
+import { ReactNode, useState, useEffect } from "react";
 import { useLocation } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 import Link from "@/components/link";
 import { cn } from "@/lib/utils";
+import { circleApi, parseCircleSettings } from "@/lib/api";
 import {
   LayoutDashboard,
   UtensilsCrossed,
@@ -46,17 +48,39 @@ export default function DashboardLayout({
 }: DashboardLayoutProps) {
   const location = useLocation();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [circleId, setCircleId] = useState<string>("");
+
+  useEffect(() => {
+    if (type !== "circle") return;
+    const stored = localStorage.getItem("circleId");
+    if (stored) setCircleId(stored);
+  }, [type]);
+
+  // 拡張機能(在庫/スタッフ)のON/OFF判定のためサークル設定を取得
+  const { data: circle } = useQuery({
+    queryKey: ["circle", circleId],
+    queryFn: () => circleApi.get(circleId),
+    enabled: type === "circle" && !!circleId,
+  });
+  const circleSettings = parseCircleSettings(circle?.settings);
 
   // サークル管理のメニュー項目
+  // 基本機能を先頭に、拡張機能(在庫/スタッフ/モッド)は末尾へ並べる。
+  // 在庫・スタッフは拡張機能としてON/OFFでき、OFFのときはメニューから隠す。
   const circleMenuItems: MenuItem[] = [
     { title: "ダッシュボード", href: "/circle/dashboard", icon: LayoutDashboard },
     { title: "メニュー管理", href: "/circle/dashboard/menu", icon: UtensilsCrossed },
-    { title: "在庫管理", href: "/circle/dashboard/stock", icon: Package },
     { title: "売上管理", href: "/circle/dashboard/sales", icon: TrendingUp },
-    { title: "スタッフ管理", href: "/circle/dashboard/staff", icon: UserCheck },
     { title: "サークル設定", href: "/circle/dashboard/circle", icon: Settings },
     { title: "メンバー管理", href: "/circle/dashboard/members", icon: Users },
     { title: "モバイルオーダーQR", href: "/circle/dashboard/qr", icon: QrCode },
+    // --- ここから拡張機能 (末尾) ---
+    ...(circleSettings.extensions.stock
+      ? [{ title: "在庫管理", href: "/circle/dashboard/stock", icon: Package }]
+      : []),
+    ...(circleSettings.extensions.staff
+      ? [{ title: "スタッフ管理", href: "/circle/dashboard/staff", icon: UserCheck }]
+      : []),
     { title: "拡張機能 (モッド)", href: "/circle/dashboard/mods", icon: Grid },
   ];
 

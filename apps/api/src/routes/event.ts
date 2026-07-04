@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import { db, event, circle, membership } from "@fesflow/db";
-import { eq, and, inArray } from "drizzle-orm";
+import { eq, and, inArray, isNull } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import bcrypt from "bcryptjs";
 import { getAdminSession, getSession } from "../utils/auth";
@@ -32,7 +32,8 @@ eventRoutes.get("/", async (c) => {
   );
 
   if (isSystemAdmin) {
-    const events = await db.select().from(event);
+    // 論理削除済み(deletedAt != null)は除外
+    const events = await db.select().from(event).where(isNull(event.deletedAt));
     return c.json(events);
   }
 
@@ -47,7 +48,7 @@ eventRoutes.get("/", async (c) => {
   const events = await db
     .select()
     .from(event)
-    .where(inArray(event.id, myEventIds));
+    .where(and(inArray(event.id, myEventIds), isNull(event.deletedAt)));
 
   return c.json(events);
 });
@@ -55,7 +56,10 @@ eventRoutes.get("/", async (c) => {
 // イベント取得
 eventRoutes.get("/:id", async (c) => {
   const id = c.req.param("id");
-  const events = await db.select().from(event).where(eq(event.id, id));
+  const events = await db
+    .select()
+    .from(event)
+    .where(and(eq(event.id, id), isNull(event.deletedAt)));
 
   if (events.length === 0) {
     return c.json({ error: "イベントが見つかりません" }, 404);
@@ -97,7 +101,7 @@ eventRoutes.post(
   }
 );
 
-// イベント削除
+// イベント削除 (論理削除) — システム管理者(super_admin)のみ
 eventRoutes.delete("/:id", async (c) => {
   const session = await getAdminSession(c);
   if (!session) {
@@ -105,7 +109,8 @@ eventRoutes.delete("/:id", async (c) => {
   }
 
   const id = c.req.param("id");
-  await db.delete(event).where(eq(event.id, id));
+  // 物理削除せず deletedAt に時刻を書き込む (論理削除)
+  await db.update(event).set({ deletedAt: new Date() }).where(eq(event.id, id));
   return c.json({ success: true });
 });
 

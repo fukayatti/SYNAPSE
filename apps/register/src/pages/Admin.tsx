@@ -13,9 +13,11 @@ import {
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/Modal";
 import { FormField, FormSubmitButton } from "@/components/ui/FormField";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import {
   Plus,
   Calendar,
+  Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -23,6 +25,8 @@ export default function AdminPage() {
   const queryClient = useQueryClient();
   const [showEventForm, setShowEventForm] = useState(false);
   const [activeTab, setActiveTab] = useState<string>("events");
+  // イベント削除の確認ダイアログ用
+  const [pendingDelete, setPendingDelete] = useState<{ id: string; name: string } | null>(null);
 
   // イベントフォーム
   const [eventForm, setEventForm] = useState({
@@ -61,6 +65,20 @@ export default function AdminPage() {
     },
     onError: (error: Error) => {
       toast.error(error.message || "イベント作成に失敗しました");
+    },
+  });
+
+  // イベント削除 (論理削除)
+  const deleteEventMutation = useMutation({
+    mutationFn: (id: string) => eventApi.delete(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["events"] });
+      toast.success("イベントを削除しました");
+      setPendingDelete(null);
+    },
+    onError: (error: Error) => {
+      toast.error(error.message || "イベント削除に失敗しました");
+      setPendingDelete(null);
     },
   });
 
@@ -158,10 +176,19 @@ export default function AdminPage() {
                   className="border-thin border-border hover:border-neutral-800 rounded-none bg-background flex flex-col justify-between shadow-none transition-all p-3"
                 >
                   <CardHeader className="p-0 border-b-thin border-muted pb-2 mb-2">
-                    <CardTitle className="text-xs font-bold uppercase tracking-wide flex items-center gap-1.5">
-                      <Calendar className="h-4 w-4 shrink-0 text-muted-foreground" />
-                      {evt.eventName}
-                    </CardTitle>
+                    <div className="flex justify-between items-start gap-2">
+                      <CardTitle className="text-xs font-bold uppercase tracking-wide flex items-center gap-1.5 min-w-0">
+                        <Calendar className="h-4 w-4 shrink-0 text-muted-foreground" />
+                        <span className="truncate">{evt.eventName}</span>
+                      </CardTitle>
+                      <button
+                        className="p-0.5 text-destructive hover:text-neutral-800 transition-all rounded-none cursor-pointer border-thick border-transparent hover:border-border hover:bg-muted shrink-0"
+                        title="イベントを削除"
+                        onClick={() => setPendingDelete({ id: evt.id, name: evt.eventName })}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
                     {evt.description && (
                       <CardDescription className="text-[10px] text-muted-foreground truncate">{evt.description}</CardDescription>
                     )}
@@ -187,6 +214,17 @@ export default function AdminPage() {
             </Card>
           )}
         </div>
+
+        <ConfirmDialog
+          isOpen={!!pendingDelete}
+          title="[確認: イベントの削除]"
+          description={`イベント「${pendingDelete?.name ?? ""}」を削除しますか？イベント一覧から非表示になります (論理削除)。`}
+          confirmLabel="削除する"
+          onConfirm={() => {
+            if (pendingDelete) deleteEventMutation.mutate(pendingDelete.id);
+          }}
+          onCancel={() => setPendingDelete(null)}
+        />
       </DashboardLayout>
     </SystemAdminGuard>
   );

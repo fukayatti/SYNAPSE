@@ -118,6 +118,8 @@ export const event = sqliteTable("event", {
   backgroundColor: text("background_color").default("#FFFFFF"),
   textColor: text("text_color").default("#000000"),
 
+  // 論理削除 (2026-07-04): 物理削除せず deletedAt に時刻を入れて非表示化する
+  deletedAt: integer("deleted_at", { mode: "timestamp_ms" }),
 
   createdAt: integer("created_at", { mode: "timestamp_ms" })
     .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
@@ -143,8 +145,13 @@ export const circle = sqliteTable(
     iconImagePath: text("icon_image_path"),
     backgroundImagePath: text("background_image_path"),
     mods: text("mods").default("{}").notNull(),
+    // サークル運用設定 (2026-07-04): 注文モード・組み込み拡張(在庫/スタッフ)のON/OFF等を
+    // JSON文字列で保持する。既定は {} で、未設定キーはアプリ側でデフォルトにフォールバックする。
+    settings: text("settings").default("{}").notNull(),
     // スタンプラリー用 TOTP シークレット(base32)。null=このサークルのOTPスタンプ無効 (2026-07-04)
     stampSecret: text("stamp_secret"),
+    // 論理削除 (2026-07-04): 物理削除せず deletedAt に時刻を入れて非表示化する
+    deletedAt: integer("deleted_at", { mode: "timestamp_ms" }),
     createdAt: integer("created_at", { mode: "timestamp_ms" })
       .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
       .notNull(),

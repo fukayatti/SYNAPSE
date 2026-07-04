@@ -100,6 +100,16 @@ export const circleApi = {
       method: "PATCH",
       body: { mods },
     }),
+  updateSettings: (id: string, settings: Record<string, any>) =>
+    fetchApi<{ success: boolean }>(`/api/circles/${id}/settings`, {
+      method: "PATCH",
+      body: { settings },
+    }),
+  transferOwner: (id: string, membershipId: string) =>
+    fetchApi<{ success: boolean }>(`/api/circles/${id}/transfer-owner`, {
+      method: "POST",
+      body: { membershipId },
+    }),
   delete: (id: string) =>
     fetchApi<{ success: boolean }>(`/api/circles/${id}`, { method: "DELETE" }),
 };
@@ -372,8 +382,46 @@ export interface Circle {
   iconImagePath: string | null;
   backgroundImagePath: string | null;
   mods?: string;
+  settings?: string;
   managerEmail?: string;
   managerName?: string;
+}
+
+// サークル運用設定 (circle.settings JSON のシェイプ)
+export type OrderFlowMode = "pending" | "preparing" | "completed";
+export interface CircleSettings {
+  // 新規注文の初期状態: pending=未着手 / preparing=調理中 / completed=即完成
+  orderFlowMode: OrderFlowMode;
+  // 組み込み拡張機能のON/OFF (既定はすべてOFF=オプトイン)
+  extensions: {
+    stock: boolean;
+    staff: boolean;
+  };
+}
+
+// settings JSON をパースし、未設定キーを既定値で補完する
+export function parseCircleSettings(raw?: string | null): CircleSettings {
+  const defaults: CircleSettings = {
+    orderFlowMode: "pending",
+    extensions: { stock: false, staff: false },
+  };
+  if (!raw) return defaults;
+  try {
+    const parsed = JSON.parse(raw);
+    return {
+      orderFlowMode:
+        parsed?.orderFlowMode === "preparing" ||
+        parsed?.orderFlowMode === "completed"
+          ? parsed.orderFlowMode
+          : "pending",
+      extensions: {
+        stock: parsed?.extensions?.stock === true,
+        staff: parsed?.extensions?.staff === true,
+      },
+    };
+  } catch {
+    return defaults;
+  }
 }
 
 export interface Menu {

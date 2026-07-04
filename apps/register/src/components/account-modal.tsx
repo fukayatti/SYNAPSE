@@ -18,8 +18,6 @@ import {
   getAuthInfo,
   saveAuthInfo,
   clearAuthInfo,
-  ROLE_NAMES,
-  type RoleType,
 } from "@/hooks/useCircleAuth";
 
 export type Space = {
@@ -45,7 +43,7 @@ export default function AccountModal({
 }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const { userName, userEmail, role, circleName } = useAuth();
+  const { userName, userEmail } = useAuth();
 
   // 正本のアカウント情報 (localStorage は image を持たないため API から取得)
   const { data: me } = useQuery({
@@ -129,23 +127,6 @@ export default function AccountModal({
 
   if (!open) return null;
 
-  const roleTag = (() => {
-    if (!role) return "USER";
-    switch (role) {
-      case "super_admin": return "SUPER ADMIN";
-      case "event_manager": return "EVENT MGR";
-      case "circle_manager": return "CIRCLE MGR";
-      case "circle_staff": return "STAFF";
-      default: return "USER";
-    }
-  })();
-
-  const activeLabel = circleName
-    ? `店舗管理者 [${circleName}]`
-    : role === "super_admin" ? "システム最高管理者"
-    : role === "event_manager" ? "イベント管理者"
-    : "一般スタッフ";
-
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/75 p-4 backdrop-blur-sm">
       <div className="relative w-full max-w-md border-thin border-border bg-background p-6 shadow-none font-mono rounded-none max-h-[90vh] overflow-y-auto">
@@ -159,17 +140,6 @@ export default function AccountModal({
         <div className="mb-6 border-b-thin border-border pb-3 flex items-center gap-2">
           <User className="h-5 w-5 text-primary" />
           <h2 className="text-lg font-black uppercase tracking-wider">[アカウント管理]</h2>
-        </div>
-
-        {/* 現在のアクティブスペース */}
-        <div className="space-y-1 mb-6 bg-muted/30 p-4 border-thin border-border rounded-none flex items-center justify-between">
-          <div>
-            <span className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider">現在のアクティブスペース</span>
-            <p className="font-bold text-xs">{activeLabel}</p>
-          </div>
-          <span className="bg-primary text-primary-foreground text-[9px] font-black px-2 py-0.5 uppercase shrink-0 rounded-none">
-            {roleTag}
-          </span>
         </div>
 
         {/* プロフィール編集 (アイコン + 名前) */}
