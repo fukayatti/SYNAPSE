@@ -1,6 +1,6 @@
 
 import { useState, useEffect } from "react";
-import { useSearchParams, useRouter } from "next/navigation";
+import { useSearchParams, useNavigate } from "react-router-dom";
 import { useMutation } from "@tanstack/react-query";
 import { eventApi, membershipApi, circleApi, type Event, type Circle } from "@/lib/api";
 import { saveAuthInfo, type RoleType } from "@/hooks/useCircleAuth";
@@ -10,8 +10,8 @@ import { Label } from "./ui/label";
 import { toast } from "sonner";
 
 export default function CircleLoginOnlyForm() {
-  const router = useRouter();
-  const searchParams = useSearchParams();
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const callbackUrl = searchParams.get("callbackUrl");
   const [events, setEvents] = useState<Event[]>([]);
   const [circles, setCircles] = useState<Circle[]>([]);
@@ -95,7 +95,7 @@ export default function CircleLoginOnlyForm() {
       });
 
       toast.success(`${data.userName}さん、ようこそ！`);
-      router.push((callbackUrl as any) || "/dashboard");
+      navigate((callbackUrl as any) || "/dashboard");
     },
     onError: (error: any) => {
       toast.error(error.message || "認証に失敗しました");

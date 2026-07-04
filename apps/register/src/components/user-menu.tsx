@@ -9,11 +9,11 @@ import {
 import { authClient } from "@/lib/auth-client";
 import { Button } from "./ui/button";
 import { Skeleton } from "./ui/skeleton";
-import { useRouter } from "next/navigation";
-import Link from "next/link";
+import { useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 
 export default function UserMenu() {
-	const router = useRouter();
+	const navigate = useNavigate();
 	const { data: session, isPending } = authClient.useSession();
 
 	if (isPending) {
@@ -23,7 +23,7 @@ export default function UserMenu() {
 	if (!session) {
 		return (
 			<Button variant="outline" size="sm" asChild>
-				<Link href="/login">Sign In</Link>
+				<Link to="/login">Sign In</Link>
 			</Button>
 		);
 	}
@@ -48,7 +48,7 @@ export default function UserMenu() {
 							authClient.signOut({
 								fetchOptions: {
 									onSuccess: () => {
-										router.push("/");
+										navigate("/");
 									},
 								},
 							});

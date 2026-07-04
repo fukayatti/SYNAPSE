@@ -26,12 +26,6 @@
 		"node_modules",
 		"dist",
 		"src/_ref",
-		"src/components/header.tsx",
-		"src/components/user-menu.tsx",
-		"src/components/sign-in-form.tsx",
-		"src/components/sign-up-form.tsx",
-		"src/components/circle-login-only-form.tsx",
-		"src/components/image-upload.tsx",
-		"src/hooks/useCircleAuth.tsx"
+		"src/components/image-upload.tsx"
 	]
 }

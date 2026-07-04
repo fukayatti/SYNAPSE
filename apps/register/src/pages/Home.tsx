@@ -44,9 +44,14 @@ export default function Home() {
           <div className="inline-block bg-accent text-accent-foreground font-headline uppercase text-[10px] sm:text-[12px] tracking-[3px] px-sp-3 py-sp-2 border-[3px] border-accent">
             {PRODUCT_NAME.toUpperCase()} // SYSTEM v1.0
           </div>
-          <h1 className="text-[32px] sm:text-[48px] md:text-[64px] lg:text-[80px] font-headline uppercase tracking-[-1px] sm:tracking-[-2px] leading-[1.0] text-foreground">
-            学園祭<br />注文システム
+          {/* 製品名をロゴ的に大きく表示 (2026-07-04 ユーザー要望)。
+              PRODUCT_NAME を参照するので名称変更にも追従する。 */}
+          <h1 className="text-[64px] sm:text-[96px] md:text-[128px] lg:text-[160px] font-headline uppercase tracking-[-3px] sm:tracking-[-5px] leading-[0.85] text-foreground">
+            {PRODUCT_NAME}
           </h1>
+          <p className="font-headline uppercase text-[12px] sm:text-[16px] tracking-[6px] text-foreground/70">
+            学園祭 注文システム
+          </p>
           <p className="text-[14px] sm:text-[16px] md:text-[18px] font-mono max-w-3xl mx-auto leading-[1.6] text-foreground">
             学園祭での注文管理を、もっとスマートに。
             <span className="hidden sm:inline"><br />無駄を削ぎ落としたリアルタイムPOS/KITCHENソリューション。</span>

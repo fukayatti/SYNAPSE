@@ -1,9 +1,9 @@
 import { useState } from "react";
-import Link from "next/link";
-import { useRouter, usePathname } from "next/navigation";
+import { Link, useNavigate, useLocation } from "react-router-dom";
 import { Button } from "./ui/button";
 import { toast } from "sonner";
 import { Menu, X } from "lucide-react";
+import { PRODUCT_NAME } from "@fesflow/config";
 import {
   useAuth,
   clearAuthInfo,
@@ -11,8 +11,8 @@ import {
 } from "@/hooks/useCircleAuth";
 
 export default function Header() {
-  const router = useRouter();
-  const pathname = usePathname();
+  const navigate = useNavigate();
+  const pathname = useLocation().pathname;
   const { role, userName, circleName, isLoading, isAuthenticated, isEventAdmin } =
     useAuth();
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -22,7 +22,7 @@ export default function Header() {
     localStorage.removeItem("circleName");
     localStorage.removeItem("eventName");
     toast.success("ログアウトしました");
-    router.push("/circle-login");
+    navigate("/circle-login");
     setMobileOpen(false);
   };
 
@@ -61,12 +61,14 @@ export default function Header() {
       <div className="flex items-center justify-between px-4 py-2 max-w-7xl mx-auto gap-4">
         {/* ロゴ */}
         <Link
-          href={isClientView ? "/menu" : "/"}
+          to={isClientView ? "/menu" : "/"}
           className="font-headline text-base sm:text-lg md:text-xl uppercase tracking-[2px] leading-none select-none hover:opacity-80 flex items-center gap-2 shrink-0"
           onClick={() => setMobileOpen(false)}
         >
           <span className="font-black border-[2px] border-border px-2 py-1 bg-primary text-primary-foreground text-sm sm:text-base">
-            {isClientView ? "FES_ORDER // CLIENT" : "FES_ORDER"}
+            {isClientView
+              ? `${PRODUCT_NAME.toUpperCase()} // CLIENT`
+              : PRODUCT_NAME.toUpperCase()}
           </span>
         </Link>
 
@@ -75,7 +77,7 @@ export default function Header() {
           {links.map(({ to, label }) => (
             <Link
               key={to}
-              href={to}
+              to={to}
               className={`px-3 py-1.5 border-[2px] border-border transition-all whitespace-nowrap ${
                 isActive(to)
                   ? "bg-primary text-primary-foreground font-bold"
@@ -114,7 +116,7 @@ export default function Header() {
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => router.push("/circle-login")}
+                  onClick={() => navigate("/circle-login")}
                   className="h-8 text-xs font-mono px-3"
                 >
                   ログイン
@@ -151,7 +153,7 @@ export default function Header() {
             {links.map(({ to, label }) => (
               <Link
                 key={to}
-                href={to}
+                to={to}
                 onClick={() => setMobileOpen(false)}
                 className={`px-4 py-4 border-b-[2px] border-border font-headline text-[14px] uppercase tracking-[1px] transition-all ${
                   isActive(to)
@@ -177,7 +179,7 @@ export default function Header() {
               ) : (
                 <button
                   onClick={() => {
-                    router.push("/circle-login");
+                    navigate("/circle-login");
                     setMobileOpen(false);
                   }}
                   className="w-full py-3 border-[3px] border-border bg-primary text-primary-foreground font-mono text-sm uppercase tracking-widest font-bold hover:bg-background hover:text-foreground transition-all"

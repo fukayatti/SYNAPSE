@@ -6,15 +6,15 @@ import Loader from "./loader";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
-import { useSearchParams, useRouter } from "next/navigation";
+import { useSearchParams, useNavigate } from "react-router-dom";
 
 export default function SignUpForm({
 	onSwitchToSignIn,
 }: {
 	onSwitchToSignIn: () => void;
 }) {
-	const router = useRouter();
-	const searchParams = useSearchParams();
+	const navigate = useNavigate();
+	const [searchParams] = useSearchParams();
 	const callbackUrl = searchParams.get("callbackUrl");
 	const { isPending } = authClient.useSession();
 
@@ -33,7 +33,7 @@ export default function SignUpForm({
 				},
 				{
 					onSuccess: () => {
-						router.push((callbackUrl as any) || "/dashboard");
+						navigate((callbackUrl as any) || "/dashboard");
 						toast.success("Sign up successful");
 					},
 					onError: (error) => {

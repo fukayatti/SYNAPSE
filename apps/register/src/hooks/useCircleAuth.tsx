@@ -1,5 +1,5 @@
 
-import { useRouter } from "next/navigation";
+import { useNavigate } from "react-router-dom";
 import { useEffect, useState, useCallback } from "react";
 import Loader from "@/components/loader";
 
@@ -231,7 +231,7 @@ export function hasAllPermissions(
 
 // 基本的な認証フック（後方互換性維持）
 export function useCircleAuth() {
-  const router = useRouter();
+  const navigate = useNavigate();
   const [circleId, setCircleId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -242,20 +242,20 @@ export function useCircleAuth() {
       if (authInfo?.isEventAdmin || authInfo?.role === "event_admin") {
         setCircleId(null);
       } else {
-        router.push("/circle-login");
+        navigate("/circle-login");
       }
     } else {
       setCircleId(authInfo.circleId);
     }
     setIsLoading(false);
-  }, [router]);
+  }, [navigate]);
 
   return { circleId, isLoading };
 }
 
 // ロール対応の認証フック
 export function useAuth() {
-  const router = useRouter();
+  const navigate = useNavigate();
   const [authInfo, setAuthInfo] = useState<AuthInfo | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -291,8 +291,8 @@ export function useAuth() {
   const logout = useCallback(() => {
     clearAuthInfo();
     setAuthInfo(null);
-    router.push("/circle-login");
-  }, [router]);
+    navigate("/circle-login");
+  }, [navigate]);
 
   // event_adminフラグを考慮した権限チェック
   const effectiveIsEventAdmin = authInfo?.isEventAdmin || authInfo?.role === "event_admin";
@@ -376,7 +376,7 @@ export function PermissionGuard({
 
 // 認証ガードコンポーネント（後方互換性維持 — event_adminもアクセス可能に）
 export function CircleAuthGuard({ children }: { children: React.ReactNode }) {
-  const router = useRouter();
+  const navigate = useNavigate();
   const [circleId, setCircleId] = useState<string | null>(null);
   const [isEventAdmin, setIsEventAdmin] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -393,10 +393,10 @@ export function CircleAuthGuard({ children }: { children: React.ReactNode }) {
       setCircleId(null);
       setIsEventAdmin(true);
     } else {
-      router.push("/circle-login");
+      navigate("/circle-login");
     }
     setIsLoading(false);
-  }, [router]);
+  }, [navigate]);
 
   if (isLoading) {
     return (
@@ -447,14 +447,14 @@ export function RoleGuard({
 
 // 管理者専用認証ガード
 export function AdminAuthGuard({ children }: { children: React.ReactNode }) {
-  const router = useRouter();
+  const navigate = useNavigate();
   const { role, isLoading, isAuthenticated, isEventAdmin } = useAuth();
 
   useEffect(() => {
     if (!isLoading && (!isAuthenticated || !isEventAdmin)) {
-      router.push("/dashboard");
+      navigate("/dashboard");
     }
-  }, [isLoading, isAuthenticated, isEventAdmin, router]);
+  }, [isLoading, isAuthenticated, isEventAdmin, navigate]);
 
   if (isLoading) {
     return (

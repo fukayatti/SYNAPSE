@@ -6,7 +6,7 @@ import Loader from "./loader";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
-import { useSearchParams, useRouter } from "next/navigation";
+import { useSearchParams, useNavigate } from "react-router-dom";
 import { saveAuthInfo } from "@/hooks/useCircleAuth";
 import { membershipApi } from "@/lib/api";
 
@@ -15,8 +15,8 @@ export default function SignInForm({
 }: {
 	onSwitchToSignUp: () => void;
 }) {
-	const router = useRouter();
-	const searchParams = useSearchParams();
+	const navigate = useNavigate();
+	const [searchParams] = useSearchParams();
 	const callbackUrl = searchParams.get("callbackUrl");
 	const { isPending } = authClient.useSession();
 
@@ -57,7 +57,7 @@ export default function SignInForm({
 									localStorage.setItem("circleName", circleMembership.circle.name);
 								}
 
-								router.push((callbackUrl as any) || "/dashboard");
+								navigate((callbackUrl as any) || "/dashboard");
 								toast.success(`管理者 + ${circleMembership.circle?.name || "サークル"}としてログインしました`);
 							} else if (adminMembership) {
 								saveAuthInfo({
@@ -72,7 +72,7 @@ export default function SignInForm({
 									adminMembershipId: adminMembership.id,
 									adminEventId: adminMembership.eventId,
 								});
-								router.push((callbackUrl as any) || "/admin");
+								navigate((callbackUrl as any) || "/admin");
 								toast.success("管理者としてログインしました");
 							} else if (circleMembership) {
 								saveAuthInfo({
@@ -89,14 +89,14 @@ export default function SignInForm({
 									localStorage.setItem("circleName", circleMembership.circle.name);
 								}
 
-								router.push((callbackUrl as any) || "/dashboard");
+								navigate((callbackUrl as any) || "/dashboard");
 								toast.success(`${circleMembership.userName}さんとしてログインしました`);
 							} else {
-								router.push((callbackUrl as any) || "/dashboard");
+								navigate((callbackUrl as any) || "/dashboard");
 								toast.success("ログインしました");
 							}
 						} catch (error) {
-							router.push((callbackUrl as any) || "/dashboard");
+							navigate((callbackUrl as any) || "/dashboard");
 							toast.success("ログインしました");
 						}
 					},

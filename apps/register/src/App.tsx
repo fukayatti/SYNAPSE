@@ -1,6 +1,9 @@
 import { Routes, Route } from "react-router-dom";
 import Providers from "@/components/providers";
+import Header from "@/components/header";
 import Home from "@/pages/Home";
+import Login from "@/pages/Login";
+import CircleLogin from "@/pages/CircleLogin";
 import Placeholder from "@/pages/Placeholder";
 
 /**
@@ -13,11 +16,14 @@ export default function App() {
 	return (
 		<Providers>
 			<div className="grid grid-rows-[auto_1fr] min-h-svh">
+				<Header />
 				<main>
 					<Routes>
 						<Route path="/" element={<Home />} />
-						{/* 以下は Phase3 で順次移植: /login /circle-login /register
-						    /menu /my-order /backyard /dashboard/* /admin など */}
+						<Route path="/login" element={<Login />} />
+						<Route path="/circle-login" element={<CircleLogin />} />
+						{/* 以下は Phase3 で順次移植: /register(POS) /menu /my-order
+						    /backyard /dashboard/* /admin など */}
 						<Route path="*" element={<Placeholder />} />
 					</Routes>
 				</main>
