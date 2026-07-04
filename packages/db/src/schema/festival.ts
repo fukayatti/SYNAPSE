@@ -138,6 +138,8 @@ export const circle = sqliteTable(
     iconImagePath: text("icon_image_path"),
     backgroundImagePath: text("background_image_path"),
     mods: text("mods").default("{}").notNull(),
+    // スタンプラリー用 TOTP シークレット(base32)。null=このサークルのOTPスタンプ無効 (2026-07-04)
+    stampSecret: text("stamp_secret"),
     createdAt: integer("created_at", { mode: "timestamp_ms" })
       .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
       .notNull(),
@@ -571,6 +573,11 @@ export const eventUser = sqliteTable(
       .references(() => event.id, { onDelete: "cascade" }),
     displayId: integer("display_id").notNull(), // 表示用呼出ID (1, 2, 3...)
     status: text("status").notNull().default("available"), // available / banned
+    // 来場者マイページの最小プロフィール (2026-07-04 追加)。
+    // リストバンド紛失時の本人確認/再紐付け用にニックネーム+誕生日のみ収集。
+    nickname: text("nickname"),
+    birthday: text("birthday"), // YYYY-MM-DD
+    onboardedAt: integer("onboarded_at", { mode: "timestamp_ms" }), // 初回入力完了時刻
     createdAt: integer("created_at", { mode: "timestamp_ms" })
       .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
       .notNull(),
@@ -698,3 +705,171 @@ export const preOrderItemRelations = relations(preOrderItem, ({ one }) => ({
 }));
 
 
+
+// ==========================================
+// 来場者マイページ機能 (2026-07-04 追加)
+//  - スタンプは既存 user_stamp、事前オーダーは既存 pre_order を利用。
+//  - ここでは 体験ログ / 整理券 / レビュー / 抽選 を追加する。
+// ==========================================
+
+// 体験ログ: レジ/受付でリストバンドをスキャンした記録。
+// レビュー投稿の可否・抽選口数の根拠になる (「体験したものだけ」)。
+export const circleVisit = sqliteTable(
+  "circle_visit",
+  {
+    id: text("id").primaryKey(),
+    eventUserId: text("event_user_id")
+      .notNull()
+      .references(() => eventUser.id, { onDelete: "cascade" }),
+    circleId: text("circle_id")
+      .notNull()
+      .references(() => circle.id, { onDelete: "cascade" }),
+    staffId: text("staff_id"), // 対応スタッフ (任意)
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+      .notNull(),
+  },
+  (table) => [
+    index("circle_visit_user_idx").on(table.eventUserId),
+    index("circle_visit_circle_idx").on(table.circleId),
+    index("circle_visit_user_circle_idx").on(table.eventUserId, table.circleId),
+  ]
+);
+
+// 整理券: サークルの端末で来場者に時間指定で発行する。
+export const numberedTicket = sqliteTable(
+  "numbered_ticket",
+  {
+    id: text("id").primaryKey(),
+    circleId: text("circle_id")
+      .notNull()
+      .references(() => circle.id, { onDelete: "cascade" }),
+    eventUserId: text("event_user_id")
+      .notNull()
+      .references(() => eventUser.id, { onDelete: "cascade" }),
+    slotStart: integer("slot_start", { mode: "timestamp_ms" }), // 案内時間帯の開始
+    slotLabel: text("slot_label"), // 表示用ラベル (例 "13:00-13:30")
+    status: text("status").notNull().default("issued"), // issued / used / expired / cancelled
+    issuedByStaffId: text("issued_by_staff_id"),
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+      .notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (table) => [
+    index("numbered_ticket_circle_idx").on(table.circleId),
+    index("numbered_ticket_user_idx").on(table.eventUserId),
+    index("numbered_ticket_status_idx").on(table.status),
+  ]
+);
+
+// レビュー: 体験したサークルへの任意投稿。1ユーザー1サークル1件。
+export const review = sqliteTable(
+  "review",
+  {
+    id: text("id").primaryKey(),
+    eventUserId: text("event_user_id")
+      .notNull()
+      .references(() => eventUser.id, { onDelete: "cascade" }),
+    circleId: text("circle_id")
+      .notNull()
+      .references(() => circle.id, { onDelete: "cascade" }),
+    rating: integer("rating").notNull(), // 1-5
+    comment: text("comment"),
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+      .notNull(),
+  },
+  (table) => [
+    index("review_circle_idx").on(table.circleId),
+    index("review_user_idx").on(table.eventUserId),
+    uniqueIndex("review_user_circle_unique").on(
+      table.eventUserId,
+      table.circleId
+    ),
+  ]
+);
+
+// 抽選: イベント単位の抽選設定 (発表時刻など)。
+export const lottery = sqliteTable(
+  "lottery",
+  {
+    id: text("id").primaryKey(),
+    eventId: text("event_id")
+      .notNull()
+      .references(() => event.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    drawAt: integer("draw_at", { mode: "timestamp_ms" }), // 当選発表時刻 (例 17:00)
+    status: text("status").notNull().default("open"), // open / drawn / closed
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+      .notNull(),
+  },
+  (table) => [index("lottery_event_idx").on(table.eventId)]
+);
+
+// 抽選の景品定義。
+export const lotteryPrize = sqliteTable(
+  "lottery_prize",
+  {
+    id: text("id").primaryKey(),
+    lotteryId: text("lottery_id")
+      .notNull()
+      .references(() => lottery.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    quantity: integer("quantity").notNull().default(1),
+  },
+  (table) => [index("lottery_prize_lottery_idx").on(table.lotteryId)]
+);
+
+// 抽選応募 (オプトイン)。口数はスタンプ数+レビュー数から集計時に算出する。
+export const lotteryEntry = sqliteTable(
+  "lottery_entry",
+  {
+    id: text("id").primaryKey(),
+    lotteryId: text("lottery_id")
+      .notNull()
+      .references(() => lottery.id, { onDelete: "cascade" }),
+    eventUserId: text("event_user_id")
+      .notNull()
+      .references(() => eventUser.id, { onDelete: "cascade" }),
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+      .notNull(),
+  },
+  (table) => [
+    index("lottery_entry_lottery_idx").on(table.lotteryId),
+    uniqueIndex("lottery_entry_lottery_user_unique").on(
+      table.lotteryId,
+      table.eventUserId
+    ),
+  ]
+);
+
+// 抽選結果 (当選者)。
+export const lotteryWinner = sqliteTable(
+  "lottery_winner",
+  {
+    id: text("id").primaryKey(),
+    lotteryId: text("lottery_id")
+      .notNull()
+      .references(() => lottery.id, { onDelete: "cascade" }),
+    prizeId: text("prize_id")
+      .notNull()
+      .references(() => lotteryPrize.id, { onDelete: "cascade" }),
+    eventUserId: text("event_user_id")
+      .notNull()
+      .references(() => eventUser.id, { onDelete: "cascade" }),
+    claimedAt: integer("claimed_at", { mode: "timestamp_ms" }), // 景品受取時刻
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+      .notNull(),
+  },
+  (table) => [
+    index("lottery_winner_lottery_idx").on(table.lotteryId),
+    index("lottery_winner_user_idx").on(table.eventUserId),
+  ]
+);
