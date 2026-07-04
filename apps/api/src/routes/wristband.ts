@@ -3,9 +3,21 @@ import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import { db, wristband, eventUser, event, getEnv } from "@fesflow/db";
 import { eq, and, desc } from "drizzle-orm";
+import { nanoid } from "nanoid";
+import { auth } from "@fesflow/auth";
 
 
 const wristbandRoutes = new Hono();
+
+/** イベント内で次に割り当てる呼出用 displayId を採番する。 */
+async function nextDisplayId(eventId: string): Promise<number> {
+  const rows = await db
+    .select({ displayId: eventUser.displayId })
+    .from(eventUser)
+    .where(eq(eventUser.eventId, eventId));
+  const max = rows.reduce((m, r) => Math.max(m, r.displayId ?? 0), 0);
+  return max + 1;
+}
 
 // コード (リストバンドID、ユーザーID) によるユーザー照会
 wristbandRoutes.get("/lookup/:code", async (c) => {
@@ -222,6 +234,97 @@ wristbandRoutes.post(
       .where(eq(wristband.id, id));
 
     return c.json({ success: true });
+  }
+);
+
+// 来場者オンボーディング: ニックネーム+誕生日を登録 (2026-07-04)
+// 認証は不要。userId(eventUser.id) を持っている人=リストバンド保持者本人とみなす
+// (ベアラーモデル)。初回のみ onboardedAt を刻む。
+wristbandRoutes.post(
+  "/onboard",
+  zValidator(
+    "json",
+    z.object({
+      userId: z.string().min(1),
+      nickname: z.string().trim().min(1).max(30),
+      birthday: z.string().optional(), // YYYY-MM-DD
+    })
+  ),
+  async (c) => {
+    const { userId, nickname, birthday } = c.req.valid("json");
+
+    const users = await db.select().from(eventUser).where(eq(eventUser.id, userId));
+    if (users.length === 0) {
+      return c.json({ error: "ユーザーが見つかりません" }, 404);
+    }
+    const u = users[0]!;
+
+    await db
+      .update(eventUser)
+      .set({
+        nickname,
+        birthday: birthday || null,
+        // 初回のみ確定させる (再編集で入場日時が動かないように)
+        onboardedAt: u.onboardedAt ?? new Date(),
+      })
+      .where(eq(eventUser.id, userId));
+
+    const updated = (await db.select().from(eventUser).where(eq(eventUser.id, userId)))[0]!;
+    return c.json({
+      id: updated.id,
+      eventId: updated.eventId,
+      displayId: updated.displayId,
+      nickname: updated.nickname,
+      birthday: updated.birthday,
+      onboardedAt: updated.onboardedAt,
+    });
+  }
+);
+
+// イベント管理から来場者IDを発行する (2026-07-04)
+// リストバンドを使わない来場者や、事前に来場者枠を用意する場合に、イベント管理者が
+// 新しい eventUser を1件発行する。任意で物理リストバンドコードも同時に紐付ける。
+// register(イベント管理)側から呼ぶ想定のためログインセッション必須。
+wristbandRoutes.post(
+  "/issue",
+  zValidator(
+    "json",
+    z.object({
+      eventId: z.string().min(1),
+      wristbandId: z.string().optional(), // 物理バンドのコード (任意)
+    })
+  ),
+  async (c) => {
+    const session = await auth.api.getSession({ headers: c.req.raw.headers });
+    if (!session || !session.user) {
+      return c.json({ error: "認証されていません" }, 401);
+    }
+    const { eventId, wristbandId } = c.req.valid("json");
+
+    const events = await db.select().from(event).where(eq(event.id, eventId));
+    if (events.length === 0) {
+      return c.json({ error: "イベントが見つかりません" }, 404);
+    }
+
+    const userId = `usr_${nanoid(12)}`;
+    const displayId = await nextDisplayId(eventId);
+    await db.insert(eventUser).values({
+      id: userId,
+      eventId,
+      displayId,
+      status: "available",
+    });
+
+    if (wristbandId) {
+      await db.insert(wristband).values({
+        id: wristbandId,
+        userId,
+        status: "active",
+        assignedAt: new Date(),
+      });
+    }
+
+    return c.json({ userId, displayId, wristbandId: wristbandId ?? null });
   }
 );
 

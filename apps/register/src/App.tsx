@@ -6,8 +6,6 @@ import Login from "@/pages/Login";
 import CircleLogin from "@/pages/CircleLogin";
 import Register from "@/pages/Register";
 import Backyard from "@/pages/Backyard";
-import Menu from "@/pages/Menu";
-import MyOrder from "@/pages/MyOrder";
 import Checkin from "@/pages/Checkin";
 import Invite from "@/pages/Invite";
 import Admin from "@/pages/Admin";
@@ -23,6 +21,7 @@ import DashboardSales from "@/pages/dashboard/Sales";
 import DashboardStaff from "@/pages/dashboard/Staff";
 import DashboardStock from "@/pages/dashboard/Stock";
 import Placeholder from "@/pages/Placeholder";
+import ExternalRedirect, { VISITOR_BASE_URL } from "@/components/external-redirect";
 import { CircleAuthGuard, SystemAdminGuard, EventAdminGuard } from "@/hooks/useCircleAuth";
 
 export default function App() {
@@ -40,9 +39,9 @@ export default function App() {
 						<Route path="/invite/:token" element={<Invite />} />
 						<Route path="/test-wristbands" element={<TestWristbands />} />
 
-						{/* 来場者専用ルート (/visitor/*) */}
-						<Route path="/visitor/menu" element={<Menu />} />
-						<Route path="/visitor/my-qr" element={<MyOrder />} />
+						{/* 来場者機能は apps/visitor へ分離。旧パスは来場者アプリへ転送 (2026-07-04) */}
+						<Route path="/visitor/menu" element={<ExternalRedirect to={`${VISITOR_BASE_URL}/menu`} />} />
+						<Route path="/visitor/my-qr" element={<ExternalRedirect to={`${VISITOR_BASE_URL}/mypage`} />} />
 
 						{/* サークル専用ルート (/circle/*) */}
 						<Route
@@ -155,8 +154,8 @@ export default function App() {
 						/>
 
 						{/* 後方互換・リダイレクト処理 */}
-						<Route path="/menu" element={<Navigate to="/visitor/menu" replace />} />
-						<Route path="/my-order" element={<Navigate to="/visitor/my-qr" replace />} />
+						<Route path="/menu" element={<ExternalRedirect to={`${VISITOR_BASE_URL}/menu`} />} />
+						<Route path="/my-order" element={<ExternalRedirect to={`${VISITOR_BASE_URL}/mypage`} />} />
 						<Route path="/register" element={<Navigate to="/circle/register" replace />} />
 						<Route path="/backyard" element={<Navigate to="/circle/backyard" replace />} />
 						<Route path="/dashboard" element={<Navigate to="/circle/dashboard" replace />} />

@@ -184,7 +184,10 @@ export default function MyOrderPage() {
 
   const activeWristband = userStatus?.wristband;
   const targetWbId = activeWristband?.id || userId;
-  const userCheckinUrl = origin ? `${origin}/checkin?wb=${targetWbId}` : targetWbId;
+  // 来場者アプリと register(模擬店POS)は別オリジンのため、店頭スキャン用QRは
+  // register 側の /checkin を指すよう VITE_REGISTER_URL を優先する (2026-07-04 アプリ分離)
+  const registerBase = (import.meta.env.VITE_REGISTER_URL as string) || origin;
+  const userCheckinUrl = registerBase ? `${registerBase}/checkin?wb=${targetWbId}` : targetWbId;
   const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(
     userCheckinUrl
   )}`;
@@ -192,7 +195,7 @@ export default function MyOrderPage() {
   return (
     <div className="max-w-3xl mx-auto p-3 sm:p-4 space-y-4 sm:space-y-6 pb-24 font-mono">
       <button
-        onClick={() => router.push("/visitor/menu")}
+        onClick={() => router.push("/menu")}
         className="text-xs uppercase tracking-widest underline hover:text-info flex items-center gap-1"
       >
         <ArrowLeft className="h-4 w-4" />

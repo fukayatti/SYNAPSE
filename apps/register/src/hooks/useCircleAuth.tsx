@@ -488,11 +488,14 @@ export function SystemAdminGuard({ children }: { children: React.ReactNode }) {
   const navigate = useNavigate();
   const { role, isLoading, isAuthenticated } = useAuth();
 
+  // 未認証のときだけ /login へ送る。認証済みでロールが合わない場合は下の
+  // インラインの「権限がありません」を表示し、リダイレクトしない。権限スイッチの
+  // 過渡状態で誤って /login に飛ぶのを防ぐ (2026-07-04 権限切替時のログイン画面表示を修正)
   useEffect(() => {
-    if (!isLoading && (!isAuthenticated || role !== "super_admin")) {
+    if (!isLoading && !isAuthenticated) {
       navigate("/login");
     }
-  }, [isLoading, isAuthenticated, role, navigate]);
+  }, [isLoading, isAuthenticated, navigate]);
 
   if (isLoading) {
     return (
@@ -523,12 +526,12 @@ export function EventAdminGuard({ children }: { children: React.ReactNode }) {
   const navigate = useNavigate();
   const { role, isLoading, isAuthenticated } = useAuth();
 
+  // 未認証のときだけ /login へ送る (SystemAdminGuard と同じ理由)
   useEffect(() => {
-    const isAllowed = role === "event_manager" || role === "super_admin";
-    if (!isLoading && (!isAuthenticated || !isAllowed)) {
+    if (!isLoading && !isAuthenticated) {
       navigate("/login");
     }
-  }, [isLoading, isAuthenticated, role, navigate]);
+  }, [isLoading, isAuthenticated, navigate]);
 
   if (isLoading) {
     return (

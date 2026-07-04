@@ -1,0 +1,11 @@
+{
+	// visitor (来場者向け) SPA を Cloudflare Workers Static Assets で配信する。
+	// register と同様に Worker スクリプトは持たず、ビルド済み dist を静的配信 + SPA フォールバック。
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "fesflow-visitor",
+	"compatibility_date": "2025-06-01",
+	"assets": {
+		"directory": "./dist",
+		"not_found_handling": "single-page-application"
+	}
+}

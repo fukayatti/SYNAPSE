@@ -35,6 +35,7 @@ import {
   wristbandRoutes,
   preOrderRoutes,
   extensionRoutes,
+  accountRoutes,
 } from "./routes";
 
 type AppBindings = { Bindings: WorkerEnv };
@@ -93,6 +94,7 @@ app.route("/api/stamps", stampRoutes);
 app.route("/api/wristbands", wristbandRoutes);
 app.route("/api/pre-orders", preOrderRoutes);
 app.route("/api/extensions", extensionRoutes);
+app.route("/api/account", accountRoutes);
 
 // 画像・フォントアップロード (fs → R2/MinIO)
 const ALLOWED_EXTS = [

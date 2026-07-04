@@ -660,6 +660,10 @@ export interface WristbandLookupResult {
     eventId: string;
     displayId: number;
     status: string;
+    // 来場者マイページの最小プロフィール (2026-07-04)
+    nickname?: string | null;
+    birthday?: string | null;
+    onboardedAt?: string | null;
   };
   wristband: {
     id: string;
@@ -670,9 +674,17 @@ export interface WristbandLookupResult {
 }
 
 export const wristbandApi = {
-  lookup: (code: string) =>
+  lookup: (code: string): Promise<WristbandLookupResult> =>
     fetchApi<WristbandLookupResult>(`/api/wristbands/lookup/${encodeURIComponent(code)}`).catch(() => ({
-      user: { id: code, eventId: "evt_default", displayId: 999, status: "available" },
+      user: {
+        id: code,
+        eventId: "evt_default",
+        displayId: 999,
+        status: "available",
+        nickname: null,
+        birthday: null,
+        onboardedAt: null,
+      },
       wristband: null,
     })),
   register: (userId: string, wristbandId: string) =>
@@ -685,6 +697,25 @@ export const wristbandApi = {
       `/api/wristbands/${encodeURIComponent(wristbandId)}/report-lost`,
       { method: "POST" }
     ),
+};
+
+// 来場者オンボーディング API (2026-07-04)
+// リストバンド/イベント管理から配布された ID に対し、来場者本人が
+// ニックネーム+誕生日のみを登録してマイページを使えるようにする。
+export interface VisitorProfile {
+  id: string;
+  eventId: string;
+  displayId: number;
+  nickname: string | null;
+  birthday: string | null;
+  onboardedAt: string | null;
+}
+export const visitorApi = {
+  onboard: (data: { userId: string; nickname: string; birthday?: string }) =>
+    fetchApi<VisitorProfile>("/api/wristbands/onboard", {
+      method: "POST",
+      body: data,
+    }),
 };
 
 

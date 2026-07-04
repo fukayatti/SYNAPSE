@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { Link, useNavigate, useLocation } from "react-router-dom";
 import { Button } from "./ui/button";
 import { toast } from "sonner";
-import { Menu, X, ChevronDown, User, LogOut, Shield, Calendar, Building2, Globe, Bell } from "lucide-react";
+import { Menu, X, ChevronDown, User, Bell } from "lucide-react";
+import AccountModal from "./account-modal";
 import { PRODUCT_NAME } from "@fesflow/config";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { eventApi, notificationApi } from "@/lib/api";
@@ -21,6 +22,16 @@ export default function Header() {
   const { role, userName, circleName, isLoading, isAuthenticated, isEventAdmin, userEmail } =
     useAuth();
   const { data: spaces } = useMySpaces();
+
+  // アカウント自体が super_admin かどうかは「現在アクティブなロール(role)」ではなく
+  // 所属(spaces)から判定する。role を基準にすると、super_admin がサークルに切り替えた
+  // 瞬間に role=circle_manager となり、システム管理/全イベントのスペースが一覧から
+  // 消えて元に戻れなくなる不具合が出るため (2026-07-04 スペース表示の不安定を修正)
+  const isAccountSuperAdmin = useMemo(
+    () => (spaces ?? []).some((m: any) => m.role === "super_admin"),
+    [spaces]
+  );
+
   const [mobileOpen, setMobileOpen] = useState(false);
   const [profileModalOpen, setProfileModalOpen] = useState(false);
   const [notifPopoverOpen, setNotifPopoverOpen] = useState(false);
@@ -37,7 +48,7 @@ export default function Header() {
   const { data: allEvents } = useQuery({
     queryKey: ["allEvents"],
     queryFn: () => eventApi.list(),
-    enabled: isAuthenticated && role === "super_admin",
+    enabled: isAuthenticated && isAccountSuperAdmin,
   });
 
   // 招待回答ミューテーション
@@ -70,7 +81,10 @@ export default function Header() {
     navigate("/login");
   };
 
-  const getAvailableSpaces = () => {
+  // 切り替え可能なスペース一覧。現在アクティブなロールに依存させず、ユーザーの所属
+  // (spaces) と super_admin 判定だけから算出することで、どのスペースにいても一覧が
+  // 安定する (2026-07-04 スペース表示の不安定を修正)
+  const availableSpaces = useMemo(() => {
     const list: Array<{
       id: string;
       type: "system" | "event" | "circle";
@@ -80,8 +94,8 @@ export default function Header() {
       eventId?: string | null;
     }> = [];
 
-    // 1. システム管理 (super_admin の場合)
-    if (role === "super_admin") {
+    // 1. システム管理 (アカウントが super_admin の場合)
+    if (isAccountSuperAdmin) {
       list.push({
         id: "super_admin_system",
         type: "system",
@@ -90,36 +104,35 @@ export default function Header() {
       });
     }
 
-    // 2. 所属スペースを走査
-    if (spaces) {
-      spaces.forEach((m: any) => {
-        if (m.eventId && !m.circleId) {
-          if (!list.some(x => x.type === "event" && x.eventId === m.eventId)) {
-            list.push({
-              id: m.id,
-              type: "event",
-              name: m.event?.eventName || `イベント: ${m.eventId}`,
-              role: m.role,
-              eventId: m.eventId,
-            });
-          }
-        } else if (m.circleId) {
-          if (!list.some(x => x.type === "circle" && x.circleId === m.circleId)) {
-            list.push({
-              id: m.id,
-              type: "circle",
-              name: m.circle?.name || `サークル: ${m.circleId}`,
-              role: m.role,
-              circleId: m.circleId,
-              eventId: m.eventId,
-            });
-          }
+    // 2. 所属スペースを走査 (super_admin メンバーシップ行は type=system で別扱い済み)
+    (spaces ?? []).forEach((m: any) => {
+      if (m.role === "super_admin") return;
+      if (m.eventId && !m.circleId) {
+        if (!list.some(x => x.type === "event" && x.eventId === m.eventId)) {
+          list.push({
+            id: m.id,
+            type: "event",
+            name: m.event?.eventName || `イベント: ${m.eventId}`,
+            role: m.role,
+            eventId: m.eventId,
+          });
         }
-      });
-    }
+      } else if (m.circleId) {
+        if (!list.some(x => x.type === "circle" && x.circleId === m.circleId)) {
+          list.push({
+            id: m.id,
+            type: "circle",
+            name: m.circle?.name || `サークル: ${m.circleId}`,
+            role: m.role,
+            circleId: m.circleId,
+            eventId: m.eventId,
+          });
+        }
+      }
+    });
 
     // 3. 全イベントを管理 (super_admin の場合の特別追加)
-    if (role === "super_admin" && allEvents) {
+    if (isAccountSuperAdmin && allEvents) {
       allEvents.forEach((evt: any) => {
         if (!list.some(x => x.type === "event" && x.eventId === evt.id)) {
           list.push({
@@ -134,14 +147,26 @@ export default function Header() {
     }
 
     return list;
-  };
+  }, [spaces, allEvents, isAccountSuperAdmin]);
 
   const handleSwitchSpace = (space: any) => {
     const email = userEmail || "";
     const name = userName || null;
 
+    // 遷移先とロールを先に確定させ、navigate → saveAuthInfo の順で呼ぶ。
+    // saveAuthInfo 内の dispatchEvent("authChange") は同期的に状態更新をフラッシュする
+    // ため、先に save すると「旧ルートのまま role だけ切り替わった」中間状態が生まれ、
+    // 旧ルートのガード(EventAdminGuard 等)が不一致とみなして /login へ飛ばしてしまう。
+    // navigate を先に呼ぶことで location 変更も同じフラッシュに含まれ、旧ガードは
+    // アンマウントされ誤リダイレクトしない (2026-07-04 権限切替時のログイン画面表示を修正)
+    let target = "/";
+    let payload: Parameters<typeof saveAuthInfo>[0] | null = null;
+    let message = "";
+
     if (space.type === "system") {
-      saveAuthInfo({
+      target = "/admin/dashboard";
+      message = "システム管理へ切り替えました";
+      payload = {
         circleId: null,
         eventId: null,
         userEmail: email,
@@ -150,11 +175,11 @@ export default function Header() {
         membershipId: space.id,
         circleName: null,
         isEventAdmin: true,
-      });
-      toast.success(`システム管理へ切り替えました`);
-      navigate("/admin/dashboard");
+      };
     } else if (space.type === "event") {
-      saveAuthInfo({
+      target = "/event/dashboard";
+      message = `イベント [${space.name}] の管理者へ切り替えました`;
+      payload = {
         circleId: null,
         eventId: space.eventId,
         userEmail: email,
@@ -163,11 +188,11 @@ export default function Header() {
         membershipId: space.id,
         circleName: null,
         isEventAdmin: true,
-      });
-      toast.success(`イベント [${space.name}] の管理者へ切り替えました`);
-      navigate("/event/dashboard");
+      };
     } else if (space.type === "circle") {
-      saveAuthInfo({
+      target = "/circle/dashboard";
+      message = `店舗 [${space.name}] へ切り替えました`;
+      payload = {
         circleId: space.circleId,
         eventId: space.eventId,
         userEmail: email,
@@ -176,28 +201,27 @@ export default function Header() {
         membershipId: space.id,
         circleName: space.name,
         isEventAdmin: false,
-      });
-      toast.success(`店舗 [${space.name}] へ切り替えました`);
-      navigate("/circle/dashboard");
+      };
     }
+
     setProfileModalOpen(false);
     setNotifPopoverOpen(false);
     setMobileOpen(false);
+
+    if (!payload) return;
+    navigate(target);
+    saveAuthInfo(payload);
+    toast.success(message);
   };
 
-  const isVisitorView = pathname.startsWith("/visitor");
+  // 来場者機能は apps/visitor に分離したため register の管理ヘッダーには来場者リンクを持たない (2026-07-04)
   const isCircleView = pathname.startsWith("/circle");
   const isEventView = pathname.startsWith("/event");
   const isAdminView = pathname.startsWith("/admin");
 
   let links: Array<{ to: string; label: string }> = [];
 
-  if (isVisitorView || (!isAuthenticated && !role)) {
-    links = [
-      { to: "/visitor/menu", label: "メニュー" },
-      { to: "/visitor/my-qr", label: "マイQR" },
-    ];
-  } else if (isAdminView && role === "super_admin") {
+  if (isAdminView && role === "super_admin") {
     links = [
       { to: "/admin/dashboard", label: "システム管理" },
     ];
@@ -233,12 +257,11 @@ export default function Header() {
       <div className="flex items-center justify-between px-4 py-2 max-w-7xl mx-auto gap-4">
         {/* ロゴ / ブランド */}
         <Link
-          to={isVisitorView ? "/visitor/menu" : "/"}
+          to="/"
           className="font-headline text-base sm:text-lg md:text-xl uppercase tracking-[2px] leading-none select-none hover:opacity-80 flex items-center gap-2 shrink-0"
         >
           <span className="font-black border-[2px] border-border px-2 py-1 bg-primary text-primary-foreground text-sm sm:text-base">
             {PRODUCT_NAME.toUpperCase()}
-            {isVisitorView && " // VISITOR"}
             {isCircleView && " // BOOTH"}
             {isEventView && " // EVENT"}
             {isAdminView && " // SYSTEM"}
@@ -402,83 +425,14 @@ export default function Header() {
         </div>
       )}
 
-      {/* ===== プロフィール ＆ スペース切り替えポップアップモーダル ===== */}
-      {profileModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/75 p-4 backdrop-blur-sm">
-          <div className="relative w-full max-w-md border-[1px] border-border bg-background p-6 shadow-none font-mono rounded-none">
-            {/* クローズボタン */}
-            <button
-              onClick={() => setProfileModalOpen(false)}
-              className="absolute right-4 top-4 w-8 h-8 border-[1px] border-border flex items-center justify-center hover:bg-primary hover:text-primary-foreground transition-all rounded-none cursor-pointer"
-            >
-              <X className="h-4 w-4" />
-            </button>
-
-            {/* ヘッダー */}
-            <div className="mb-6 border-b-[1px] border-border pb-3 flex items-center gap-2">
-              <User className="h-5 w-5 text-primary" />
-              <h2 className="text-lg font-black uppercase tracking-wider">[アカウント管理]</h2>
-            </div>
-
-            {/* ユーザー情報 */}
-            <div className="space-y-4 mb-6 bg-muted/30 p-4 border-[1px] border-border rounded-none">
-              <div className="space-y-1">
-                <span className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider">ログインユーザー</span>
-                <p className="font-bold text-sm">{userName || "スタッフ"}</p>
-                <p className="text-xs text-muted-foreground">{userEmail}</p>
-              </div>
-
-              <div className="space-y-1 pt-2 border-t border-border/10 flex items-center justify-between">
-                <div>
-                  <span className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider">現在のアクティブスペース</span>
-                  <p className="font-bold text-xs">
-                    {circleName ? `店舗管理者 [${circleName}]` : role === "super_admin" ? "システム最高管理者" : role === "event_manager" ? "イベント管理者" : "一般スタッフ"}
-                  </p>
-                </div>
-                <span className="bg-primary text-primary-foreground text-[9px] font-black px-2 py-0.5 uppercase shrink-0 rounded-none">
-                  {getRoleTag()}
-                </span>
-              </div>
-            </div>
-
-            {/* スペース切り替え */}
-            {getAvailableSpaces().length > 1 && (
-              <div className="space-y-3 mb-6">
-                <h3 className="text-xs font-black uppercase tracking-wider text-muted-foreground">[スペースを切り替える]</h3>
-                <div className="max-h-48 overflow-y-auto space-y-1 border-[1px] border-border p-2 bg-background rounded-none">
-                  {getAvailableSpaces().map((space) => (
-                    <button
-                      key={space.id}
-                      onClick={() => handleSwitchSpace(space)}
-                      className="w-full text-left p-2 hover:bg-primary hover:text-primary-foreground transition-all block border-b border-border/10 last:border-b-0 cursor-pointer rounded-none"
-                    >
-                      <div className="flex items-center gap-1.5 text-[9px] text-muted-foreground font-black uppercase tracking-wider">
-                        {space.type === "system" && <Shield className="h-3 w-3" />}
-                        {space.type === "event" && <Calendar className="h-3 w-3" />}
-                        {space.type === "circle" && <Building2 className="h-3 w-3" />}
-                        {space.type.toUpperCase()} | {space.role}
-                      </div>
-                      <div className="text-xs font-bold truncate mt-0.5">{space.name}</div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* アクションボタン */}
-            <div className="space-y-2 border-t border-border/20 pt-4">
-              <Button
-                variant="destructive"
-                className="w-full h-12 border-[1px] border-border rounded-none flex items-center justify-center gap-2 uppercase font-black bg-destructive text-destructive-foreground hover:bg-background hover:text-foreground"
-                onClick={handleLogout}
-              >
-                <LogOut className="h-4 w-4" />
-                ログアウト
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* ===== アカウント管理モーダル (プロフィール編集/メール変更/スペース切替・退出/削除) ===== */}
+      <AccountModal
+        open={profileModalOpen}
+        onClose={() => setProfileModalOpen(false)}
+        availableSpaces={availableSpaces}
+        onSwitch={handleSwitchSpace}
+        onLogout={handleLogout}
+      />
     </header>
   );
 }

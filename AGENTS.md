@@ -64,8 +64,10 @@
 ## Directory map
 - `docs`: 設計資料 (`docs/reference` は旧 FesOrder のドメイン資料)
 - `apps/api`: バックエンド (Hono Worker, D1+R2, REST+tRPC+better-auth)
-- `apps/register`: 模擬店向けアプリ (Vite SPA, 移植済み)
-- `apps/visitor`: 来場者向けアプリ (スタンプラリー/事前注文/抽選, 未着手)
+- `apps/register`: 模擬店/イベント/システム管理向けアプリ (Vite SPA, :3000)
+- `apps/visitor`: 来場者向けアプリ (Vite SPA, :3001)。register とは独立ビルド。
+  入場は /w/:id (リストバンドQR) → オンボーディング(ニックネーム+誕生日) → マイページ。
+  管理者の権限/ダッシュボードは持たない。VITE_REGISTER_URL で店頭スキャン先を指定。
 - `apps/stream`: 校内配信制御アプリ (未着手)
 - `packages/config`: ブランド定数 (PRODUCT_NAME) + tsconfig.base
 - `packages/db`: drizzle スキーマ + createDb / ALS リクエストストア
