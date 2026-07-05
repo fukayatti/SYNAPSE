@@ -7,6 +7,13 @@ import { nanoid } from "nanoid";
 import bcrypt from "bcryptjs";
 import { auth } from "@fesflow/auth";
 import { Context } from "hono";
+import {
+  clientIp,
+  isLocked,
+  recordFailure,
+  clearAttempts,
+  lockoutMessage,
+} from "../utils/rate-limit";
 
 const membershipRoutes = new Hono();
 
@@ -765,50 +772,55 @@ membershipRoutes.post(
     z.object({
       circleId: z.string().optional(),
       eventId: z.string().optional(),
-      email: z.string().email().optional(),
+      // 2026-07-05 (H4): email を必須化。従来は任意で、未指定だとサークル/イベント配下の
+      // 全メンバーの PIN に対して総当たりできてしまい (探索空間 = 人数 × PIN空間)、
+      // かつ「当たった誰か」でログインできる横取りも可能だった。email を要求することで
+      // 探索対象を 1 名に限定し、ロックアウトも本人単位で効かせる。
+      // フロント (register の circle-login-only-form) は元々 email を必須送信している。
+      email: z.string().email(),
       pin: z.string(),
     })
   ),
   async (c) => {
     const input = c.req.valid("json");
 
-    // メンバーシップを検索
-    let query;
-    if (input.circleId) {
-      const conditions = [
-        eq(membership.circleId, input.circleId),
-        eq(membership.isActive, true)
-      ];
-      if (input.email) {
-        conditions.push(eq(membership.userEmail, input.email.toLowerCase()));
-      }
-      query = db
-        .select()
-        .from(membership)
-        .where(and(...conditions));
-    } else if (input.eventId) {
-      const conditions = [
-        eq(membership.eventId, input.eventId),
-        eq(membership.isActive, true)
-      ];
-      if (input.email) {
-        conditions.push(eq(membership.userEmail, input.email.toLowerCase()));
-      }
-      query = db
-        .select()
-        .from(membership)
-        .where(and(...conditions));
-    } else {
+    const targetId = input.circleId ?? input.eventId;
+    if (!targetId) {
       return c.json({ error: "circleIdまたはeventIdが必要です" }, 400);
     }
+    const email = input.email.toLowerCase();
 
-    const memberships = await query;
+    // 2026-07-05 (H4): PIN 総当たり対策。IP バケットと対象(本人)バケットの双方を見て、
+    // どちらかがロック中なら bcrypt を実行する前に 429 で弾く。
+    const ip = clientIp(c);
+    const ipKey = `pin:ip:${ip}`;
+    const targetKey = `pin:target:${targetId}:${email}`;
+    const keys = [ipKey, targetKey];
+
+    const retryAfter = await isLocked(keys);
+    if (retryAfter > 0) {
+      return c.json({ error: lockoutMessage(retryAfter) }, 429, {
+        "Retry-After": String(retryAfter),
+      });
+    }
+
+    // メンバーシップを検索 (email 必須になったため対象は最大 1 件)
+    const conditions = input.circleId
+      ? [eq(membership.circleId, input.circleId), eq(membership.isActive, true), eq(membership.userEmail, email)]
+      : [eq(membership.eventId, input.eventId!), eq(membership.isActive, true), eq(membership.userEmail, email)];
+
+    const memberships = await db
+      .select()
+      .from(membership)
+      .where(and(...conditions));
 
     // PINがnullでないメンバーシップをチェック
     for (const m of memberships) {
       if (m.pin) {
         const isValid = await bcrypt.compare(input.pin, m.pin);
         if (isValid) {
+          // 認証成功: 失敗履歴を消去して正当な利用者を巻き込まないようにする。
+          await clearAttempts(keys);
           // 該当メンバーシップの user テーブルのレコードを検索
           const users = await db
             .select()
@@ -840,6 +852,11 @@ membershipRoutes.post(
       }
     }
 
+    // 認証失敗: IP/対象バケットに失敗を記録し、しきい値到達で以降ロックする。
+    await recordFailure([
+      { key: ipKey, scope: "pin" },
+      { key: targetKey, scope: "pin" },
+    ]);
     return c.json({ error: "PINが正しくありません" }, 401);
   }
 );

@@ -6,6 +6,13 @@ import { eq, and, inArray, isNull } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import bcrypt from "bcryptjs";
 import { getAdminSession, getSession } from "../utils/auth";
+import {
+  clientIp,
+  isLocked,
+  recordFailure,
+  clearAttempts,
+  lockoutMessage,
+} from "../utils/rate-limit";
 
 const eventRoutes = new Hono();
 
@@ -194,6 +201,25 @@ eventRoutes.post(
   async (c) => {
     const input = c.req.valid("json");
 
+    // 2026-07-05 (H4): サークルパスワード総当たり対策。IP バケットと対象(イベント名+サークル名)
+    // バケットの双方を見て、どちらかがロック中なら DB 検索/bcrypt 前に 429 で弾く。対象キーは
+    // ID 確定前の入力名ベース (存在しない名前の探索=列挙も同じ IP バケットで抑止される)。
+    const ip = clientIp(c);
+    const ipKey = `circle_login:ip:${ip}`;
+    const targetKey = `circle_login:target:${input.eventName.trim().toLowerCase()}::${input.circleName.trim().toLowerCase()}`;
+    const keys = [ipKey, targetKey];
+    const buckets = [
+      { key: ipKey, scope: "circle_login" },
+      { key: targetKey, scope: "circle_login" },
+    ];
+
+    const retryAfter = await isLocked(keys);
+    if (retryAfter > 0) {
+      return c.json({ error: lockoutMessage(retryAfter) }, 429, {
+        "Retry-After": String(retryAfter),
+      });
+    }
+
     // イベント名でイベントを検索
     // 2026-07-05: 論理削除済みイベントへのログインを防止するためisNull(event.deletedAt)を追加
     const events = await db
@@ -202,6 +228,7 @@ eventRoutes.post(
       .where(and(eq(event.eventName, input.eventName), isNull(event.deletedAt)));
 
     if (events.length === 0) {
+      await recordFailure(buckets);
       return c.json({ error: "イベントが見つかりません" }, 404);
     }
 
@@ -221,6 +248,7 @@ eventRoutes.post(
       );
 
     if (circles.length === 0) {
+      await recordFailure(buckets);
       return c.json({ error: "サークルが見つかりません" }, 404);
     }
 
@@ -233,8 +261,12 @@ eventRoutes.post(
     );
 
     if (!isPasswordValid) {
+      await recordFailure(buckets);
       return c.json({ error: "パスワードが正しくありません" }, 401);
     }
+
+    // 認証成功: 失敗履歴を消去する。
+    await clearAttempts(keys);
 
     return c.json({
       circleId: foundCircle.id,

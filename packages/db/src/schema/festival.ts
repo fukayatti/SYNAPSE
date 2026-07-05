@@ -910,3 +910,46 @@ export const notification = sqliteTable(
     index("notification_status_idx").on(table.status),
   ]
 );
+
+// ==========================================
+// 認証レート制限 / アカウントロックアウト (2026-07-05 追加, 監査 High: H4)
+//  - 目的: PIN 総当たり (POST /api/memberships/authenticate-pin) と
+//    サークルパスワード総当たり (POST /api/festivals/login) の「オンライン総当たり」を抑止する。
+//  - 方針: bcrypt のコストは上げない (bcryptjs は純JSで低速。Workers の CPU 制約下で
+//    コストを上げると認証1回で CPU 予算を超え得るため)。代わりに「失敗回数の計数 + 一定回数で
+//    ロックアウト」で対処する。既定は 5 回失敗 / 15 分ロック (helper 側の定数)。
+//  - キー設計: 1 バケット = 1 行。key は scope と識別子を結合した文字列
+//    (例 "pin:ip:1.2.3.4" / "pin:target:<circleId>:<email>" / "circle_login:ip:...")。
+//    IP バケットと対象 (circle/event) バケットを独立に持ち、どちらかがロックしたら拒否する
+//    (単一 IP からの多対象攻撃・多 IP からの単一対象攻撃の双方を捕捉するため)。
+//  - 注意: D1(SQLite) の read-modify-write は厳密なアトミック性を持たないため、極端な高並列時に
+//    計数が数回甘くなり得るが、ロックアウトという緩和目的では許容範囲。行は (ip, 対象) の
+//    組の数に比例して有限で、文化祭は短命なため定期削除は設けていない (必要なら scope で一括削除可)。
+export const authAttempt = sqliteTable(
+  "auth_attempt",
+  {
+    id: text("id").primaryKey(),
+    // レート制限バケットキー (scope + 識別子を結合)。1 バケット 1 行。
+    key: text("key").notNull(),
+    // 分類ラベル (可観測性 / 一括クリーンアップ用): "pin" | "circle_login" など
+    scope: text("scope").notNull(),
+    // 現在の計数ウィンドウ内での失敗回数
+    failedCount: integer("failed_count").notNull().default(0),
+    // 計数ウィンドウの起点。ここから windowMs 経過 (かつ非ロック) で失敗回数をリセットする。
+    firstFailedAt: integer("first_failed_at", { mode: "timestamp_ms" }).notNull(),
+    lastFailedAt: integer("last_failed_at", { mode: "timestamp_ms" }).notNull(),
+    // ロックアウト解除時刻 (null=未ロック)。この時刻まで当該バケットへの試行を全拒否する。
+    lockedUntil: integer("locked_until", { mode: "timestamp_ms" }),
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+      .notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("auth_attempt_key_unique").on(table.key),
+    index("auth_attempt_locked_until_idx").on(table.lockedUntil),
+  ]
+);
