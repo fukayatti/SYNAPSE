@@ -15,6 +15,7 @@ import {
 } from "@fesflow/db";
 import { eq, and, inArray, desc, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
+import { hasPermission } from "../utils/auth";
 
 const preOrderRoutes = new Hono();
 
@@ -112,6 +113,20 @@ preOrderRoutes.post(
         if (!m) {
           return c.json({ error: `メニュー ${item.menuId} が存在しません` }, 404);
         }
+
+        // 2026-07-05: クロスサークルIDOR対策。他サークルのメニューが混入していないか検証する
+        if (m.circleId !== circleId) {
+          return c.json(
+            { error: `メニュー ${m.name} は指定サークルに属していません` },
+            400
+          );
+        }
+
+        // 2026-07-05: 売り切れメニューの事前オーダーをハードゲートで拒否する
+        if (m.soldOut) {
+          return c.json({ error: `${m.name}は売り切れです` }, 400);
+        }
+
         totalPrice += m.price * item.quantity;
         itemList.push({
           id: nanoid(),
@@ -148,6 +163,11 @@ preOrderRoutes.post(
 );
 
 // コード (リストバンドIDまたはユーザーID) から該当する未受取事前オーダーを取得
+// 2026-07-05: フロント確認の結果、register の qr-scanner-modal (スタッフがレジで来場者のQR/リストバンドを
+// スキャン) と visitor の MyPage (来場者本人が自分のuserIdで参照) の両方から呼ばれている。
+// 来場者導線を壊さないため hasPermission による認可は課さず維持する。
+// リストバンド/userIdの保持（QRを提示できること）自体が来場者側の実質的な認証手段であり、
+// レスポンスには元々 cashierId 等の内部情報は含まれていないため追加の最小化は不要と判断した。
 preOrderRoutes.get("/user/:code", async (c) => {
   const code = c.req.param("code");
   const circleId = c.req.query("circleId");
@@ -234,6 +254,12 @@ preOrderRoutes.post(
         return c.json({ error: "事前オーダーが見つかりません" }, 404);
       }
       const po = pos[0]!;
+
+      // 2026-07-05: レジでの確定処理はスタッフ操作のため order:write 必須にする
+      // (register の qr-scanner-modal のみが呼び出しており visitor からの呼び出しはない)
+      if (!(await hasPermission(c, po.circleId, "order:write"))) {
+        return c.json({ error: "権限がありません" }, 403);
+      }
 
       if (po.status !== "pending") {
         return c.json({ error: "この事前オーダーは既に処理されているかキャンセルされています" }, 400);

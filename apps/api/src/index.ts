@@ -13,14 +13,13 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
-import { trpcServer } from "@hono/trpc-server";
+import { secureHeaders } from "hono/secure-headers";
 import { nanoid } from "nanoid";
 
 import { createDb, runWithRequest, type WorkerEnv } from "@fesflow/db";
 import { createAuth } from "@fesflow/auth";
 import { createStorage } from "@fesflow/storage";
-import { appRouter } from "@fesflow/api/routers/index";
-import { createContext } from "@fesflow/api/context";
+import { getSession } from "./utils/auth";
 
 // Hono REST ルート
 import {
@@ -43,14 +42,52 @@ type AppBindings = { Bindings: WorkerEnv };
 const app = new Hono<AppBindings>();
 
 app.use(logger());
+// 2026-07-05: 基本的なセキュリティレスポンスヘッダを付与 (クリックジャッキング/MIMEスニッフ/
+// HSTS/リファラ抑止)。ただし画像・フォント(/uploads/*)はフロント (別サブドメイン) から
+// <img>/CSS で読み込むため、CORP は cross-origin に緩める (既定の same-origin だと読込が壊れる)。
 app.use(
   "/*",
+  secureHeaders({
+    crossOriginResourcePolicy: "cross-origin",
+  }),
+);
+
+/**
+ * 許可オリジンの判定 (2026-07-05 セキュリティ強化)
+ *
+ * 旧実装は `origin: (origin) => origin || "*"` で任意オリジンを credentials 付きで
+ * 反射しており、任意サイトからログイン中ユーザーの Cookie を使った CSRF /
+ * クレデンシャル窃取が可能だった。以下の許可リストに一致した場合のみ反射する。
+ * - 本番: fesflow.shikosai.net (apex) と全サブドメイン (staff/admin 等)
+ * - ローカル: localhost / 127.0.0.1 の 3000(register) / 3001(visitor)
+ * - env.CORS_ORIGIN があればカンマ区切りで追加許可 (別ドメイン検証用の逃げ道)
+ */
+function isAllowedOrigin(origin: string, env: WorkerEnv): boolean {
+  if (!origin) return false;
+  const extra = env.CORS_ORIGIN
+    ? env.CORS_ORIGIN.split(",").map((s) => s.trim()).filter(Boolean)
+    : [];
+  if (extra.includes(origin)) return true;
+  let host: string;
+  try {
+    host = new URL(origin).hostname;
+  } catch {
+    return false;
+  }
+  if (host === "localhost" || host === "127.0.0.1") return true;
+  if (host === "fesflow.shikosai.net") return true;
+  if (host.endsWith(".fesflow.shikosai.net")) return true;
+  return false;
+}
+
+app.use("/*", (c, next) =>
   cors({
-    origin: (origin) => origin || "*",
+    origin: (origin) =>
+      isAllowedOrigin(origin, c.env as WorkerEnv) ? origin : null,
     allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowHeaders: ["Content-Type", "Authorization", "Cookie", "Accept", "X-Active-Membership-Id"],
     credentials: true,
-  }),
+  })(c, next),
 );
 
 /**
@@ -71,14 +108,10 @@ app.on(["POST", "GET"], "/api/auth/*", (c) => {
   return auth.handler(c.req.raw);
 });
 
-// tRPC (web が @fesflow/api の型で参照するエンドポイント)
-app.use(
-  "/trpc/*",
-  trpcServer({
-    router: appRouter,
-    createContext: (_opts, c) => createContext({ context: c }),
-  }),
-);
+// 2026-07-05: 旧 tRPC エンドポイント (/trpc/*) を撤去。
+// フロント (register/visitor) は REST (/api/*) のみを使用しており、tRPC 側は
+// 全プロシージャが publicProcedure (認可なし) かつ circle/event を物理削除する
+// 実装だったため、生きた無認可攻撃面になっていた。マウントごと削除する。
 
 // REST ルート登録
 // 2026-07-04: /api/events は広告ブロック機能(uBlock, Brave Shield等)に telemetry 送信と誤認され
@@ -97,13 +130,15 @@ app.route("/api/extensions", extensionRoutes);
 app.route("/api/account", accountRoutes);
 
 // 画像・フォントアップロード (fs → R2/MinIO)
+// 2026-07-05: SVG は同一オリジン配信時にスクリプトを実行し得る (保存型XSS) ため
+// 許可拡張子から除外した。加えてアップロードはログインセッション必須にする
+// (アップロード導線はイベント/サークル/メニューの管理操作に限られ、来場者は使わない)。
 const ALLOWED_EXTS = [
   "jpg",
   "jpeg",
   "png",
   "gif",
   "webp",
-  "svg",
   "ttf",
   "otf",
   "woff",
@@ -112,6 +147,11 @@ const ALLOWED_EXTS = [
 
 app.post("/api/upload", async (c) => {
   try {
+    const session = await getSession(c);
+    if (!session || !session.user) {
+      return c.json({ error: "認証が必要です" }, 401);
+    }
+
     const body = await c.req.parseBody();
     const file = body["file"];
 
@@ -124,7 +164,7 @@ app.post("/api/upload", async (c) => {
       return c.json(
         {
           error:
-            "許可されていないファイル形式です (画像: jpg, png, webp, svg / フォント: ttf, otf, woff, woff2)",
+            "許可されていないファイル形式です (画像: jpg, png, webp / フォント: ttf, otf, woff, woff2)",
         },
         400,
       );
@@ -161,9 +201,13 @@ app.get("/uploads/*", async (c) => {
     if (!obj) {
       return c.text("Not Found", 404);
     }
+    // 2026-07-05: 保存型XSS対策。MIMEスニッフ抑止 + sandbox CSP で、万一 SVG/HTML が
+    // 保存されていてもスクリプト実行や能動コンテンツ読込を無効化する。
     return c.body(obj.body, 200, {
       "Content-Type": obj.contentType || "application/octet-stream",
       "Cache-Control": "public, max-age=31536000, immutable",
+      "X-Content-Type-Options": "nosniff",
+      "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox",
     });
   } catch (error) {
     console.error("Failed to serve upload:", error);

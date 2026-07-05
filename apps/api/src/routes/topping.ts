@@ -1,9 +1,10 @@
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
-import { db, topping } from "@fesflow/db";
+import { db, topping, menuTopping } from "@fesflow/db";
 import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
+import { hasPermission } from "../utils/auth";
 
 const toppingRoutes = new Hono();
 
@@ -13,6 +14,11 @@ toppingRoutes.get("/", async (c) => {
 
   if (!circleId) {
     return c.json({ error: "circleIdが必要です" }, 400);
+  }
+
+  // 2026-07-05: 認可チェックが皆無だったため追加（専用権限がないためmenu:*を流用）
+  if (!(await hasPermission(c, circleId, "menu:read"))) {
+    return c.json({ error: "権限がありません" }, 403);
   }
 
   const toppings = await db
@@ -30,6 +36,11 @@ toppingRoutes.get("/:id", async (c) => {
 
   if (toppings.length === 0) {
     return c.json({ error: "トッピングが見つかりません" }, 404);
+  }
+
+  // 2026-07-05: 認可チェックが皆無だったため追加。対象のcircleIdで判定
+  if (!(await hasPermission(c, toppings[0]!.circleId, "menu:read"))) {
+    return c.json({ error: "権限がありません" }, 403);
   }
 
   return c.json(toppings[0]);
@@ -50,6 +61,12 @@ toppingRoutes.post(
   ),
   async (c) => {
     const input = c.req.valid("json");
+
+    // 2026-07-05: 認可チェックが皆無だったため追加（専用権限がないためmenu:*を流用）
+    if (!(await hasPermission(c, input.circleId, "menu:write"))) {
+      return c.json({ error: "権限がありません" }, 403);
+    }
+
     const id = nanoid();
 
     await db.insert(topping).values({
@@ -81,6 +98,19 @@ toppingRoutes.put(
     const id = c.req.param("id");
     const input = c.req.valid("json");
 
+    // 2026-07-05: 認可チェックが皆無だったため追加（単価改ざん防止）。対象のcircleIdを先に取得して判定
+    const existingTopping = await db
+      .select()
+      .from(topping)
+      .where(eq(topping.id, id));
+    if (existingTopping.length === 0) {
+      return c.json({ error: "トッピングが見つかりません" }, 404);
+    }
+
+    if (!(await hasPermission(c, existingTopping[0]!.circleId, "menu:write"))) {
+      return c.json({ error: "権限がありません" }, 403);
+    }
+
     const updates: Partial<typeof topping.$inferSelect> = {};
 
     if (input.name !== undefined) updates.name = input.name;
@@ -98,6 +128,23 @@ toppingRoutes.put(
 // トッピング削除
 toppingRoutes.delete("/:id", async (c) => {
   const id = c.req.param("id");
+
+  // 2026-07-05: 認可チェックが皆無だったため追加。存在確認の上、対象のcircleIdで判定
+  const existingTopping = await db
+    .select()
+    .from(topping)
+    .where(eq(topping.id, id));
+  if (existingTopping.length === 0) {
+    return c.json({ error: "トッピングが見つかりません" }, 404);
+  }
+
+  if (!(await hasPermission(c, existingTopping[0]!.circleId, "menu:delete"))) {
+    return c.json({ error: "権限がありません" }, 403);
+  }
+
+  // 2026-07-05: 関連するmenu_topping中間テーブル行を連動削除（menu.tsの削除実装に準拠）
+  await db.delete(menuTopping).where(eq(menuTopping.toppingId, id));
+
   await db.delete(topping).where(eq(topping.id, id));
   return c.json({ success: true });
 });

@@ -27,9 +27,8 @@ eventRoutes.get("/", async (c) => {
       )
     );
 
-  const isSystemAdmin = userMemberships.some(
-    (m) => m.role === "super_admin" || m.role === "system_manager" || m.role === "system_staff"
-  );
+  // 2026-07-05: ROLES定数に存在しないロール名(system_manager, system_staff)を判定していた死んだ分岐を除去
+  const isSystemAdmin = userMemberships.some((m) => m.role === "super_admin");
 
   if (isSystemAdmin) {
     // 論理削除済み(deletedAt != null)は除外
@@ -37,8 +36,9 @@ eventRoutes.get("/", async (c) => {
     return c.json(events);
   }
 
+  // 2026-07-05: ROLES定数に存在しないロール名(event_staff)を判定していた死んだ分岐を除去
   const myEventIds = userMemberships
-    .filter((m) => (m.role === "event_manager" || m.role === "event_staff") && m.eventId)
+    .filter((m) => m.role === "event_manager" && m.eventId)
     .map((m) => m.eventId) as string[];
 
   if (myEventIds.length === 0) {
@@ -195,10 +195,11 @@ eventRoutes.post(
     const input = c.req.valid("json");
 
     // イベント名でイベントを検索
+    // 2026-07-05: 論理削除済みイベントへのログインを防止するためisNull(event.deletedAt)を追加
     const events = await db
       .select()
       .from(event)
-      .where(eq(event.eventName, input.eventName));
+      .where(and(eq(event.eventName, input.eventName), isNull(event.deletedAt)));
 
     if (events.length === 0) {
       return c.json({ error: "イベントが見つかりません" }, 404);
@@ -207,13 +208,15 @@ eventRoutes.post(
     const foundEvent = events[0]!;
 
     // サークル名とイベントIDでサークルを検索
+    // 2026-07-05: 論理削除済みサークルへのログインを防止するためisNull(circle.deletedAt)を追加
     const circles = await db
       .select()
       .from(circle)
       .where(
         and(
           eq(circle.eventId, foundEvent.id),
-          eq(circle.name, input.circleName)
+          eq(circle.name, input.circleName),
+          isNull(circle.deletedAt)
         )
       );
 

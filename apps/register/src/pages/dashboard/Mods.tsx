@@ -357,7 +357,7 @@ function ModsSettingsContent() {
                           >
                             {enabled ? (
                               <>
-                                <ToggleOn className="mr-1.5 h-4 w-4 text-green-500" /> 有効
+                                <ToggleOn className="mr-1.5 h-4 w-4 text-success" /> 有効
                               </>
                             ) : (
                               <>

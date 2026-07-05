@@ -92,7 +92,7 @@ export default function InvitePage() {
         <Card className="w-full max-w-md">
           <CardContent className="pt-6">
             <div className="text-center space-y-4">
-              <CheckCircle className="h-16 w-16 mx-auto text-green-500" />
+              <CheckCircle className="h-16 w-16 mx-auto text-success" />
               <h2 className="text-2xl font-bold">参加完了！</h2>
               <p className="text-muted-foreground">
                 サークルへの参加が完了しました。 ダッシュボードへ移動します...

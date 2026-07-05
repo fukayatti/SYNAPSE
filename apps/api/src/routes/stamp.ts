@@ -9,6 +9,12 @@ import { getSession } from "../utils/auth";
 const stampRoutes = new Hono();
 
 // ユーザーのスタンプ取得
+// 2026-07-05: フロント(apps/register, apps/visitor)を grep した結果、現時点では
+// `/api/stamps/:userId` を呼び出すコンポーネント・APIラッパーは存在しない(未消費)。
+// 想定用途は来場者マイページでの自分のスタンプ確認であり、他のマイページ系エンドポイント
+// (例: pre-orders/user/:code)と同様に userId(=リストバンド/ゲストID) の保持自体が
+// 実質的な本人確認手段となる設計のため、現状維持（認可なし）とする。
+// スタンプ数・景品交換済みフラグのみを返しており、他ユーザーの決済情報等の機微情報は含まない。
 stampRoutes.get("/:userId", async (c) => {
   const userId = c.req.param("userId");
 

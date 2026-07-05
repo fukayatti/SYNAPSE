@@ -17,6 +17,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Modal } from "@/components/ui/Modal";
 import { toast } from "sonner";
 import Image from "@/components/image";
 import { ShoppingCart, Plus, Minus, CheckCircle } from "lucide-react";
@@ -211,8 +212,8 @@ function MenuPageContent() {
   if (!circleIdParam && !selectedCircleId) {
     return (
       <div className="max-w-xl mx-auto p-sp-3 sm:p-sp-4 text-center font-mono my-12">
-        <div className="border-[5px] border-border p-sp-5 space-y-sp-4 bg-background">
-          <div className="inline-block bg-primary text-primary-foreground font-headline uppercase text-[10px] sm:text-[12px] tracking-[3px] px-sp-3 py-sp-2 border-[3px] border-primary">
+        <div className="border-heavy border-border p-sp-5 space-y-sp-4 bg-background">
+          <div className="inline-block bg-primary text-primary-foreground font-headline uppercase text-[10px] sm:text-[12px] tracking-[3px] px-sp-3 py-sp-2 border-thick border-primary">
             ACCESS DENIED // 注文不可
           </div>
           <h1 className="text-[24px] sm:text-[32px] font-headline uppercase tracking-tight leading-[1.1] text-foreground">
@@ -277,14 +278,14 @@ function MenuPageContent() {
               : undefined
           }
         >
-          <div className="bg-primary/80 border-[3px] border-primary-foreground p-sp-3 sm:p-sp-4 max-w-2xl w-full">
+          <div className="bg-primary/80 border-thick border-primary-foreground p-sp-3 sm:p-sp-4 max-w-2xl w-full">
             {circleData.iconImagePath && (
               <Image
                 src={circleData.iconImagePath}
                 alt={circleData.name}
                 width={64}
                 height={64}
-                className="mx-auto border-[2px] border-white mb-sp-3"
+                className="mx-auto border-thick border-white mb-sp-3"
               />
             )}
             <h1 className="text-[28px] sm:text-[40px] md:text-[48px] font-headline uppercase tracking-tight mb-sp-1 leading-[1.0]">
@@ -351,11 +352,11 @@ function MenuPageContent() {
 
                   <CardFooter className="border-t-thick border-border pt-4">
                     {qty > 0 ? (
-                      <div className="flex items-center justify-between w-full bg-muted border-[2px] border-border p-1">
+                      <div className="flex items-center justify-between w-full bg-muted border-thick border-border p-1">
                         <Button
                           type="button"
                           onClick={() => updateQuantity(menu.id, -1)}
-                          className="h-10 w-10 border-[2px] border-border bg-background text-foreground rounded-none hover:bg-primary hover:text-primary-foreground transition-all"
+                          className="h-10 w-10 border-thick border-border bg-background text-foreground rounded-none hover:bg-primary hover:text-primary-foreground transition-all"
                         >
                           <Minus className="h-4 w-4" />
                         </Button>
@@ -365,7 +366,7 @@ function MenuPageContent() {
                         <Button
                           type="button"
                           onClick={() => updateQuantity(menu.id, 1)}
-                          className="h-10 w-10 border-[2px] border-border bg-background text-foreground rounded-none hover:bg-primary hover:text-primary-foreground transition-all"
+                          className="h-10 w-10 border-thick border-border bg-background text-foreground rounded-none hover:bg-primary hover:text-primary-foreground transition-all"
                         >
                           <Plus className="h-4 w-4" />
                         </Button>
@@ -421,79 +422,69 @@ function MenuPageContent() {
       )}
 
       {/* 標準カート確認モーダル */}
-      {isCartOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/80 p-4 font-mono">
-          <div className="w-full max-w-lg border-heavy border-border bg-background p-6 space-y-4 max-h-[90vh] overflow-y-auto">
-            <div className="border-b-thick border-border pb-3 flex justify-between items-center">
-              <h3 className="font-black text-2xl uppercase text-foreground">[カートの中身を確認]</h3>
-              <Button
-                variant="ghost"
-                onClick={() => setIsCartOpen(false)}
-                className="font-bold border-[2px] border-border rounded-none hover:bg-primary hover:text-primary-foreground"
-              >
-                ✕ 閉じる
-              </Button>
-            </div>
-
-            <div className="space-y-3 max-h-[40vh] overflow-y-auto pr-1">
-              {cart.map((item) => (
-                <div key={item.menuId} className="flex justify-between items-center border-b border-border/10 pb-2 gap-4">
-                  <div className="space-y-1">
-                    <p className="font-bold text-sm text-foreground">{item.menuName}</p>
-                    <p className="text-xs text-muted-foreground">単価: ¥{item.menuPrice.toLocaleString()}</p>
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <Button
-                      type="button"
-                      onClick={() => updateQuantity(item.menuId, -1)}
-                      className="h-8 w-8 border-[2px] border-border bg-background text-foreground rounded-none hover:bg-primary hover:text-primary-foreground p-0"
-                    >
-                      <Minus className="h-3 w-3" />
-                    </Button>
-                    <span className="font-bold text-sm w-6 text-center">{item.quantity}</span>
-                    <Button
-                      type="button"
-                      onClick={() => updateQuantity(item.menuId, 1)}
-                      className="h-8 w-8 border-[2px] border-border bg-background text-foreground rounded-none hover:bg-primary hover:text-primary-foreground p-0"
-                    >
-                      <Plus className="h-3 w-3" />
-                    </Button>
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            <div className="border-t-thick border-border pt-3 space-y-2">
-              <div className="flex justify-between font-black text-lg text-foreground">
-                <span>合計金額:</span>
-                <span>¥{getTotalPrice().toLocaleString()}</span>
+      <Modal
+        isOpen={isCartOpen}
+        onClose={() => setIsCartOpen(false)}
+        title="[カートの中身を確認]"
+        maxWidth="lg"
+      >
+        <div className="space-y-3 max-h-[40vh] overflow-y-auto pr-1">
+          {cart.map((item) => (
+            <div key={item.menuId} className="flex justify-between items-center border-b border-border/10 pb-2 gap-4">
+              <div className="space-y-1">
+                <p className="font-bold text-sm text-foreground">{item.menuName}</p>
+                <p className="text-xs text-muted-foreground">単価: ¥{item.menuPrice.toLocaleString()}</p>
               </div>
-              <p className="text-[11px] text-muted-foreground leading-normal">
-                {isPreOrderEnabled() 
-                  ? "※「注文を送信する」を押すと注文が送信されます。番号が呼ばれたら受取口にてお支払いください。"
-                  : "※「注文を送信する」を押すと事前注文が送信されます。レジにてマイQRコード、または連携したリストバンドを提示してお支払いください。"}
-              </p>
+              <div className="flex items-center gap-2 shrink-0">
+                <Button
+                  type="button"
+                  onClick={() => updateQuantity(item.menuId, -1)}
+                  className="h-8 w-8 border-thick border-border bg-background text-foreground rounded-none hover:bg-primary hover:text-primary-foreground p-0"
+                >
+                  <Minus className="h-3 w-3" />
+                </Button>
+                <span className="font-bold text-sm w-6 text-center">{item.quantity}</span>
+                <Button
+                  type="button"
+                  onClick={() => updateQuantity(item.menuId, 1)}
+                  className="h-8 w-8 border-thick border-border bg-background text-foreground rounded-none hover:bg-primary hover:text-primary-foreground p-0"
+                >
+                  <Plus className="h-3 w-3" />
+                </Button>
+              </div>
             </div>
-
-            <div className="flex flex-col gap-2 pt-2">
-              <Button
-                onClick={() => {
-                  setIsCartOpen(false);
-                  if (isPreOrderEnabled()) {
-                    codOrderMutation.mutate();
-                  } else {
-                    preOrderMutation.mutate();
-                  }
-                }}
-                disabled={preOrderMutation.isPending || codOrderMutation.isPending}
-                className="w-full h-12 border-thick border-border bg-primary text-primary-foreground text-base font-black uppercase rounded-none hover:bg-background hover:text-foreground transition-all"
-              >
-                {preOrderMutation.isPending || codOrderMutation.isPending ? "送信中..." : "注文を送信する"}
-              </Button>
-            </div>
-          </div>
+          ))}
         </div>
-      )}
+
+        <div className="border-t-thick border-border pt-3 space-y-2">
+          <div className="flex justify-between font-black text-lg text-foreground">
+            <span>合計金額:</span>
+            <span>¥{getTotalPrice().toLocaleString()}</span>
+          </div>
+          <p className="text-[11px] text-muted-foreground leading-normal">
+            {isPreOrderEnabled()
+              ? "※「注文を送信する」を押すと注文が送信されます。番号が呼ばれたら受取口にてお支払いください。"
+              : "※「注文を送信する」を押すと事前注文が送信されます。レジにてマイQRコード、または連携したリストバンドを提示してお支払いください。"}
+          </p>
+        </div>
+
+        <div className="flex flex-col gap-2 pt-2">
+          <Button
+            onClick={() => {
+              setIsCartOpen(false);
+              if (isPreOrderEnabled()) {
+                codOrderMutation.mutate();
+              } else {
+                preOrderMutation.mutate();
+              }
+            }}
+            disabled={preOrderMutation.isPending || codOrderMutation.isPending}
+            className="w-full h-12 border-thick border-border bg-primary text-primary-foreground text-base font-black uppercase rounded-none hover:bg-background hover:text-foreground transition-all"
+          >
+            {preOrderMutation.isPending || codOrderMutation.isPending ? "送信中..." : "注文を送信する"}
+          </Button>
+        </div>
+      </Modal>
 
       {/* 外部モッドの動的ヘッダーインジェクション */}
       {getActiveMods().map((mod: any) => {

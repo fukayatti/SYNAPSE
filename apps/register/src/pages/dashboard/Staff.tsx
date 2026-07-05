@@ -33,7 +33,7 @@ import {
 
 // スタッフモーダルとカスタムダイアログ
 import { StaffFormModal } from "@/components/staff/StaffFormModal";
-import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 
 function StaffManagementContent() {
   const { circleId } = useAuth();
@@ -157,7 +157,7 @@ function StaffManagementContent() {
         <Card className=" rounded-none bg-background shadow-none">
           <CardHeader className="p-4 pb-2 border-b-thin border-border bg-muted/20">
             <CardTitle className="flex items-center gap-2 text-xs uppercase font-bold">
-              <Clock className="h-4 w-4 text-green-500" />
+              <Clock className="h-4 w-4 text-success" />
               現在シフト中
             </CardTitle>
             <CardDescription className="text-[10px]">現在勤務中のスタッフ一覧</CardDescription>
@@ -200,7 +200,7 @@ function StaffManagementContent() {
                     key={staff.id}
                     className={`flex items-center justify-between p-3 text-xs font-mono ${
                       isOnShift(staff)
-                        ? "bg-green-50/10 border-l-thick border-l-green-500"
+                        ? "bg-success/10 border-l-thick border-l-success"
                         : ""
                     }`}
                   >
@@ -278,13 +278,13 @@ function StaffManagementContent() {
         />
       )}
 
-      {/* 削除確認カスタムダイアログ */}
-      <ConfirmationDialog
+      {/* 削除確認ダイアログ (破壊的操作のため ConfirmDialog を使用) */}
+      <ConfirmDialog
         isOpen={isDeleteConfirmOpen}
         title="[確認: スタッフの削除]"
         description={`本当にスタッフ「${staffToDelete?.name}」さんを削除しますか？この操作は取り消せません。`}
+        confirmLabel="削除する"
         onConfirm={() => staffToDelete && deleteStaff.mutate(staffToDelete.id)}
-        onDiscard={() => setIsDeleteConfirmOpen(false)}
         onCancel={() => setIsDeleteConfirmOpen(false)}
       />
     </DashboardLayout>

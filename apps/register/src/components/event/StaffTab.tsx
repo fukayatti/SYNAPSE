@@ -11,7 +11,7 @@ import { toast } from "sonner";
 
 // モーダル
 import { EventStaffFormModal } from "./EventStaffFormModal";
-import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 
 interface StaffTabProps {
   eventId: string;
@@ -179,23 +179,23 @@ export function StaffTab({
         onClose={() => setIsInviteModalOpen(false)}
       />
 
-      {/* 招待取消確認カスタムダイアログ */}
-      <ConfirmationDialog
+      {/* 招待取消確認ダイアログ (破壊的操作のため ConfirmDialog を使用) */}
+      <ConfirmDialog
         isOpen={isDeleteInviteConfirmOpen}
         title="[確認: スタッフ招待の取消]"
         description={`本当にこの招待リンクを取り消しますか？取り消されたリンクは無効になります。`}
+        confirmLabel="取り消す"
         onConfirm={() => inviteToDelete && deleteInviteMutation.mutate(inviteToDelete.id)}
-        onDiscard={() => setIsDeleteInviteConfirmOpen(false)}
         onCancel={() => setIsDeleteInviteConfirmOpen(false)}
       />
 
-      {/* スタッフ解除確認カスタムダイアログ */}
-      <ConfirmationDialog
+      {/* スタッフ解除確認ダイアログ (破壊的操作のため ConfirmDialog を使用) */}
+      <ConfirmDialog
         isOpen={isDeactivateConfirmOpen}
         title="[確認: スタッフ登録の解除]"
         description={`本当にスタッフ「${memberToDeactivate?.userName}」さんの登録を解除しますか？解除されるとダッシュボードにアクセスできなくなります。`}
+        confirmLabel="解除する"
         onConfirm={() => memberToDeactivate && deactivateStaffMutation.mutate(memberToDeactivate.id)}
-        onDiscard={() => setIsDeactivateConfirmOpen(false)}
         onCancel={() => setIsDeactivateConfirmOpen(false)}
       />
     </div>

@@ -354,7 +354,7 @@ export default function Header() {
                     setProfileModalOpen(false);
                     setSpacePopoverOpen(false);
                   }}
-                  className="p-2 border-[2.5px] border-border bg-background hover:bg-muted select-none cursor-pointer flex items-center justify-center relative h-9 w-9 rounded-none"
+                  className="p-2 border-thick border-border bg-background hover:bg-muted select-none cursor-pointer flex items-center justify-center relative h-9 w-9 rounded-none"
                 >
                   <Bell className="h-4 w-4" />
                   {notifications && notifications.length > 0 && (
@@ -427,7 +427,7 @@ export default function Header() {
                     setNotifPopoverOpen(false);
                     setProfileModalOpen(false);
                   }}
-                  className="flex items-center gap-2 bg-muted border-[2.5px] border-border px-3 py-1.5 font-mono text-[11px] font-bold hover:bg-muted/80 select-none cursor-pointer h-9 rounded-none"
+                  className="flex items-center gap-2 bg-muted border-thick border-border px-3 py-1.5 font-mono text-[11px] font-bold hover:bg-muted/80 select-none cursor-pointer h-9 rounded-none"
                 >
                   {pathname.startsWith("/admin") && <Shield className="h-3.5 w-3.5" />}
                   {pathname.startsWith("/event") && <Calendar className="h-3.5 w-3.5" />}
@@ -506,7 +506,7 @@ export default function Header() {
                   setNotifPopoverOpen(false);
                   setSpacePopoverOpen(false);
                 }}
-                className="flex items-center gap-2 bg-muted border-[2.5px] border-border px-3 py-1.5 font-mono text-[11px] font-bold hover:bg-muted/80 select-none cursor-pointer h-9 rounded-none"
+                className="flex items-center gap-2 bg-muted border-thick border-border px-3 py-1.5 font-mono text-[11px] font-bold hover:bg-muted/80 select-none cursor-pointer h-9 rounded-none"
               >
                 {me?.image ? (
                   <img src={me.image} alt="Avatar" className="w-5 h-5 rounded-none border border-border object-cover shrink-0" />

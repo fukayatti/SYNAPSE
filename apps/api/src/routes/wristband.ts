@@ -1,10 +1,11 @@
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
-import { db, wristband, eventUser, event, getEnv } from "@fesflow/db";
+import { db, wristband, eventUser, event } from "@fesflow/db";
 import { eq, and, desc } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { auth } from "@fesflow/auth";
+import { hasPermission } from "../utils/auth";
 
 
 const wristbandRoutes = new Hono();
@@ -33,37 +34,8 @@ wristbandRoutes.get("/lookup/:code", async (c) => {
   const eventsList = await db.select().from(event).limit(1);
   const defaultEventId = eventsList[0]?.id || "evt_default";
 
-  // 固定の管理者/テスト用リストバンドの自動シード補完
-  if (code.startsWith("wb_admin") || code.startsWith("wb_test")) {
-    const existingWb = await db
-      .select()
-      .from(wristband)
-      .where(eq(wristband.id, code));
-
-    if (existingWb.length === 0) {
-      const targetUserId = code.startsWith("wb_admin") ? "usr_admin" : `usr_${code}`;
-      const existingUser = await db
-        .select()
-        .from(eventUser)
-        .where(eq(eventUser.id, targetUserId));
-
-      if (existingUser.length === 0) {
-        await db.insert(eventUser).values({
-          id: targetUserId,
-          eventId: defaultEventId,
-          displayId: code.startsWith("wb_admin") ? 999 : Math.floor(100 + Math.random() * 800),
-          status: "available",
-        });
-      }
-
-      await db.insert(wristband).values({
-        id: code,
-        userId: targetUserId,
-        status: "active",
-        assignedAt: new Date(),
-      });
-    }
-  }
+  // 2026-07-05: 開発用の固定管理者/テストバンド (wb_admin*/wb_test*) の自動シードを撤去。
+  // 本番に残るとハードコードされたバックドア (誰でも管理者バンドを生成可能) になるため。
 
   // 1. リストバンドIDとして検索
   const wristbands = await db
@@ -88,43 +60,22 @@ wristbandRoutes.get("/lookup/:code", async (c) => {
   }
 
   // 2. ユーザーID/メールアドレスとして直接検索 (スマホ画面QR等のフォールバック)
-  let users = await db
+  const users = await db
     .select()
     .from(eventUser)
     .where(eq(eventUser.id, code));
 
-  // 管理者ID・メールアドレスの場合の自動補完・同等扱い
-  const adminEmail = getEnv().INITIAL_SUPER_ADMIN_EMAIL || "me@fukayatti0.dev";
-  if (users.length === 0 && (code === adminEmail || code === "lTkBEJtn1G88NFZ2bsLdATuSrjjLuaTG" || code.startsWith("usr_"))) {
-    const newDisplayId = code === adminEmail || code === "lTkBEJtn1G88NFZ2bsLdATuSrjjLuaTG" ? 999 : Math.floor(100 + Math.random() * 900);
-    await db.insert(eventUser).values({
-      id: code,
-      eventId: defaultEventId,
-      displayId: newDisplayId,
-      status: "available",
-    });
-    users = await db
-      .select()
-      .from(eventUser)
-      .where(eq(eventUser.id, code));
-  }
+  // 2026-07-05: 管理者メール/固定トークン (lTk...) を管理者バンドとして特別扱いする
+  // バックドアを撤去。未知コードは下の汎用フォールバックで通常ユーザーとして扱う。
 
   if (users.length > 0) {
     const user = users[0]!;
     // 最新のアクティブリストバンドを取得
-    let activeWristbands = await db
+    const activeWristbands = await db
       .select()
       .from(wristband)
       .where(and(eq(wristband.userId, user.id), eq(wristband.status, "active")))
       .orderBy(desc(wristband.assignedAt));
-
-    // 管理者の場合は wb_admin_001 を固定アクティブとして紐付けフォールバック
-    if (activeWristbands.length === 0 && (code === adminEmail || code === "lTkBEJtn1G88NFZ2bsLdATuSrjjLuaTG" || code === "usr_admin")) {
-      const adminWb = await db.select().from(wristband).where(eq(wristband.id, "wb_admin_001"));
-      if (adminWb.length > 0) {
-        activeWristbands = adminWb;
-      }
-    }
 
     return c.json({
       user,
@@ -190,6 +141,43 @@ wristbandRoutes.post(
       });
     }
 
+    // 2026-07-05: リストバンド乗っ取り対策。
+    // 「既にアクティブなバンドを持つユーザーへの付替え」または「他ユーザーで
+    // アクティブなバンドの再割当」はスタッフ権限 (対象イベントの member:write) を
+    // 要求する。新規ユーザーの初回バインド (来場者セルフサービス) は従来どおり
+    // 認証不要で許可する。これにより、被害者の userId や有効なバンドコードを
+    // 知っただけの第三者が既存の紐付けを奪う経路を塞ぐ。
+    const targetActive = await db
+      .select()
+      .from(wristband)
+      .where(and(eq(wristband.userId, userId), eq(wristband.status, "active")));
+    const bandNow = await db
+      .select()
+      .from(wristband)
+      .where(eq(wristband.id, wristbandId));
+    const replacingUsersActiveBand = targetActive.some((w) => w.id !== wristbandId);
+    const bandOwnedByOther =
+      bandNow.length > 0 &&
+      bandNow[0]!.status === "active" &&
+      bandNow[0]!.userId !== userId;
+    if (replacingUsersActiveBand || bandOwnedByOther) {
+      let evId: string | undefined = users[0]?.eventId;
+      if (!evId && bandNow.length > 0) {
+        const otherUser = await db
+          .select()
+          .from(eventUser)
+          .where(eq(eventUser.id, bandNow[0]!.userId));
+        evId = otherUser[0]?.eventId;
+      }
+      const allowed = await hasPermission(c, null, "member:write", evId);
+      if (!allowed) {
+        return c.json(
+          { error: "このリストバンドの再割り当てにはスタッフ権限が必要です" },
+          403
+        );
+      }
+    }
+
     // 既存のアクティブなリストバンドがあれば無効化 (replaced)
     await db
       .update(wristband)
@@ -233,6 +221,18 @@ wristbandRoutes.post(
   "/:id/report-lost",
   async (c) => {
     const id = c.req.param("id");
+
+    // 2026-07-05: 存在確認とアクティブ状態のみロック可能に限定する。
+    // (ベアラーモデルのため所有証明までは行えないが、既に無効化済みのバンドを
+    //  再度 lost 化する無意味な操作・存在しないIDへの操作を弾く。恒久的には
+    //  紛失報告を本人セッション or スタッフ権限で保護する再設計が望ましい。)
+    const wbs = await db.select().from(wristband).where(eq(wristband.id, id));
+    if (wbs.length === 0) {
+      return c.json({ error: "リストバンドが見つかりません" }, 404);
+    }
+    if (wbs[0]!.status !== "active") {
+      return c.json({ error: "このリストバンドは既に無効です" }, 400);
+    }
 
     await db
       .update(wristband)

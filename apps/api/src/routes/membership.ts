@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import { db, membership, inviteToken, circle, event, user, getEnv, notification } from "@fesflow/db";
-import { eq, and, inArray, gt, isNull } from "drizzle-orm";
+import { eq, and, inArray, gt, isNull, lt } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import bcrypt from "bcryptjs";
 import { auth } from "@fesflow/auth";
@@ -213,36 +213,17 @@ membershipRoutes.get("/roles", (c) => {
 });
 
 // 自分のメンバーシップ一覧取得
+// 2026-07-05: 無認証で任意の userEmail の所属一覧(PIN含む)を閲覧でき、かつ
+// INITIAL_SUPER_ADMIN_EMAIL 一致時に super_admin を自動生成する副作用があった。
+// セッション必須化し、対象は必ずセッション本人のメールに固定する。
+// super_admin 自動生成は getAdminSession 側で既にセッション必須で行われているため、
+// ここでの自動生成ロジックは完全に削除する。
 membershipRoutes.get("/my", async (c) => {
-  const userEmail = c.req.query("userEmail");
-
-  if (!userEmail) {
-    return c.json({ error: "userEmailが必要です" }, 400);
+  const session = await auth.api.getSession({ headers: c.req.raw.headers });
+  if (!session || !session.user) {
+    return c.json({ error: "認証されていません" }, 401);
   }
-
-  const initialAdminEmail = getEnv().INITIAL_SUPER_ADMIN_EMAIL;
-  if (initialAdminEmail && userEmail.toLowerCase() === initialAdminEmail.toLowerCase()) {
-    const existingAdmin = await db
-      .select()
-      .from(membership)
-      .where(
-        and(
-          eq(membership.userEmail, userEmail.toLowerCase()),
-          eq(membership.role, "super_admin"),
-          eq(membership.isActive, true)
-        )
-      );
-
-    if (existingAdmin.length === 0) {
-      await db.insert(membership).values({
-        id: nanoid(),
-        userEmail: userEmail.toLowerCase(),
-        userName: "Super Admin",
-        role: "super_admin",
-        isActive: true,
-      });
-    }
-  }
+  const userEmail = session.user.email;
 
   const memberships = await db
     .select()
@@ -294,27 +275,60 @@ membershipRoutes.get("/my", async (c) => {
 });
 
 // サークルのメンバー一覧取得
+// 2026-07-05: 無認証で全カラム(PINハッシュ+メール含む)を返していた脆弱性を修正。
+// セッション必須化し、対象サークルのメンバー閲覧権限(member:read)を要求したうえで、
+// 返却カラムから pin を明示的に除外する。
 membershipRoutes.get("/circle/:circleId", async (c) => {
   const circleId = c.req.param("circleId");
+
+  const session = await auth.api.getSession({ headers: c.req.raw.headers });
+  if (!session || !session.user) {
+    return c.json({ error: "認証されていません" }, 401);
+  }
+
+  const circles = await db.select().from(circle).where(eq(circle.id, circleId));
+  if (circles.length === 0) {
+    return c.json({ error: "サークルが見つかりません" }, 404);
+  }
+
+  const err = await checkMemberWritePermission(c, circleId, "viewer", undefined, circles[0]!.eventId);
+  if (err) return c.json({ error: err.error }, err.status);
 
   const memberships = await db
     .select()
     .from(membership)
     .where(eq(membership.circleId, circleId));
 
-  return c.json(memberships);
+  // pin(ハッシュ)を返却対象から除外する
+  const sanitized = memberships.map(({ pin, ...rest }) => rest);
+
+  return c.json(sanitized);
 });
 
 // イベントのメンバー一覧取得
+// 2026-07-05: 無認証で全カラム(PINハッシュ+メール含む)を返していた脆弱性を修正。
+// セッション必須化し、対象イベントのメンバー閲覧権限(member:read)を要求したうえで、
+// 返却カラムから pin を明示的に除外する。
 membershipRoutes.get("/event/:eventId", async (c) => {
   const eventId = c.req.param("eventId");
+
+  const session = await auth.api.getSession({ headers: c.req.raw.headers });
+  if (!session || !session.user) {
+    return c.json({ error: "認証されていません" }, 401);
+  }
+
+  const err = await checkMemberWritePermission(c, null, "viewer", undefined, eventId);
+  if (err) return c.json({ error: err.error }, err.status);
 
   const memberships = await db
     .select()
     .from(membership)
     .where(eq(membership.eventId, eventId));
 
-  return c.json(memberships);
+  // pin(ハッシュ)を返却対象から除外する
+  const sanitized = memberships.map(({ pin, ...rest }) => rest);
+
+  return c.json(sanitized);
 });
 
 // 権限チェック
@@ -558,19 +572,31 @@ membershipRoutes.post(
 );
 
 // 招待を受け入れ
+// 2026-07-05: (1) セッション不要で任意の userEmail としてメンバーシップを
+//   作成できた（なりすまし/権限昇格チェーン）ため、セッション必須化し、
+//   メンバーシップの userEmail は必ずセッションのメールを使う。
+//   targetEmail 指定付きトークンは、そのメールのセッションでしか使えないようにする。
+// (2) usedCount 更新が「読んで+1して書く」楽観更新でガードが無く、
+//   同時アクセスで maxUses を超過しうる(TOCTOU)ため、メンバーシップ作成前に
+//   `WHERE used_count < max_uses` 付き条件UPDATEを行い、更新0件なら中断する。
 membershipRoutes.post(
   "/invite/accept",
   zValidator(
     "json",
     z.object({
       token: z.string(),
-      userEmail: z.string(),
       userName: z.string(),
       pin: z.string().optional(),
     })
   ),
   async (c) => {
     const input = c.req.valid("json");
+
+    const session = await auth.api.getSession({ headers: c.req.raw.headers });
+    if (!session || !session.user) {
+      return c.json({ error: "認証されていません" }, 401);
+    }
+    const userEmail = session.user.email.toLowerCase();
 
     // トークンを検索
     const tokens = await db
@@ -589,7 +615,12 @@ membershipRoutes.post(
 
     const foundToken = tokens[0]!;
 
-    // 使用回数チェック
+    // targetEmail が指定されたトークンは、そのメール宛のセッションでしか使えない
+    if (foundToken.targetEmail && foundToken.targetEmail.toLowerCase() !== userEmail) {
+      return c.json({ error: "この招待は別のメールアドレス宛です" }, 403);
+    }
+
+    // 使用回数チェック（事前チェック。確定は下の条件付きUPDATEで行う）
     if (
       foundToken.maxUses !== null &&
       foundToken.usedCount >= foundToken.maxUses
@@ -603,7 +634,7 @@ membershipRoutes.post(
       .from(membership)
       .where(
         and(
-          eq(membership.userEmail, input.userEmail),
+          eq(membership.userEmail, userEmail),
           foundToken.circleId
             ? eq(membership.circleId, foundToken.circleId)
             : foundToken.eventId
@@ -614,6 +645,27 @@ membershipRoutes.post(
 
     if (existingMembership.length > 0) {
       return c.json({ error: "既にメンバーとして登録されています" }, 400);
+    }
+
+    // トークンの使用回数を条件付きで更新する（TOCTOU対策）。
+    // D1 は対話的トランザクション(BEGIN)非対応のため、
+    // `used_count < max_uses` (または上限なし) を満たす場合のみ更新されるようにし、
+    // 更新0件なら他リクエストと競合して上限に達したとみなし中断する。
+    const updateResult = await db
+      .update(inviteToken)
+      .set({ usedCount: foundToken.usedCount + 1 })
+      .where(
+        and(
+          eq(inviteToken.id, foundToken.id),
+          foundToken.maxUses !== null
+            ? lt(inviteToken.usedCount, foundToken.maxUses)
+            : undefined
+        )
+      );
+
+    const changes = (updateResult as unknown as { meta?: { changes?: number } })?.meta?.changes ?? 0;
+    if (changes === 0) {
+      return c.json({ error: "招待トークンの使用回数上限に達しました" }, 400);
     }
 
     // PINをハッシュ化
@@ -627,7 +679,7 @@ membershipRoutes.post(
     const membershipId = nanoid();
     await db.insert(membership).values({
       id: membershipId,
-      userEmail: input.userEmail.toLowerCase(),
+      userEmail,
       userName: input.userName,
       circleId: foundToken.circleId,
       eventId: foundToken.eventId,
@@ -636,28 +688,29 @@ membershipRoutes.post(
       isActive: true,
     });
 
-    // トークンの使用回数を更新
-    await db
-      .update(inviteToken)
-      .set({ usedCount: foundToken.usedCount + 1 })
-      .where(eq(inviteToken.id, foundToken.id));
-
     return c.json({ membershipId }, 201);
   }
 );
 
 // 招待トークン一覧取得
+// 2026-07-05: 無認可で生トークン(token)を含む一覧を誰でも取得できた
+// （権限昇格チェーンの起点になりうる）ため、メンバー管理権限を要求し、
+// レスポンスから生の token を除外する。
 membershipRoutes.get("/invite/list", async (c) => {
   const circleId = c.req.query("circleId");
   const eventId = c.req.query("eventId");
 
   let query;
   if (circleId) {
+    const err = await checkMemberWritePermission(c, circleId, "viewer", undefined, eventId || undefined);
+    if (err) return c.json({ error: err.error }, err.status);
     query = db
       .select()
       .from(inviteToken)
       .where(eq(inviteToken.circleId, circleId));
   } else if (eventId) {
+    const err = await checkMemberWritePermission(c, null, "viewer", undefined, eventId);
+    if (err) return c.json({ error: err.error }, err.status);
     query = db
       .select()
       .from(inviteToken)
@@ -671,7 +724,21 @@ membershipRoutes.get("/invite/list", async (c) => {
   // 期限切れのトークンを除外
   const activeTokens = tokens.filter((t) => new Date(t.expiresAt) > new Date());
 
-  return c.json(activeTokens);
+  // 生トークンの値をレスポンスから除外し、一覧に必要な項目のみ返す
+  const sanitized = activeTokens.map((t) => ({
+    id: t.id,
+    circleId: t.circleId,
+    eventId: t.eventId,
+    role: t.role,
+    expiresAt: t.expiresAt,
+    usedCount: t.usedCount,
+    maxUses: t.maxUses,
+    targetEmail: t.targetEmail,
+    createdBy: t.createdBy,
+    createdAt: t.createdAt,
+  }));
+
+  return c.json(sanitized);
 });
 
 // 招待トークン削除
@@ -909,7 +976,12 @@ membershipRoutes.post(
 
       const foundToken = tokens[0]!;
 
-      // 使用上限チェック
+      // 2026-07-05: targetEmail 指定付きトークンは、そのメール宛のセッションでしか使えない
+      if (foundToken.targetEmail && foundToken.targetEmail.toLowerCase() !== email) {
+        return c.json({ error: "この招待は別のメールアドレス宛です" }, 403);
+      }
+
+      // 使用上限チェック（事前チェック。確定は下の条件付きUPDATEで行う）
       if (foundToken.maxUses !== null && foundToken.usedCount >= foundToken.maxUses) {
         return c.json({ error: "招待の上限に達しています" }, 400);
       }
@@ -930,6 +1002,27 @@ membershipRoutes.post(
         return c.json({ error: "既にメンバーとして登録されています" }, 400);
       }
 
+      // 2026-07-05: トークンの使用回数を条件付きで更新する（TOCTOU対策）。
+      // D1 は対話的トランザクション非対応のため、`used_count < max_uses` を
+      // 満たす場合のみ更新されるようにし、更新0件なら他リクエストと競合して
+      // 上限に達したとみなし中断する。メンバーシップ作成より前に確定させる。
+      const updateResult = await db
+        .update(inviteToken)
+        .set({ usedCount: foundToken.usedCount + 1 })
+        .where(
+          and(
+            eq(inviteToken.id, foundToken.id),
+            foundToken.maxUses !== null
+              ? lt(inviteToken.usedCount, foundToken.maxUses)
+              : undefined
+          )
+        );
+
+      const changes = (updateResult as unknown as { meta?: { changes?: number } })?.meta?.changes ?? 0;
+      if (changes === 0) {
+        return c.json({ error: "招待の上限に達しています" }, 400);
+      }
+
       // PINハッシュ化
       let pinHash: string | null = null;
       if (input.pin) {
@@ -948,11 +1041,7 @@ membershipRoutes.post(
         isActive: true,
       });
 
-      // トークン使用回数増加
-      await db
-        .update(inviteToken)
-        .set({ usedCount: foundToken.usedCount + 1 })
-        .where(eq(inviteToken.id, foundToken.id));
+      // (使用回数は上でメンバーシップ作成前に確定更新済みのため、ここでは何もしない)
     }
 
     // 通知を既読（回答済）にする

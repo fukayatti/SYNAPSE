@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
+import { ConfirmDialog } from "./ui/ConfirmDialog";
 import { accountApi, uploadImage } from "@/lib/api";
 import {
   useAuth,
@@ -227,41 +228,25 @@ export default function AccountModal({
             ログアウト
           </Button>
 
-          {/* 危険な操作: アカウント削除 */}
-          {confirmDelete ? (
-            <div className="border-thin border-destructive p-3 space-y-2 bg-destructive/5">
-              <p className="text-[11px] font-bold text-destructive">
-                本当に削除しますか？すべての所属・権限が失われ、元に戻せません。
-              </p>
-              <div className="flex gap-2">
-                <Button
-                  variant="destructive"
-                  className="flex-1 h-9 rounded-none uppercase font-black text-xs"
-                  onClick={() => deleteMutation.mutate()}
-                  disabled={deleteMutation.isPending}
-                >
-                  {deleteMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "完全に削除する"}
-                </Button>
-                <Button
-                  variant="outline"
-                  className="flex-1 h-9 rounded-none uppercase font-black text-xs"
-                  onClick={() => setConfirmDelete(false)}
-                >
-                  キャンセル
-                </Button>
-              </div>
-            </div>
-          ) : (
-            <button
-              onClick={() => setConfirmDelete(true)}
-              className="w-full flex items-center justify-center gap-2 text-[11px] text-muted-foreground hover:text-destructive py-2 cursor-pointer"
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-              アカウントを削除
-            </button>
-          )}
+          {/* 危険な操作: アカウント削除 (破壊的操作のため独自インラインUIをやめ ConfirmDialog に統一) */}
+          <button
+            onClick={() => setConfirmDelete(true)}
+            className="w-full flex items-center justify-center gap-2 text-[11px] text-muted-foreground hover:text-destructive py-2 cursor-pointer"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+            アカウントを削除
+          </button>
         </div>
       </div>
+
+      <ConfirmDialog
+        isOpen={confirmDelete}
+        title="[確認: アカウントの削除]"
+        description="本当に削除しますか？すべての所属・権限が失われ、元に戻せません。"
+        confirmLabel="完全に削除する"
+        onConfirm={() => deleteMutation.mutate()}
+        onCancel={() => setConfirmDelete(false)}
+      />
     </div>
   );
 }

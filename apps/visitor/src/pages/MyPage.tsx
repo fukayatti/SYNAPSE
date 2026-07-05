@@ -10,6 +10,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Modal } from "@/components/ui/Modal";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { toast } from "sonner";
 import { useRouter } from "@/lib/next-navigation";
 import {
@@ -20,7 +22,6 @@ import {
   ShieldAlert,
   QrCode,
   Link as LinkIcon,
-  X,
 } from "lucide-react";
 
 import { useAuth } from "@/hooks/useCircleAuth";
@@ -40,6 +41,7 @@ export default function MyOrderPage() {
   const { userId: authUserId, isAuthenticated, isLoading: authLoading } = useAuth();
   const [isRegisterOpen, setIsRegisterOpen] = useState(false);
   const [newWristbandId, setNewWristbandId] = useState("");
+  const [isReportLostConfirmOpen, setIsReportLostConfirmOpen] = useState(false);
   const [origin, setOrigin] = useState("");
   const [modHooks, setModHooks] = useState<{ id: string; hook: any }[]>([]);
   const [directOrders, setDirectOrders] = useState<any[]>([]);
@@ -139,19 +141,6 @@ export default function MyOrderPage() {
   });
 
 
-  // 初期ロード時、アクティブなリストバンドがなければデフォルトで wb_admin_001 を自動紐付け
-  const [autoBound, setAutoBound] = useState(false);
-  useEffect(() => {
-    if (userStatus && !userStatus.wristband && !autoBound && userId) {
-      setAutoBound(true);
-      wristbandApi.register(userId, "wb_admin_001").then(() => {
-        queryClient.invalidateQueries({ queryKey: ["userWristbandStatus", userId] });
-      });
-    }
-  }, [userStatus, autoBound, userId, queryClient]);
-
-
-
   // リストバンド新規登録・再発行ミューテーション
   const registerMutation = useMutation({
     mutationFn: async (wbId: string) => {
@@ -176,9 +165,11 @@ export default function MyOrderPage() {
     onSuccess: () => {
       toast.warning("旧リストバンドを無効化（ロック）しました。スマホQRはそのままご利用いただけます。");
       queryClient.invalidateQueries({ queryKey: ["userWristbandStatus", userId] });
+      setIsReportLostConfirmOpen(false);
     },
     onError: (error: any) => {
       toast.error(error.message || "紛失報告に失敗しました");
+      setIsReportLostConfirmOpen(false);
     },
   });
 
@@ -204,7 +195,7 @@ export default function MyOrderPage() {
   return (
     <div className="max-w-3xl mx-auto p-3 sm:p-4 space-y-4 sm:space-y-6 pb-24 font-mono">
       {eventData?.logoUrl && (
-        <div className="border-[3px] border-border p-2 bg-background mb-4">
+        <div className="border-thick border-border p-2 bg-background mb-4">
           <img
             src={eventData.logoUrl}
             alt={eventData.eventName}
@@ -248,20 +239,16 @@ export default function MyOrderPage() {
           <div className="flex gap-2 flex-wrap">
             <Button
               onClick={() => setIsRegisterOpen(true)}
-              className="h-9 border-[2px] border-border bg-background text-foreground text-xs font-bold uppercase rounded-none hover:bg-primary hover:text-primary-foreground"
+              className="h-9 border-thick border-border bg-background text-foreground text-xs font-bold uppercase rounded-none hover:bg-primary hover:text-primary-foreground"
             >
               <LinkIcon className="mr-1 h-3.5 w-3.5" />
               {activeWristband ? "再発行・付け替え" : "バンドを登録"}
             </Button>
             {activeWristband && (
               <Button
-                onClick={() => {
-                  if (confirm("失くしたリストバンドを即時ロック・無効化しますか？")) {
-                    reportLostMutation.mutate(activeWristband.id);
-                  }
-                }}
+                onClick={() => setIsReportLostConfirmOpen(true)}
                 disabled={reportLostMutation.isPending}
-                className="h-9 border-[2px] border-border bg-error text-primary-foreground text-xs font-bold uppercase rounded-none hover:bg-primary"
+                className="h-9 border-thick border-border bg-error text-primary-foreground text-xs font-bold uppercase rounded-none hover:bg-primary"
               >
                 <ShieldAlert className="mr-1 h-3.5 w-3.5" />
                 紛失報告 (ロック)
@@ -271,7 +258,7 @@ export default function MyOrderPage() {
         </div>
 
         {!activeWristband && (
-          <div className="bg-background border-[2px] border-border p-3 text-xs flex items-start gap-2">
+          <div className="bg-background border-thick border-border p-3 text-xs flex items-start gap-2">
             <AlertTriangle className="h-5 w-5 text-foreground shrink-0 mt-0.5" />
             <div>
               <span className="font-bold">💡 スマホのままで大丈夫です！</span>
@@ -284,42 +271,50 @@ export default function MyOrderPage() {
       </div>
 
       {/* リストバンド紐付けモーダル */}
-      {isRegisterOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/80 p-4">
-          <div className="w-full max-w-md border-heavy border-border bg-background p-6 space-y-4">
-            <div className="flex justify-between items-center border-b-thick border-border pb-3">
-              <h3 className="font-black text-lg uppercase">[リストバンド紐付け]</h3>
-              <button
-                onClick={() => setIsRegisterOpen(false)}
-                className="border-[2px] border-border p-1 hover:bg-primary hover:text-primary-foreground"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-            <p className="text-xs text-gray-600">
-              手元の物理リストバンドのQRコードをスキャンするか、IDを入力してください。
-            </p>
-            <Input
-              type="text"
-              placeholder="リストバンドIDを入力 (例: wb_12345)"
-              className="h-12 border-thick border-border text-base rounded-none"
-              value={newWristbandId}
-              onChange={(e) => setNewWristbandId(e.target.value)}
-            />
-            <Button
-              onClick={() => {
-                if (newWristbandId.trim()) {
-                  registerMutation.mutate(newWristbandId.trim());
-                }
-              }}
-              disabled={registerMutation.isPending || !newWristbandId.trim()}
-              className="w-full h-12 border-thick border-border bg-primary text-primary-foreground text-base font-bold uppercase rounded-none hover:bg-background hover:text-foreground"
-            >
-              紐付けを完了する
-            </Button>
-          </div>
-        </div>
-      )}
+      <Modal
+        isOpen={isRegisterOpen}
+        onClose={() => setIsRegisterOpen(false)}
+        title="[リストバンド紐付け]"
+        maxWidth="md"
+      >
+        <p className="text-xs text-gray-600">
+          手元の物理リストバンドのQRコードをスキャンするか、IDを入力してください。
+        </p>
+        <Input
+          type="text"
+          placeholder="リストバンドIDを入力 (例: wb_12345)"
+          className="h-12 border-thick border-border text-base rounded-none"
+          value={newWristbandId}
+          onChange={(e) => setNewWristbandId(e.target.value)}
+        />
+        <Button
+          onClick={() => {
+            if (newWristbandId.trim()) {
+              registerMutation.mutate(newWristbandId.trim());
+            }
+          }}
+          disabled={registerMutation.isPending || !newWristbandId.trim()}
+          className="w-full h-12 border-thick border-border bg-primary text-primary-foreground text-base font-bold uppercase rounded-none hover:bg-background hover:text-foreground"
+        >
+          紐付けを完了する
+        </Button>
+      </Modal>
+
+      {/* リストバンド紛失報告 確認ダイアログ */}
+      <ConfirmDialog
+        isOpen={isReportLostConfirmOpen}
+        title="[リストバンド紛失報告]"
+        description="失くしたリストバンドを即時ロック・無効化しますか？この操作は取り消せません。"
+        confirmLabel="ロックする"
+        cancelLabel="キャンセル"
+        destructive
+        onConfirm={() => {
+          if (activeWristband) {
+            reportLostMutation.mutate(activeWristband.id);
+          }
+        }}
+        onCancel={() => setIsReportLostConfirmOpen(false)}
+      />
 
       {/* デジタルQRカード */}
       <Card className="border-heavy border-border bg-primary text-primary-foreground rounded-none p-4 sm:p-6 text-center shadow-none">
@@ -329,7 +324,7 @@ export default function MyOrderPage() {
           </div>
         </CardHeader>
         <CardContent className="p-0 space-y-4">
-          <div className="bg-background p-3 sm:p-4 inline-block border-[3px] border-background mx-auto">
+          <div className="bg-background p-3 sm:p-4 inline-block border-thick border-background mx-auto">
             <img
               src={qrImageUrl}
               alt="My Digital QR"
@@ -380,7 +375,7 @@ export default function MyOrderPage() {
                 <div className="flex justify-between items-start border-b-[2px] border-border pb-2">
                   <div className="flex items-center gap-2">
                     {po.status === "pending" ? (
-                      <span className="bg-warning text-foreground border-[1.5px] border-border px-2 py-0.5 text-xs font-black uppercase flex items-center gap-1">
+                      <span className="bg-warning text-foreground border-thin border-border px-2 py-0.5 text-xs font-black uppercase flex items-center gap-1">
                         <Clock className="h-3.5 w-3.5" /> 店頭未受取
                       </span>
                     ) : (
@@ -397,7 +392,7 @@ export default function MyOrderPage() {
                   </span>
                 </div>
 
-                <div className="bg-muted p-3 border-[2px] border-border">
+                <div className="bg-muted p-3 border-thick border-border">
                   <ul className="divide-y divide-border/10 text-sm">
                     {po.items.map((item) => (
                       <li key={item.id} className="py-1 flex justify-between">

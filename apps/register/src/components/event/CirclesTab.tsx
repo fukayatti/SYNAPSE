@@ -11,7 +11,7 @@ import { toast } from "sonner";
 
 // モーダル
 import { CircleFormModal } from "./CircleFormModal";
-import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 
 interface CirclesTabProps {
   eventId: string;
@@ -172,13 +172,13 @@ export function CirclesTab({
         circle={selectedCircle}
       />
 
-      {/* 削除確認カスタムダイアログ */}
-      <ConfirmationDialog
+      {/* 削除確認ダイアログ (破壊的操作のため ConfirmDialog を使用) */}
+      <ConfirmDialog
         isOpen={isDeleteOpen}
         title="[確認: サークルの削除]"
         description={`本当にサークル「${circleToDelete?.name}」を削除してよろしいですか？この操作はサークルに紐づくメニューや売上データもすべて削除されます。`}
+        confirmLabel="削除する"
         onConfirm={() => circleToDelete && deleteCircleMutation.mutate(circleToDelete.id)}
-        onDiscard={() => setIsDeleteOpen(false)}
         onCancel={() => setIsDeleteOpen(false)}
       />
     </div>

@@ -16,7 +16,7 @@ import { Hono, type Context } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import { db, user, membership, notification } from "@fesflow/db";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { auth } from "@fesflow/auth";
 
 const accountRoutes = new Hono();
@@ -133,6 +133,10 @@ accountRoutes.patch(
 );
 
 // 権限(所属)を1件削除 = 自分がそのスペースから抜ける
+// 2026-07-05: circle_manager / event_manager が自分の所属を退出すると、
+// そのサークル/イベントの管理者が誰もいなくなる(オーナー不在化)おそれがあった。
+// 同じ circleId/eventId に他にアクティブな同ロールの管理者がいない場合は退出を拒否し、
+// 先にオーナー権限を他のメンバーに譲渡(ロール変更)するよう促す。
 accountRoutes.delete("/membership/:id", async (c) => {
   const self = await getSelf(c);
   if (!self) return c.json({ error: "認証されていません" }, 401);
@@ -144,6 +148,44 @@ accountRoutes.delete("/membership/:id", async (c) => {
   // 本人の所属のみ削除可 (他人の権限は管理者APIから)
   if (m.userEmail.toLowerCase() !== self.email) {
     return c.json({ error: "この権限を削除する権限がありません" }, 403);
+  }
+
+  if (m.role === "circle_manager" && m.circleId) {
+    const otherManagers = await db
+      .select()
+      .from(membership)
+      .where(
+        and(
+          eq(membership.circleId, m.circleId),
+          eq(membership.role, "circle_manager"),
+          eq(membership.isActive, true)
+        )
+      );
+    if (otherManagers.filter((om) => om.id !== m.id).length === 0) {
+      return c.json(
+        { error: "オーナー権限を他のメンバーに譲渡してから退出してください" },
+        403
+      );
+    }
+  }
+
+  if (m.role === "event_manager" && m.eventId) {
+    const otherEventManagers = await db
+      .select()
+      .from(membership)
+      .where(
+        and(
+          eq(membership.eventId, m.eventId),
+          eq(membership.role, "event_manager"),
+          eq(membership.isActive, true)
+        )
+      );
+    if (otherEventManagers.filter((om) => om.id !== m.id).length === 0) {
+      return c.json(
+        { error: "オーナー権限を他のメンバーに譲渡してから退出してください" },
+        403
+      );
+    }
   }
 
   await db.delete(membership).where(eq(membership.id, id));

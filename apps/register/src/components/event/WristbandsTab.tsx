@@ -142,8 +142,8 @@ export function WristbandsTab({
                       状態:
                       <Badge variant="default" className={`rounded-none text-[8px] font-mono border-thick border-border uppercase ${
                         lookupResult.wristband.status === "active"
-                          ? "bg-green-50/10 text-green-700 border-green-500"
-                          : "bg-red-50/10 text-red-700 border-red-500"
+                          ? "bg-success/10 text-success border-success"
+                          : "bg-error/10 text-error border-error"
                       }`}>
                         {lookupResult.wristband.status}
                       </Badge>

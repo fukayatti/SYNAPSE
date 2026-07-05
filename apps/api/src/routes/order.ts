@@ -7,16 +7,28 @@ import {
   orderItem,
   orderItemTopping,
   menu,
+  menuTopping,
   topping,
   userStamp,
   circle,
   eventUser,
 } from "@fesflow/db";
-import { eq, and, desc, sql, inArray } from "drizzle-orm";
+import { eq, and, desc, sql, inArray, gte } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { hasPermission } from "../utils/auth";
 
 const orderRoutes = new Hono();
+
+// 2026-07-05: 注文ステータスの許可された遷移表。
+// completed/cancelled は終端状態でありそこからの遷移は禁止する。
+// 任意の非終端状態から cancelled へは遷移可能。
+const ORDER_STATUS_TRANSITIONS: Record<string, string[]> = {
+  pending: ["preparing", "ready", "completed", "cancelled"],
+  preparing: ["ready", "completed", "cancelled"],
+  ready: ["completed", "cancelled"],
+  completed: [],
+  cancelled: [],
+};
 
 // 注文番号を生成（サークル内で連番）
 async function generateOrderNumber(circleId: string): Promise<string> {
@@ -59,6 +71,12 @@ orderRoutes.get("/", async (c) => {
 
   if (!circleId) {
     return c.json({ error: "circleIdが必要です" }, 400);
+  }
+
+  // 2026-07-05: 一覧は他サークルの注文状況・売上動向が漏洩しうるためスタッフ権限必須にする
+  // (register の Sales/Backyard/EventDashboard のみが利用しており来場者導線では使われていない)
+  if (!(await hasPermission(c, circleId, "order:read"))) {
+    return c.json({ error: "権限がありません" }, 403);
   }
 
   let query = db
@@ -143,8 +161,13 @@ orderRoutes.get("/:id", async (c) => {
     };
   });
 
+  // 2026-07-05: このエンドポイントは来場者(apps/visitor の MyPage)が自分の注文IDで
+  // ポーリングするため無認可のまま維持するが、cashierId 等スタッフ向けの内部情報は
+  // 最小化のため除外する（注文IDを知る者に限定される設計を前提に情報漏洩を抑える）。
+  const { cashierId: _cashierId, ...safeOrder } = foundOrder;
+
   return c.json({
-    ...foundOrder,
+    ...safeOrder,
     items: itemsWithToppings,
   });
 });
@@ -156,6 +179,12 @@ orderRoutes.get("/by-number/:orderNumber", async (c) => {
 
   if (!circleId) {
     return c.json({ error: "circleIdが必要です" }, 400);
+  }
+
+  // 2026-07-05: フロント確認の結果、register/visitor いずれにも呼び出し箇所が無く
+  // レジ導線専用のルックアップ（注文番号+circleId指定）であるため order:read を必須化する。
+  if (!(await hasPermission(c, circleId, "order:read"))) {
+    return c.json({ error: "権限がありません" }, 403);
   }
 
   const orders = await db
@@ -257,6 +286,16 @@ orderRoutes.post(
               .where(inArray(topping.id, allToppingIds))
           : [];
 
+      // 2026-07-05: 指定トッピングが対象メニューに実際に紐付いているかを検証するため
+      // menu_topping の関連を取得しておく
+      const menuToppingLinks =
+        allToppingIds.length > 0
+          ? await db
+              .select()
+              .from(menuTopping)
+              .where(inArray(menuTopping.menuId, menuIds))
+          : [];
+
       // 合計金額を計算
       let totalPrice = 0;
       const orderItems: {
@@ -268,6 +307,8 @@ orderRoutes.post(
         quantity: number;
         toppingIds?: string[];
       }[] = [];
+      // 在庫管理対象(stockQuantity > 0)のメニューごとの必要数を集計する
+      const stockNeeded = new Map<string, number>();
 
       for (const item of input.items) {
         const menuItem = menus.find((m) => m.id === item.menuId);
@@ -278,9 +319,67 @@ orderRoutes.post(
           );
         }
 
+        // 2026-07-05: クロスサークルIDOR対策。他サークルのメニューが混入していないか検証する
+        if (menuItem.circleId !== input.circleId) {
+          return c.json(
+            { error: `メニュー ${menuItem.name} は指定サークルに属していません` },
+            400
+          );
+        }
+
+        // 2026-07-05: 売り切れメニューの注文をハードゲートで拒否する
+        if (menuItem.soldOut) {
+          return c.json({ error: `${menuItem.name}は売り切れです` }, 400);
+        }
+
         const itemToppings = toppings.filter((t) =>
           (item.toppingIds || []).includes(t.id)
         );
+
+        // 指定トッピングIDがすべて解決できているか（存在確認）
+        if (itemToppings.length !== (item.toppingIds || []).length) {
+          return c.json({ error: "存在しないトッピングが指定されています" }, 400);
+        }
+
+        for (const t of itemToppings) {
+          // クロスサークルIDOR対策
+          if (t.circleId !== input.circleId) {
+            return c.json(
+              { error: `トッピング ${t.name} は指定サークルに属していません` },
+              400
+            );
+          }
+          // 売り切れトッピングの拒否
+          if (t.soldOut) {
+            return c.json({ error: `${t.name}は売り切れです` }, 400);
+          }
+          // 対象メニューに実際に紐付いているか確認
+          const isLinked = menuToppingLinks.some(
+            (mt) => mt.menuId === menuItem.id && mt.toppingId === t.id
+          );
+          if (!isLinked) {
+            return c.json(
+              { error: `トッピング ${t.name} はメニュー ${menuItem.name} に紐付いていません` },
+              400
+            );
+          }
+        }
+
+        // 2026-07-05: 在庫が管理されているメニュー(stockQuantity > 0)のみ在庫チェック対象とする。
+        // stockQuantity === 0 は在庫無制限/未管理を意味し、チェック・減算をスキップする。
+        if (menuItem.stockQuantity > 0) {
+          const alreadyNeeded = stockNeeded.get(menuItem.id) || 0;
+          const totalNeeded = alreadyNeeded + item.quantity;
+          stockNeeded.set(menuItem.id, totalNeeded);
+
+          if (menuItem.stockQuantity < totalNeeded) {
+            return c.json(
+              { error: `${menuItem.name}の在庫が不足しています` },
+              400
+            );
+          }
+        }
+
         const toppingTotal = itemToppings.reduce((sum, t) => sum + t.price, 0);
         const unitPrice = menuItem.price + toppingTotal;
         const subtotal = unitPrice * item.quantity;
@@ -296,6 +395,37 @@ orderRoutes.post(
         });
 
         totalPrice += subtotal;
+      }
+
+      // 2026-07-05: 在庫管理メニューの在庫をガード付きUPDATEで減算する。
+      // D1 は対話的トランザクション非対応のため、条件付きUPDATEで0行更新なら在庫不足として
+      // 注文全体を中断する（レース対策）。
+      for (const [menuId, neededQty] of stockNeeded.entries()) {
+        const result = await db
+          .update(menu)
+          .set({
+            stockQuantity: sql`${menu.stockQuantity} - ${neededQty}`,
+          })
+          .where(and(eq(menu.id, menuId), gte(menu.stockQuantity, neededQty)))
+          .returning({ stockQuantity: menu.stockQuantity });
+
+        if (result.length === 0) {
+          const menuItem = menus.find((m) => m.id === menuId);
+          return c.json(
+            {
+              error: `${menuItem?.name ?? menuId}の在庫が不足しています`,
+            },
+            400
+          );
+        }
+
+        // 減算の結果 在庫が0になった場合は soldOut も併せてセットする
+        if (result[0]!.stockQuantity <= 0) {
+          await db
+            .update(menu)
+            .set({ soldOut: true })
+            .where(eq(menu.id, menuId));
+        }
       }
 
       // 注文を作成 (注文モードに応じて初期ステータスを決定)
@@ -402,6 +532,20 @@ orderRoutes.patch(
 
     if (!(await hasPermission(c, targetOrder.circleId, "order:write"))) {
       return c.json({ error: "権限がありません" }, 403);
+    }
+
+    // 2026-07-05: 不正なステータス遷移を禁止する（completed/cancelled は終端状態で、そこからの遷移不可）
+    const allowedNextStatuses = ORDER_STATUS_TRANSITIONS[targetOrder.status] ?? [];
+    if (
+      targetOrder.status !== input.status &&
+      !allowedNextStatuses.includes(input.status)
+    ) {
+      return c.json(
+        {
+          error: `${targetOrder.status} から ${input.status} への変更はできません`,
+        },
+        400
+      );
     }
 
     // pending -> preparing に変わった場合、スタンプを付与

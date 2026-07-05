@@ -4,6 +4,7 @@ import { z } from "zod";
 import { db, staff } from "@fesflow/db";
 import { eq, and, isNull } from "drizzle-orm";
 import { nanoid } from "nanoid";
+import { hasPermission } from "../utils/auth";
 
 const staffRoutes = new Hono();
 
@@ -13,6 +14,11 @@ staffRoutes.get("/", async (c) => {
 
   if (!circleId) {
     return c.json({ error: "circleIdが必要です" }, 400);
+  }
+
+  // 2026-07-05: 認可チェックが皆無だったため追加（他サークルのスタッフ情報漏洩を防止）
+  if (!(await hasPermission(c, circleId, "staff:read"))) {
+    return c.json({ error: "権限がありません" }, 403);
   }
 
   const staffList = await db
@@ -32,6 +38,11 @@ staffRoutes.get("/:id", async (c) => {
     return c.json({ error: "スタッフが見つかりません" }, 404);
   }
 
+  // 2026-07-05: 認可チェックが皆無だったため追加。対象スタッフのcircleIdで判定
+  if (!(await hasPermission(c, staffList[0]!.circleId, "staff:read"))) {
+    return c.json({ error: "権限がありません" }, 403);
+  }
+
   return c.json(staffList[0]);
 });
 
@@ -47,6 +58,12 @@ staffRoutes.post(
   ),
   async (c) => {
     const input = c.req.valid("json");
+
+    // 2026-07-05: 認可チェックが皆無だったため追加
+    if (!(await hasPermission(c, input.circleId, "staff:write"))) {
+      return c.json({ error: "権限がありません" }, 403);
+    }
+
     const id = nanoid();
 
     await db.insert(staff).values({
@@ -72,6 +89,16 @@ staffRoutes.put(
     const id = c.req.param("id");
     const input = c.req.valid("json");
 
+    // 2026-07-05: 認可チェックが皆無だったため追加。対象のcircleIdを先に取得して判定
+    const existingStaff = await db.select().from(staff).where(eq(staff.id, id));
+    if (existingStaff.length === 0) {
+      return c.json({ error: "スタッフが見つかりません" }, 404);
+    }
+
+    if (!(await hasPermission(c, existingStaff[0]!.circleId, "staff:write"))) {
+      return c.json({ error: "権限がありません" }, 403);
+    }
+
     if (input.name) {
       await db.update(staff).set({ name: input.name }).where(eq(staff.id, id));
     }
@@ -83,6 +110,17 @@ staffRoutes.put(
 // スタッフ削除
 staffRoutes.delete("/:id", async (c) => {
   const id = c.req.param("id");
+
+  // 2026-07-05: 認可チェックが皆無だったため追加。対象のcircleIdを先に取得して判定
+  const existingStaff = await db.select().from(staff).where(eq(staff.id, id));
+  if (existingStaff.length === 0) {
+    return c.json({ error: "スタッフが見つかりません" }, 404);
+  }
+
+  if (!(await hasPermission(c, existingStaff[0]!.circleId, "staff:delete"))) {
+    return c.json({ error: "権限がありません" }, 403);
+  }
+
   await db.delete(staff).where(eq(staff.id, id));
   return c.json({ success: true });
 });
@@ -93,6 +131,11 @@ staffRoutes.get("/shift/current", async (c) => {
 
   if (!circleId) {
     return c.json({ error: "circleIdが必要です" }, 400);
+  }
+
+  // 2026-07-05: 認可チェックが皆無だったため追加
+  if (!(await hasPermission(c, circleId, "staff:read"))) {
+    return c.json({ error: "権限がありません" }, 403);
   }
 
   const staffList = await db
@@ -110,6 +153,16 @@ staffRoutes.get("/shift/current", async (c) => {
 staffRoutes.post("/:id/clock-in", async (c) => {
   const id = c.req.param("id");
 
+  // 2026-07-05: 認可チェックが皆無だったため追加。対象のcircleIdを先に取得して判定
+  const existingStaff = await db.select().from(staff).where(eq(staff.id, id));
+  if (existingStaff.length === 0) {
+    return c.json({ error: "スタッフが見つかりません" }, 404);
+  }
+
+  if (!(await hasPermission(c, existingStaff[0]!.circleId, "staff:write"))) {
+    return c.json({ error: "権限がありません" }, 403);
+  }
+
   await db
     .update(staff)
     .set({ shiftStart: new Date(), shiftEnd: null })
@@ -121,6 +174,16 @@ staffRoutes.post("/:id/clock-in", async (c) => {
 // 退勤
 staffRoutes.post("/:id/clock-out", async (c) => {
   const id = c.req.param("id");
+
+  // 2026-07-05: 認可チェックが皆無だったため追加。対象のcircleIdを先に取得して判定
+  const existingStaff = await db.select().from(staff).where(eq(staff.id, id));
+  if (existingStaff.length === 0) {
+    return c.json({ error: "スタッフが見つかりません" }, 404);
+  }
+
+  if (!(await hasPermission(c, existingStaff[0]!.circleId, "staff:write"))) {
+    return c.json({ error: "権限がありません" }, 403);
+  }
 
   await db.update(staff).set({ shiftEnd: new Date() }).where(eq(staff.id, id));
 
