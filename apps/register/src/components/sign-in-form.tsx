@@ -184,6 +184,41 @@ export default function SignInForm({
 				</form.Subscribe>
 			</form>
 
+			<div className="mt-6 flex flex-col gap-3">
+				<div className="relative">
+					<div className="absolute inset-0 flex items-center">
+						<span className="w-full border-t border-border" />
+					</div>
+					<div className="relative flex justify-center text-xs uppercase">
+						<span className="bg-background px-2 text-muted-foreground font-mono font-bold tracking-widest">or</span>
+					</div>
+				</div>
+				<Button
+					type="button"
+					variant="outline"
+					className="w-full font-mono text-sm uppercase tracking-widest flex items-center justify-center gap-2"
+					onClick={async () => {
+						try {
+							await authClient.signIn.passkey({
+								fetchOptions: {
+									onSuccess: async () => {
+										// login success handler will be triggered by session state change or we can manually route
+										navigate((callbackUrl as any) || "/circle/dashboard");
+									},
+									onError: (error) => {
+										toast.error(error.error.message || error.error.statusText);
+									},
+								}
+							});
+						} catch (e: any) {
+							toast.error(e.message || "パスキーでのログインに失敗しました");
+						}
+					}}
+				>
+					Sign in with Passkey
+				</Button>
+			</div>
+
 			<div className="mt-sp-4 text-center">
 				<button
 					type="button"

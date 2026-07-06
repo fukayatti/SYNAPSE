@@ -34,6 +34,8 @@ export interface WorkerEnv {
   BETTER_AUTH_URL?: string;
   CORS_ORIGIN?: string;
   INITIAL_SUPER_ADMIN_EMAIL?: string;
+  GOOGLE_CLIENT_ID?: string;
+  GOOGLE_CLIENT_SECRET?: string;
   PRODUCT_NAME?: string;
   // MinIO/S3 フォールバック
   S3_ENDPOINT?: string;

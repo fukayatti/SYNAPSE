@@ -1,4 +1,5 @@
 import { createAuthClient } from "better-auth/react";
+import { passkeyClient } from "@better-auth/passkey/client";
 
 function getApiBaseUrl(): string {
   let url = import.meta.env.VITE_API_URL || "http://localhost:8787";
@@ -17,5 +18,10 @@ function getApiBaseUrl(): string {
 
 // better-auth のハンドラは API Worker (apps/api) の /api/auth/* に居る。
 export const authClient = createAuthClient({
+
 	baseURL: getApiBaseUrl(),
+
+
+	plugins: [passkeyClient()],
+
 });
