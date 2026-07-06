@@ -19,7 +19,7 @@ export default function Home() {
         <span className="text-[11px] font-black uppercase tracking-widest text-muted-foreground">
           {PRODUCT_NAME.toUpperCase()}
         </span>
-        <h1 className="font-headline text-3xl sm:text-4xl font-black uppercase tracking-tight leading-tight">
+        <h1 className="font-headline text-2xl sm:text-3xl md:text-4xl font-black uppercase tracking-tight leading-tight">
           FesFlow へようこそ
         </h1>
         <p className="text-sm text-muted-foreground leading-relaxed">
@@ -82,7 +82,7 @@ function PortalCard({
   return (
     <button
       onClick={onClick}
-      className={`group text-left border-[3px] border-border p-5 transition-all hover:bg-muted flex flex-col gap-3 ${
+      className={`group text-left border-[3px] border-border p-4 sm:p-5 transition-all hover:bg-muted flex flex-col gap-2 sm:gap-3 ${
         primary ? "bg-primary/5" : "bg-background"
       }`}
     >
@@ -94,9 +94,9 @@ function PortalCard({
         >
           <Icon className="h-5 w-5" />
         </span>
-        <span className="font-headline text-xl font-black uppercase tracking-tight">{title}</span>
+        <span className="font-headline text-lg sm:text-xl font-black uppercase tracking-tight leading-tight">{title}</span>
       </div>
-      <p className="text-xs text-muted-foreground leading-relaxed">{desc}</p>
+      <p className="text-[11px] sm:text-xs text-muted-foreground leading-relaxed">{desc}</p>
       <span className="mt-1 inline-flex items-center gap-1 text-[11px] font-black uppercase tracking-wider">
         {cta}
         <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-1" />
