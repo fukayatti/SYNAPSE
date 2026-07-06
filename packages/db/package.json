@@ -1,0 +1,31 @@
+{
+  "name": "@fesflow/db",
+  "type": "module",
+  "exports": {
+    ".": {
+      "default": "./src/index.ts"
+    },
+    "./*": {
+      "default": "./src/*.ts"
+    }
+  },
+  "scripts": {
+    "check-types": "tsc -b",
+    "db:generate": "drizzle-kit generate",
+    "db:studio": "drizzle-kit studio"
+  },
+  "devDependencies": {
+    "drizzle-kit": "^0.31.8",
+    "@cloudflare/workers-types": "^4.20250620.0",
+    "@fesflow/config": "workspace:*"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "drizzle-orm": "^0.45.0",
+    "@libsql/client": "catalog:",
+    "libsql": "catalog:",
+    "zod": "catalog:"
+  }
+}

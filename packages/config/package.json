@@ -1,0 +1,15 @@
+{
+	"name": "@fesflow/config",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"exports": {
+		".": {
+			"default": "./src/index.ts"
+		},
+		"./brand": {
+			"default": "./src/brand.ts"
+		},
+		"./tsconfig.base.json": "./tsconfig.base.json"
+	}
+}

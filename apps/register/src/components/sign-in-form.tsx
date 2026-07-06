@@ -1,0 +1,198 @@
+import { authClient } from "@/lib/auth-client";
+import { useForm } from "@tanstack/react-form";
+import { toast } from "sonner";
+import z from "zod";
+import Loader from "./loader";
+import { Button } from "./ui/button";
+import { Input } from "./ui/input";
+import { Label } from "./ui/label";
+import { useSearchParams, useNavigate } from "react-router-dom";
+import { saveAuthInfo } from "@/hooks/useCircleAuth";
+import { membershipApi } from "@/lib/api";
+
+export default function SignInForm({
+	onSwitchToSignUp,
+}: {
+	onSwitchToSignUp: () => void;
+}) {
+	const navigate = useNavigate();
+	const [searchParams] = useSearchParams();
+	const callbackUrl = searchParams.get("callbackUrl");
+	const { isPending } = authClient.useSession();
+
+	const form = useForm({
+		defaultValues: {
+			email: "",
+			password: "",
+		},
+		onSubmit: async ({ value }) => {
+			await authClient.signIn.email(
+				{
+					email: value.email,
+					password: value.password,
+				},
+				{
+					onSuccess: async () => {
+						try {
+							const memberships = await membershipApi.listMy(value.email);
+							
+							const systemMembership = memberships.find((m) => m.role === "super_admin");
+							const eventMembership = memberships.find((m) => m.role === "event_manager");
+							const circleMembership = memberships.find((m) => m.circleId);
+
+							if (systemMembership) {
+								saveAuthInfo({
+									circleId: null,
+									eventId: null,
+									userEmail: systemMembership.userEmail,
+									userName: systemMembership.userName,
+									role: systemMembership.role,
+									membershipId: systemMembership.id,
+									circleName: null,
+									isEventAdmin: true,
+								});
+								navigate((callbackUrl as any) || "/admin/dashboard");
+								toast.success(`システム管理スペースにログインしました (${systemMembership.role})`);
+							} else if (eventMembership) {
+								saveAuthInfo({
+									circleId: null,
+									eventId: eventMembership.eventId,
+									userEmail: eventMembership.userEmail,
+									userName: eventMembership.userName,
+									role: eventMembership.role,
+									membershipId: eventMembership.id,
+									circleName: null,
+									isEventAdmin: true,
+								});
+								navigate((callbackUrl as any) || "/event/dashboard");
+								toast.success(`イベント管理スペースにログインしました (${eventMembership.role})`);
+							} else if (circleMembership) {
+								saveAuthInfo({
+									circleId: circleMembership.circleId,
+									eventId: circleMembership.eventId,
+									userEmail: circleMembership.userEmail,
+									userName: circleMembership.userName,
+									role: circleMembership.role,
+									membershipId: circleMembership.id,
+									circleName: circleMembership.circle?.name || null,
+								});
+
+								if (circleMembership.circle) {
+									localStorage.setItem("circleName", circleMembership.circle.name);
+								}
+
+								navigate((callbackUrl as any) || "/circle/dashboard");
+								toast.success(`${circleMembership.userName}さんとして [${circleMembership.circle?.name || "サークル"}] にログインしました`);
+							} else {
+								navigate((callbackUrl as any) || "/visitor/menu");
+								toast.success("ログインしました");
+							}
+						} catch (error) {
+							navigate((callbackUrl as any) || "/visitor/menu");
+							toast.success("ログインしました");
+						}
+					},
+					onError: (error) => {
+						toast.error(error.error.message || error.error.statusText);
+					},
+				},
+			);
+		},
+		validators: {
+			onSubmit: z.object({
+				email: z.email("Invalid email address"),
+				password: z.string().min(8, "Password must be at least 8 characters"),
+			}),
+		},
+	});
+
+	if (isPending) {
+		return <Loader />;
+	}
+
+	return (
+		<div className="mx-auto w-full mt-sp-3">
+			<h2 className="mb-sp-4 text-center text-[24px] font-headline uppercase tracking-tight leading-[1.1]">
+				Welcome Back
+			</h2>
+
+			<form
+				onSubmit={(e) => {
+					e.preventDefault();
+					e.stopPropagation();
+					form.handleSubmit();
+				}}
+				className="space-y-5"
+			>
+				<div>
+					<form.Field name="email">
+						{(field) => (
+							<div className="space-y-1">
+								<Label htmlFor={field.name}>Email</Label>
+								<Input
+									id={field.name}
+									name={field.name}
+									type="email"
+									value={field.state.value}
+									onBlur={field.handleBlur}
+									onChange={(e) => field.handleChange(e.target.value)}
+								/>
+								{field.state.meta.errors.map((error) => (
+									<p key={error?.message} className="text-error font-mono text-[12px] font-bold mt-[4px]">
+										{error?.message}
+									</p>
+								))}
+							</div>
+						)}
+					</form.Field>
+				</div>
+
+				<div>
+					<form.Field name="password">
+						{(field) => (
+							<div className="space-y-1">
+								<Label htmlFor={field.name}>Password</Label>
+								<Input
+									id={field.name}
+									name={field.name}
+									type="password"
+									value={field.state.value}
+									onBlur={field.handleBlur}
+									onChange={(e) => field.handleChange(e.target.value)}
+								/>
+								{field.state.meta.errors.map((error) => (
+									<p key={error?.message} className="text-error font-mono text-[12px] font-bold mt-[4px]">
+										{error?.message}
+									</p>
+								))}
+							</div>
+						)}
+					</form.Field>
+				</div>
+
+				<form.Subscribe>
+					{(state) => (
+						<Button
+							type="submit"
+							className="w-full"
+							size="lg"
+							disabled={!state.canSubmit || state.isSubmitting}
+						>
+							{state.isSubmitting ? "Submitting..." : "Sign In"}
+						</Button>
+					)}
+				</form.Subscribe>
+			</form>
+
+			<div className="mt-sp-4 text-center">
+				<button
+					type="button"
+					onClick={onSwitchToSignUp}
+					className="text-accent underline font-mono text-[12px] uppercase tracking-[1px] hover:text-foreground"
+				>
+					Need an account? Sign Up
+				</button>
+			</div>
+		</div>
+	);
+}

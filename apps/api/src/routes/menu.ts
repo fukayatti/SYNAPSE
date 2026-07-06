@@ -1,0 +1,257 @@
+import { Hono } from "hono";
+import { zValidator } from "@hono/zod-validator";
+import { z } from "zod";
+import { db, menu, menuTopping, topping } from "@fesflow/db";
+import { eq, inArray } from "drizzle-orm";
+import { nanoid } from "nanoid";
+import { hasPermission } from "../utils/auth";
+
+const menuRoutes = new Hono();
+
+// メニュー一覧取得（toppingも含む）
+menuRoutes.get("/", async (c) => {
+  const circleId = c.req.query("circleId");
+
+  if (!circleId) {
+    return c.json({ error: "circleIdが必要です" }, 400);
+  }
+
+  // メニューを取得
+  const menus = await db.select().from(menu).where(eq(menu.circleId, circleId));
+
+  // 各メニューのトッピングを取得
+  const menuIds = menus.map((m) => m.id);
+
+  if (menuIds.length === 0) {
+    return c.json([]);
+  }
+
+  const menuToppings = await db
+    .select()
+    .from(menuTopping)
+    .where(inArray(menuTopping.menuId, menuIds));
+
+  const toppingIds = [...new Set(menuToppings.map((mt) => mt.toppingId))];
+
+  const toppings =
+    toppingIds.length > 0
+      ? await db.select().from(topping).where(inArray(topping.id, toppingIds))
+      : [];
+
+  // メニューにトッピング情報を追加
+  const menusWithToppings = menus.map((m) => {
+    const menuToppingIds = menuToppings
+      .filter((mt) => mt.menuId === m.id)
+      .map((mt) => mt.toppingId);
+    const menuToppingsData = toppings.filter((t) =>
+      menuToppingIds.includes(t.id)
+    );
+    return {
+      ...m,
+      toppings: menuToppingsData,
+    };
+  });
+
+  return c.json(menusWithToppings);
+});
+
+// メニュー取得
+menuRoutes.get("/:id", async (c) => {
+  const id = c.req.param("id");
+
+  const menus = await db.select().from(menu).where(eq(menu.id, id));
+
+  if (menus.length === 0) {
+    return c.json({ error: "メニューが見つかりません" }, 404);
+  }
+
+  const foundMenu = menus[0]!;
+
+  // トッピングを取得
+  const menuToppings = await db
+    .select()
+    .from(menuTopping)
+    .where(eq(menuTopping.menuId, id));
+
+  const toppingIds = menuToppings.map((mt) => mt.toppingId);
+
+  const toppings =
+    toppingIds.length > 0
+      ? await db.select().from(topping).where(inArray(topping.id, toppingIds))
+      : [];
+
+  return c.json({
+    ...foundMenu,
+    toppings,
+  });
+});
+
+// メニュー作成
+menuRoutes.post(
+  "/",
+  zValidator(
+    "json",
+    z.object({
+      circleId: z.string(),
+      name: z.string().min(1, "メニュー名は必須です"),
+      price: z.number().min(0, "価格は0以上である必要があります"),
+      description: z.string().optional(),
+      imagePath: z.string(),
+      additionalInfo: z.string().optional(),
+      stockQuantity: z.number().min(0).optional(),
+      soldOut: z.boolean().optional(),
+      toppingIds: z.array(z.string()).optional(),
+    })
+  ),
+  async (c) => {
+    const input = c.req.valid("json");
+
+    if (!(await hasPermission(c, input.circleId, "menu:write"))) {
+      return c.json({ error: "権限がありません" }, 403);
+    }
+
+    const id = nanoid();
+
+    await db.insert(menu).values({
+      id,
+      circleId: input.circleId,
+      name: input.name,
+      price: input.price,
+      description: input.description,
+      imagePath: input.imagePath,
+      additionalInfo: input.additionalInfo,
+      stockQuantity: input.stockQuantity ?? 0,
+      soldOut: input.soldOut ?? false,
+    });
+
+    // トッピングを関連付け
+    if (input.toppingIds && input.toppingIds.length > 0) {
+      await db.insert(menuTopping).values(
+        input.toppingIds.map((toppingId) => ({
+          id: nanoid(),
+          menuId: id,
+          toppingId,
+        }))
+      );
+    }
+
+    return c.json({ id }, 201);
+  }
+);
+
+// メニュー更新
+menuRoutes.put(
+  "/:id",
+  zValidator(
+    "json",
+    z.object({
+      name: z.string().min(1).optional(),
+      price: z.number().min(0).optional(),
+      description: z.string().optional(),
+      imagePath: z.string().optional(),
+      additionalInfo: z.string().optional(),
+      stockQuantity: z.number().min(0).optional(),
+      soldOut: z.boolean().optional(),
+      toppingIds: z.array(z.string()).optional(),
+    })
+  ),
+  async (c) => {
+    const id = c.req.param("id");
+    const input = c.req.valid("json");
+
+    // Get circleId first
+    const existingMenu = await db.select().from(menu).where(eq(menu.id, id));
+    if (existingMenu.length === 0) return c.json({ error: "見つかりません" }, 404);
+    
+    if (!(await hasPermission(c, existingMenu[0]!.circleId, "menu:write"))) {
+      return c.json({ error: "権限がありません" }, 403);
+    }
+
+    const updates: Partial<typeof menu.$inferSelect> = {};
+
+    if (input.name !== undefined) updates.name = input.name;
+    if (input.price !== undefined) updates.price = input.price;
+    if (input.description !== undefined)
+      updates.description = input.description;
+    if (input.imagePath !== undefined) updates.imagePath = input.imagePath;
+    if (input.additionalInfo !== undefined)
+      updates.additionalInfo = input.additionalInfo;
+    if (input.stockQuantity !== undefined)
+      updates.stockQuantity = input.stockQuantity;
+    if (input.soldOut !== undefined) updates.soldOut = input.soldOut;
+
+    if (Object.keys(updates).length > 0) {
+      await db.update(menu).set(updates).where(eq(menu.id, id));
+    }
+
+    // トッピングの更新
+    if (input.toppingIds !== undefined) {
+      // 既存のトッピング関連を削除
+      await db.delete(menuTopping).where(eq(menuTopping.menuId, id));
+
+      // 新しいトッピング関連を追加
+      if (input.toppingIds.length > 0) {
+        await db.insert(menuTopping).values(
+          input.toppingIds.map((toppingId) => ({
+            id: nanoid(),
+            menuId: id,
+            toppingId,
+          }))
+        );
+      }
+    }
+
+    return c.json({ success: true });
+  }
+);
+
+// メニュー削除
+menuRoutes.delete("/:id", async (c) => {
+  const id = c.req.param("id");
+
+  const existingMenu = await db.select().from(menu).where(eq(menu.id, id));
+  if (existingMenu.length === 0) return c.json({ error: "見つかりません" }, 404);
+  
+  if (!(await hasPermission(c, existingMenu[0]!.circleId, "menu:delete"))) {
+    return c.json({ error: "権限がありません" }, 403);
+  }
+
+  // トッピング関連を削除
+  await db.delete(menuTopping).where(eq(menuTopping.menuId, id));
+
+  // メニューを削除
+  await db.delete(menu).where(eq(menu.id, id));
+
+  return c.json({ success: true });
+});
+
+// 在庫更新
+menuRoutes.patch(
+  "/:id/stock",
+  zValidator(
+    "json",
+    z.object({
+      stockQuantity: z.number().min(0),
+    })
+  ),
+  async (c) => {
+    const id = c.req.param("id");
+    const input = c.req.valid("json");
+
+    const existingMenu = await db.select().from(menu).where(eq(menu.id, id));
+    if (existingMenu.length === 0) return c.json({ error: "見つかりません" }, 404);
+    
+    if (!(await hasPermission(c, existingMenu[0]!.circleId, "stock:write"))) {
+      return c.json({ error: "権限がありません" }, 403);
+    }
+
+    await db
+      .update(menu)
+      .set({ stockQuantity: input.stockQuantity })
+      .where(eq(menu.id, id));
+
+    return c.json({ success: true });
+  }
+);
+
+export default menuRoutes;
