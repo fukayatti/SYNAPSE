@@ -237,6 +237,29 @@ membershipRoutes.get("/my", async (c) => {
   }
   const userEmail = session.user.email;
 
+  const initialAdminEmail = getEnv().INITIAL_SUPER_ADMIN_EMAIL;
+  if (initialAdminEmail && userEmail.toLowerCase() === initialAdminEmail.toLowerCase()) {
+    const existing = await db
+      .select()
+      .from(membership)
+      .where(
+        and(
+          eq(membership.userEmail, userEmail.toLowerCase()),
+          eq(membership.role, "super_admin"),
+          eq(membership.isActive, true)
+        )
+      );
+    if (existing.length === 0) {
+      await db.insert(membership).values({
+        id: nanoid(),
+        userEmail: userEmail.toLowerCase(),
+        userName: session.user.name || "Super Admin",
+        role: "super_admin",
+        isActive: true,
+      });
+    }
+  }
+
   const memberships = await db
     .select()
     .from(membership)
