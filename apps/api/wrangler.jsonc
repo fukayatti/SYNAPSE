@@ -1,0 +1,45 @@
+{
+	// FesFlow API Worker の設定。
+	// D1 (DB) と R2 (BUCKET) をバインドし、nodejs_compat で
+	// AsyncLocalStorage (node:async_hooks) を有効化する。
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "fesflow-api",
+	"main": "src/index.ts",
+	"compatibility_date": "2025-06-01",
+	"compatibility_flags": ["nodejs_compat"],
+	// 本番はカスタムドメイン api.fesflow.shikosai.net で配信 (2026-07-04)。
+	// ゾーン shikosai.net が同一 Cloudflare アカウントにあることが前提。
+	"routes": [
+		{ "pattern": "api.fesflow.shikosai.net", "custom_domain": true }
+	],
+	"observability": {
+		"enabled": true
+	},
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "fesflow-db",
+			// `wrangler d1 create fesflow-db` 実行後に表示される id に置き換える。
+			// ローカル (--local) では任意の値で動作する。
+			"database_id": "f7122e10-3ca6-4bb6-8996-b03eb46bb984",
+			"migrations_dir": "../../packages/db/src/migrations"
+		}
+	],
+	"r2_buckets": [
+		{
+			"binding": "BUCKET",
+			"bucket_name": "fesflow-uploads"
+		}
+	],
+	"vars": {
+		// 非機密の本番設定値。ローカル開発では apps/api/.dev.vars が同名キーを上書きする
+		// (wrangler dev の仕様) ので、ここは本番値を書いてよい。
+		// 機密 (BETTER_AUTH_SECRET) だけは vars に書かず `wrangler secret put` で登録する。
+		"PRODUCT_NAME": "FesFlow",
+		"BETTER_AUTH_URL": "https://api.fesflow.shikosai.net",
+		// フロント3オリジンをカンマ区切りで信頼 (better-auth trustedOrigins が分割して読む)
+		"CORS_ORIGIN": "https://fesflow.shikosai.net,https://staff.fesflow.shikosai.net,https://admin.fesflow.shikosai.net",
+		"INITIAL_SUPER_ADMIN_EMAIL": "sato.t.5970@gmail.com",
+		"R2_PUBLIC_URL": "https://api.fesflow.shikosai.net/uploads"
+	}
+}

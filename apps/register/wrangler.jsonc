@@ -1,0 +1,17 @@
+{
+	// register (模擬店向け) SPA を Cloudflare Workers Static Assets で配信する。
+	// Worker スクリプトは持たず、ビルド済み dist を静的配信 + SPA フォールバック。
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "fesflow-register",
+	"compatibility_date": "2025-06-01",
+	// register は1つのSPAでロール別にセクション分けするため、スタッフ用と管理用の
+	// 2つのカスタムドメインを同一 Worker に割り当てる (2026-07-04 本番設定)。
+	"routes": [
+		{ "pattern": "staff.fesflow.shikosai.net", "custom_domain": true },
+		{ "pattern": "admin.fesflow.shikosai.net", "custom_domain": true }
+	],
+	"assets": {
+		"directory": "./dist",
+		"not_found_handling": "single-page-application"
+	}
+}
