@@ -56,6 +56,7 @@ toppingRoutes.post(
       name: z.string().min(1, "トッピング名は必須です"),
       price: z.number().min(0, "価格は0以上である必要があります"),
       description: z.string().optional(),
+      imagePath: z.string().optional(),
       soldOut: z.boolean().optional(),
     })
   ),
@@ -75,6 +76,7 @@ toppingRoutes.post(
       name: input.name,
       price: input.price,
       description: input.description,
+      imagePath: input.imagePath ?? null,
       soldOut: input.soldOut ?? false,
     });
 
@@ -91,6 +93,7 @@ toppingRoutes.put(
       name: z.string().min(1).optional(),
       price: z.number().min(0).optional(),
       description: z.string().optional(),
+      imagePath: z.string().optional(),
       soldOut: z.boolean().optional(),
     })
   ),
@@ -117,6 +120,8 @@ toppingRoutes.put(
     if (input.price !== undefined) updates.price = input.price;
     if (input.description !== undefined)
       updates.description = input.description;
+    if (input.imagePath !== undefined)
+      updates.imagePath = input.imagePath ?? null;
     if (input.soldOut !== undefined) updates.soldOut = input.soldOut;
 
     await db.update(topping).set(updates).where(eq(topping.id, id));

@@ -51,6 +51,8 @@ export function FormField({
   min,
   inputMode,
   onBlur,
+  value,
+  placeholder,
   ...inputProps
 }: FormFieldProps) {
   // 2026-07-05: 価格・在庫数等の number 入力で負値が入力・確定されてしまう問題への
@@ -59,6 +61,14 @@ export function FormField({
   // (呼び出し側の state 管理はそのまま onChange 経由で更新されるため壊れない)
   const isNumber = type === "number";
   const resolvedMin = isNumber ? (min ?? 0) : min;
+
+  // 2026-07-06: 価格・在庫数などの number 入力は値が 0 のとき常に "0" が
+  // 表示され続け、ユーザーが一度消してから入力し直す必要があり直感に反していた。
+  // 値が 0 の間は表示上は空欄にし、placeholder で "0" を示すことで
+  // そのまま数字を打ち始められるようにする (格納される値は引き続き number のまま)。
+  const displayValue =
+    isNumber && (value === 0 || value === "0") ? "" : value;
+  const resolvedPlaceholder = isNumber ? (placeholder ?? "0") : placeholder;
 
   const handleBlur = (e: React.FocusEvent<HTMLInputElement>) => {
     if (isNumber) {
@@ -91,6 +101,8 @@ export function FormField({
         min={resolvedMin}
         inputMode={isNumber ? (inputMode ?? "numeric") : inputMode}
         onBlur={handleBlur}
+        value={displayValue}
+        placeholder={resolvedPlaceholder}
         className={cn(formControlClassName, className)}
         {...inputProps}
       />
@@ -168,25 +180,12 @@ interface EditModeBannerProps {
   saveStatus?: SaveStatus;
 }
 
-/** 編集モード時に表示する「フォーカスを外すと自動保存」の注記バナー。 */
-export function EditModeBanner({ saveStatus = "idle" }: EditModeBannerProps) {
-  return (
-    <div className="flex items-center justify-between gap-2 text-[10px] text-success font-bold bg-muted p-2 border-thick border-border">
-      <span>※ 編集モード: 変更箇所は入力欄からフォーカスを外すと自動保存されます。</span>
-      {saveStatus === "saving" && (
-        <span className="flex items-center gap-1 shrink-0 text-muted-foreground">
-          <Loader2 className="h-3 w-3 animate-spin" />
-          保存中…
-        </span>
-      )}
-      {saveStatus === "saved" && (
-        <span className="shrink-0 text-success">✓ 保存済み</span>
-      )}
-      {saveStatus === "error" && (
-        <span className="shrink-0 text-destructive">
-          保存失敗 — 再度フォーカスを外すと再試行
-        </span>
-      )}
-    </div>
-  );
+/**
+ * 2026-07-06: 「フォーカスを外すと自動保存されます」という注記文言は不要という
+ * フィードバックのため非表示にした。自動保存の挙動自体 (useEntityForm 側) は
+ * 変更していない。呼び出し側の import が壊れないよう export とシグネチャは維持し、
+ * null を返す。
+ */
+export function EditModeBanner(_props: EditModeBannerProps) {
+  return null;
 }

@@ -16,6 +16,9 @@ import { FormField, FormSubmitButton } from "@/components/ui/FormField";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { AccountsTab } from "@/components/system/AccountsTab";
+import { AnnouncementsTab } from "@/components/system/AnnouncementsTab";
+import { SystemSettingsTab } from "@/components/system/SystemSettingsTab";
 import {
   Plus,
   Calendar,
@@ -102,16 +105,20 @@ export default function AdminPage() {
         activeTab={activeTab}
         onTabChange={setActiveTab}
       >
+        {activeTab === "accounts" && <AccountsTab />}
+        {activeTab === "announcements" && <AnnouncementsTab />}
+        {activeTab === "system-settings" && <SystemSettingsTab />}
+        {activeTab === "events" && (
         <div className="space-y-6">
           {/* アクションバー */}
-          <div className="flex justify-between items-center border-b-thin border-border pb-3">
+          <div className="flex justify-between items-center border-b-thick border-border pb-3">
             <h2 className="text-sm font-bold flex items-center gap-2 uppercase tracking-wider">
               <Calendar className="h-4 w-4" />
               イベント一覧 ({events?.length || 0})
             </h2>
             <Button
               onClick={() => setShowEventForm(true)}
-              className="rounded-none border-thin border-primary bg-primary text-primary-foreground hover:bg-background hover:text-foreground h-8 text-[11px] uppercase font-bold transition-all shadow-none px-3"
+              className="rounded-none border-thick border-primary bg-primary text-primary-foreground hover:bg-background hover:text-foreground h-8 text-[11px] uppercase font-bold transition-all shadow-none px-3"
             >
               <Plus className="mr-1.5 h-3.5 w-3.5" />
               新規イベント開設
@@ -179,7 +186,7 @@ export default function AdminPage() {
               {events.map((evt) => (
                 <Card
                   key={evt.id}
-                  className="border-thin border-border hover:border-neutral-800 rounded-none bg-background flex flex-col justify-between shadow-none transition-all p-3"
+                  className="border-thick border-border hover:border-neutral-800 rounded-none bg-background flex flex-col justify-between shadow-none transition-all p-3"
                 >
                   <CardHeader className="p-0 border-b-thin border-muted pb-2 mb-2">
                     <div className="flex justify-between items-start gap-2">
@@ -222,6 +229,7 @@ export default function AdminPage() {
             />
           )}
         </div>
+        )}
 
         <ConfirmDialog
           isOpen={!!pendingDelete}

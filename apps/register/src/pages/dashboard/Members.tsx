@@ -27,7 +27,7 @@ import {
   FormSelect,
   FormSubmitButton,
 } from "@/components/ui/FormField";
-import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { undoableDelete } from "@/lib/toast-undo";
 import { EmptyState } from "@/components/ui/EmptyState";
 import {
   UserPlus,
@@ -49,8 +49,6 @@ function MembersContent() {
   const [copiedToken, setCopiedToken] = useState<string | null>(null);
 
   // 削除確認ダイアログ用ステート (メンバー除名 / 招待リンク削除)
-  const [memberToRemove, setMemberToRemove] = useState<any | null>(null);
-  const [tokenToDelete, setTokenToDelete] = useState<any | null>(null);
 
   useEffect(() => {
     const authStored = localStorage.getItem("circleAuth");
@@ -138,31 +136,24 @@ function MembersContent() {
     },
   });
 
-  const removeMemberMutation = useMutation({
-    mutationFn: (input: { membershipId: string }) =>
-      membershipApi.delete(input.membershipId),
-    onSuccess: () => {
-      toast.success("メンバーを除名しました");
-      refetchMembers();
-      setMemberToRemove(null);
-    },
-    onError: (error: any) => {
-      toast.error(error.message || "除名に失敗しました");
-    },
-  });
+  // 除名 / 招待リンク削除は確認ダイアログの代わりに undo 付きトーストで実行する
+  const handleRemoveMember = (member: any) =>
+    undoableDelete({
+      queryClient,
+      queryKey: ["members", circleId],
+      id: member.id,
+      message: `メンバー「${member.userName}」を除名しました`,
+      commit: () => membershipApi.delete(member.id),
+    });
 
-  const deleteTokenMutation = useMutation({
-    mutationFn: (input: { tokenId: string }) =>
-      membershipApi.deleteInvite(input.tokenId),
-    onSuccess: () => {
-      toast.success("招待リンクを削除しました");
-      refetchTokens();
-      setTokenToDelete(null);
-    },
-    onError: (error: any) => {
-      toast.error(error.message || "削除に失敗しました");
-    },
-  });
+  const handleDeleteToken = (token: any) =>
+    undoableDelete({
+      queryClient,
+      queryKey: ["inviteTokens", circleId],
+      id: token.id,
+      message: "招待リンクを削除しました",
+      commit: () => membershipApi.deleteInvite(token.id),
+    });
 
   const handleAddMember = () => {
     if (!circleId) return;
@@ -383,7 +374,7 @@ function MembersContent() {
               {inviteTokens.map((token) => (
                 <div
                   key={token.id}
-                  className="flex items-center justify-between p-3 border-thin border-border"
+                  className="flex items-center justify-between p-3 border-thick border-border"
                 >
                   <div className="flex items-center gap-3">
                     <Badge variant={getRoleBadgeVariant(token.role)}>
@@ -413,7 +404,7 @@ function MembersContent() {
                       <Button
                         size="sm"
                         variant="destructive"
-                        onClick={() => setTokenToDelete(token)}
+                        onClick={() => handleDeleteToken(token)}
                       >
                         <Trash2 className="h-4 w-4" />
                       </Button>
@@ -448,10 +439,10 @@ function MembersContent() {
               {members.map((member) => (
                 <div
                   key={member.id}
-                  className="flex items-center justify-between p-4 border-thin border-border"
+                  className="flex items-center justify-between p-4 border-thick border-border"
                 >
                   <div className="flex items-center gap-4">
-                    <div className="h-10 w-10 border-thin border-border bg-secondary flex items-center justify-center">
+                    <div className="h-10 w-10 border-thick border-border bg-secondary flex items-center justify-center">
                       <Shield className="h-5 w-5 text-muted-foreground" />
                     </div>
                     <div>
@@ -472,7 +463,7 @@ function MembersContent() {
                       <Button
                         size="sm"
                         variant="ghost"
-                        onClick={() => setMemberToRemove(member)}
+                        onClick={() => handleRemoveMember(member)}
                       >
                         <Trash2 className="h-4 w-4 text-destructive" />
                       </Button>
@@ -502,7 +493,7 @@ function MembersContent() {
               rolesData.map((roleInfo) => (
                 <div
                   key={roleInfo.role}
-                  className="p-4 border-thin border-border space-y-2"
+                  className="p-4 border-thick border-border space-y-2"
                 >
                   <div className="flex items-center gap-2">
                     <Badge variant={getRoleBadgeVariant(roleInfo.role)}>
@@ -518,32 +509,6 @@ function MembersContent() {
         </CardContent>
       </Card>
       </div>
-
-      {/* メンバー除名確認ダイアログ */}
-      <ConfirmDialog
-        isOpen={!!memberToRemove}
-        title="[確認: メンバーの除名]"
-        description={`メンバー「${memberToRemove?.userName ?? ""}」を除名しますか？この操作は取り消せません。`}
-        confirmLabel="除名する"
-        onConfirm={() =>
-          memberToRemove &&
-          removeMemberMutation.mutate({ membershipId: memberToRemove.id })
-        }
-        onCancel={() => setMemberToRemove(null)}
-      />
-
-      {/* 招待リンク削除確認ダイアログ */}
-      <ConfirmDialog
-        isOpen={!!tokenToDelete}
-        title="[確認: 招待リンクの削除]"
-        description="この招待リンクを削除しますか？削除されたリンクは無効になり、この操作は取り消せません。"
-        confirmLabel="削除する"
-        onConfirm={() =>
-          tokenToDelete &&
-          deleteTokenMutation.mutate({ tokenId: tokenToDelete.id })
-        }
-        onCancel={() => setTokenToDelete(null)}
-      />
     </DashboardLayout>
   );
 }

@@ -442,6 +442,8 @@ export interface Menu {
   imagePath: string | null;
   stockQuantity: number | null;
   soldOut: boolean;
+  /** 既定トッピングID配列を JSON 文字列で保持 (例: '["t1","t2"]') */
+  defaultToppingIds?: string;
 }
 
 export interface Topping {
@@ -450,6 +452,7 @@ export interface Topping {
   name: string;
   price: number;
   description: string | null;
+  imagePath: string | null;
   soldOut: boolean;
 }
 
@@ -613,6 +616,7 @@ export interface CreateMenuInput {
   stock?: number;
   isAvailable?: boolean;
   toppingIds?: string[];
+  defaultToppingIds?: string[];
 }
 
 export interface UpdateMenuInput {
@@ -625,6 +629,7 @@ export interface UpdateMenuInput {
   stock?: number | null;
   isAvailable?: boolean;
   toppingIds?: string[];
+  defaultToppingIds?: string[];
 }
 
 export interface CreateToppingInput {
@@ -632,6 +637,7 @@ export interface CreateToppingInput {
   name: string;
   price: number;
   description?: string;
+  imagePath?: string;
   stock?: number;
   isAvailable?: boolean;
 }
@@ -640,6 +646,7 @@ export interface UpdateToppingInput {
   name?: string;
   price?: number;
   description?: string | null;
+  imagePath?: string | null;
   stock?: number | null;
   isAvailable?: boolean;
 }
@@ -816,3 +823,87 @@ export const preOrderApi = {
 
 
 
+
+// ── システム管理 API (2026-07-06) ──────────────────────────────────────
+export interface AdminUserAccount {
+  email: string;
+  name: string;
+  isSuperAdmin: boolean;
+  memberships: Array<{
+    id: string;
+    role: string;
+    isActive: boolean;
+    scope: string;
+    scopeName: string;
+  }>;
+}
+
+export interface SystemLockout {
+  id: string;
+  key: string;
+  scope: string;
+  failedCount: number;
+  lockedUntil: string | null;
+}
+
+export interface SystemSettings {
+  maintenance: { enabled: boolean; message: string };
+}
+
+export type AnnouncementLevel = "info" | "warning" | "critical";
+
+export interface PublicAnnouncement {
+  id: string;
+  title: string;
+  body: string;
+  level: AnnouncementLevel;
+  createdAt: string;
+}
+
+export interface AdminAnnouncement extends PublicAnnouncement {
+  published: boolean;
+  updatedAt: string;
+}
+
+export interface AnnouncementInput {
+  title: string;
+  body?: string;
+  level?: AnnouncementLevel;
+  published?: boolean;
+}
+
+// 公開 (認証不要): メンテナンス + お知らせ
+export const systemApi = {
+  public: () => fetchApi<SystemSettings>("/api/system/public"),
+  announcements: () => fetchApi<PublicAnnouncement[]>("/api/system/announcements"),
+};
+
+// super_admin 専用
+export const adminApi = {
+  listUsers: () => fetchApi<AdminUserAccount[]>("/api/admin/users"),
+  updateMembership: (id: string, data: { role?: string; isActive?: boolean }) =>
+    fetchApi<{ success: boolean }>(`/api/admin/memberships/${id}`, {
+      method: "PATCH",
+      body: data,
+    }),
+  listLockouts: () => fetchApi<SystemLockout[]>("/api/admin/lockouts"),
+  clearLockout: (id: string) =>
+    fetchApi<{ success: boolean }>(`/api/admin/lockouts/${id}`, { method: "DELETE" }),
+  getSettings: () => fetchApi<SystemSettings>("/api/admin/settings"),
+  updateSettings: (data: Partial<SystemSettings>) =>
+    fetchApi<{ success: boolean }>("/api/admin/settings", { method: "PUT", body: data }),
+  // お知らせ CMS
+  listAnnouncements: () => fetchApi<AdminAnnouncement[]>("/api/admin/announcements"),
+  createAnnouncement: (data: AnnouncementInput) =>
+    fetchApi<{ success: boolean; id: string }>("/api/admin/announcements", {
+      method: "POST",
+      body: data,
+    }),
+  updateAnnouncement: (id: string, data: Partial<AnnouncementInput>) =>
+    fetchApi<{ success: boolean }>(`/api/admin/announcements/${id}`, {
+      method: "PATCH",
+      body: data,
+    }),
+  deleteAnnouncement: (id: string) =>
+    fetchApi<{ success: boolean }>(`/api/admin/announcements/${id}`, { method: "DELETE" }),
+};

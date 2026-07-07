@@ -19,6 +19,7 @@ import {
   Download,
 } from "lucide-react";
 import Link from "@/components/link";
+import { VISITOR_BASE_URL } from "@/components/external-redirect";
 import { QRCodeSVG } from "qrcode.react";
 import { toPng } from "html-to-image";
 import jsPDF from "jspdf";
@@ -71,7 +72,10 @@ function CircleQrContent() {
     );
   }
 
-  const mobileOrderUrl = `${origin}/visitor/menu?circleId=${circleId}`;
+  // 2026-07-06: 来場者アプリへ直接リンクする。以前は register の /visitor/menu 経由で
+  // ExternalRedirect していたが、リダイレクト時に ?circleId が落ちてサークルが特定できず
+  // 「メニューが開けない」不具合になっていた。VISITOR_BASE_URL へ直接飛ばして circleId を渡す。
+  const mobileOrderUrl = `${VISITOR_BASE_URL}/menu?circleId=${circleId}`;
 
   const handlePrint = () => {
     window.print();

@@ -36,6 +36,34 @@
       "when": 1783249982156,
       "tag": "0004_noisy_bulldozer",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1783320094582,
+      "tag": "0005_misty_chimera",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1783321258863,
+      "tag": "0006_normal_payback",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1783323715974,
+      "tag": "0007_busy_stephen_strange",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1783380101291,
+      "tag": "0008_fuzzy_master_mold",
+      "breakpoints": true
     }
   ]
 }

@@ -1,4 +1,5 @@
 import { toppingApi, type Topping } from "@/lib/api";
+import { ImageUpload } from "@/components/image-upload";
 import { Modal } from "@/components/ui/Modal";
 import {
   FormField,
@@ -16,17 +17,22 @@ interface ToppingFormModalProps {
   topping?: Topping | null;
 }
 
-type ToppingForm = { name: string; price: number; description: string };
+type ToppingForm = { name: string; price: number; imagePath: string; description: string };
 
 export function ToppingFormModal({ circleId, isOpen, onClose, topping }: ToppingFormModalProps) {
   const {
     form, setForm, isEdit, isConfirmOpen, setIsConfirmOpen, isCreating, saveStatus,
-    triggerAutoSave, handleOverlayClose, handleSaveAndClose, handleDiscardAndClose,
+    triggerAutoSave, saveNow, handleOverlayClose, handleSaveAndClose, handleDiscardAndClose,
   } = useEntityForm<ToppingForm, Topping>({
     isOpen,
     entity: topping,
-    emptyForm: { name: "", price: 0, description: "" },
-    toForm: (t) => ({ name: t.name, price: t.price, description: t.description || "" }),
+    emptyForm: { name: "", price: 0, imagePath: "", description: "" },
+    toForm: (t) => ({
+      name: t.name,
+      price: t.price,
+      imagePath: t.imagePath || "",
+      description: t.description || "",
+    }),
     onClose,
     toastId: "topping-auto-save",
     invalidateKeys: [["toppings", circleId]],
@@ -35,12 +41,14 @@ export function ToppingFormModal({ circleId, isOpen, onClose, topping }: Topping
         circleId,
         name: data.name,
         price: data.price,
+        imagePath: data.imagePath || undefined,
         description: data.description || undefined,
       }),
     update: (t, data) =>
       toppingApi.update(t.id, {
         name: data.name,
         price: data.price,
+        imagePath: data.imagePath || undefined,
         description: data.description || null,
       }),
     validate: (data) => (!data.name ? "トッピング名を入力してください" : null),
@@ -76,10 +84,26 @@ export function ToppingFormModal({ circleId, isOpen, onClose, topping }: Topping
             required
             type="number"
             value={form.price}
-            onChange={(e) => setForm({ ...form, price: Number(e.target.value) })}
+            onChange={(e) => {
+              const n = Number(e.target.value);
+              setForm({ ...form, price: Number.isNaN(n) ? 0 : n });
+            }}
             onBlur={triggerAutoSave}
           />
         </div>
+
+        <ImageUpload
+          label="トッピング画像"
+          value={form.imagePath}
+          onChange={(path) => {
+            setForm((prev) => {
+              const next = { ...prev, imagePath: path };
+              // 画像パス変更時は blur を伴わないため即座に自動保存を発火
+              if (isEdit) saveNow(next);
+              return next;
+            });
+          }}
+        />
 
         <FormField
           id="toppingDescription"

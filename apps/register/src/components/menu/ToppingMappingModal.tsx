@@ -125,6 +125,13 @@ export function ToppingMappingModal({ circleId, isOpen, onClose }: ToppingMappin
                           }
                           className="w-4 h-4 rounded-none border-thin border-border focus:ring-0 focus:ring-offset-0"
                         />
+                        {topping.imagePath && (
+                          <img
+                            src={topping.imagePath}
+                            alt={topping.name}
+                            className="h-8 w-8 object-cover border-thick border-border shrink-0"
+                          />
+                        )}
                         <div className="min-w-0">
                           <p className="truncate">{topping.name}</p>
                           <p className="text-[10px] text-muted-foreground font-normal">

@@ -1,6 +1,9 @@
-import { menuApi, type Menu } from "@/lib/api";
+import { useQuery } from "@tanstack/react-query";
+import { menuApi, toppingApi, type Menu } from "@/lib/api";
+import { cn } from "@/lib/utils";
 import { ImageUpload } from "@/components/image-upload";
 import { Modal } from "@/components/ui/Modal";
+import { Label } from "@/components/ui/label";
 import {
   FormField,
   FormSubmitButton,
@@ -23,22 +26,41 @@ type MenuForm = {
   imagePath: string;
   description: string;
   stockQuantity: number;
+  defaultToppingIds: string[];
 };
 
+function parseDefaultToppingIds(raw?: string): string[] {
+  if (!raw) return [];
+  try {
+    const v = JSON.parse(raw);
+    return Array.isArray(v) ? v : [];
+  } catch {
+    return [];
+  }
+}
+
 export function MenuFormModal({ circleId, isOpen, onClose, menu }: MenuFormModalProps) {
+  // 既定トッピングの選択肢 (サークルのトッピング一覧)
+  const { data: toppings } = useQuery({
+    queryKey: ["toppings", circleId],
+    queryFn: () => toppingApi.list(circleId),
+    enabled: isOpen && !!circleId,
+  });
+
   const {
     form, setForm, isEdit, isConfirmOpen, setIsConfirmOpen, isCreating, saveStatus,
     triggerAutoSave, saveNow, handleOverlayClose, handleSaveAndClose, handleDiscardAndClose,
   } = useEntityForm<MenuForm, Menu>({
     isOpen,
     entity: menu,
-    emptyForm: { name: "", price: 0, imagePath: "", description: "", stockQuantity: 0 },
+    emptyForm: { name: "", price: 0, imagePath: "", description: "", stockQuantity: 0, defaultToppingIds: [] },
     toForm: (m) => ({
       name: m.name,
       price: m.price,
       imagePath: m.imagePath || "",
       description: m.description || "",
       stockQuantity: m.stockQuantity ?? 0,
+      defaultToppingIds: parseDefaultToppingIds(m.defaultToppingIds),
     }),
     onClose,
     toastId: "menu-auto-save",
@@ -51,6 +73,7 @@ export function MenuFormModal({ circleId, isOpen, onClose, menu }: MenuFormModal
         imagePath: data.imagePath || undefined,
         description: data.description || undefined,
         stockQuantity: data.stockQuantity,
+        defaultToppingIds: data.defaultToppingIds,
       }),
     update: (m, data) =>
       menuApi.update(m.id, {
@@ -59,6 +82,7 @@ export function MenuFormModal({ circleId, isOpen, onClose, menu }: MenuFormModal
         imagePath: data.imagePath || undefined,
         description: data.description || undefined,
         stockQuantity: data.stockQuantity,
+        defaultToppingIds: data.defaultToppingIds,
       }),
     validate: (data) => (!data.name ? "メニュー名を入力してください" : null),
     messages: {
@@ -93,7 +117,10 @@ export function MenuFormModal({ circleId, isOpen, onClose, menu }: MenuFormModal
             required
             type="number"
             value={form.price}
-            onChange={(e) => setForm({ ...form, price: Number(e.target.value) })}
+            onChange={(e) => {
+              const n = Number(e.target.value);
+              setForm({ ...form, price: Number.isNaN(n) ? 0 : n });
+            }}
             onBlur={triggerAutoSave}
           />
         </div>
@@ -125,9 +152,50 @@ export function MenuFormModal({ circleId, isOpen, onClose, menu }: MenuFormModal
           label="在庫数"
           type="number"
           value={form.stockQuantity}
-          onChange={(e) => setForm({ ...form, stockQuantity: Number(e.target.value) })}
+          onChange={(e) => {
+            const n = Number(e.target.value);
+            setForm({ ...form, stockQuantity: Number.isNaN(n) ? 0 : n });
+          }}
           onBlur={triggerAutoSave}
         />
+
+        {/* 既定トッピング: レジで追加時に自動で入るトッピング */}
+        {toppings && toppings.length > 0 && (
+          <div className="space-y-1.5">
+            <Label className="text-xs font-bold uppercase">
+              既定トッピング（レジで自動適用）
+            </Label>
+            <div className="flex flex-wrap gap-1.5">
+              {toppings.map((t) => {
+                const selected = form.defaultToppingIds.includes(t.id);
+                return (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() => {
+                      const next = {
+                        ...form,
+                        defaultToppingIds: selected
+                          ? form.defaultToppingIds.filter((x) => x !== t.id)
+                          : [...form.defaultToppingIds, t.id],
+                      };
+                      setForm(next);
+                      if (isEdit) saveNow(next);
+                    }}
+                    className={cn(
+                      "border-thick rounded-none px-2 py-1 text-xs font-bold transition-all",
+                      selected
+                        ? "border-primary bg-primary text-primary-foreground"
+                        : "border-border bg-background hover:bg-muted",
+                    )}
+                  >
+                    {t.name} (+¥{t.price})
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {!isEdit && (
           <FormSubmitButton

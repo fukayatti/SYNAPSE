@@ -398,6 +398,7 @@ export interface Topping {
   name: string;
   price: number;
   description: string | null;
+  imagePath: string | null;
   soldOut: boolean;
 }
 
@@ -574,6 +575,7 @@ export interface CreateToppingInput {
   circleId: string;
   name: string;
   price: number;
+  imagePath?: string;
   stock?: number;
   isAvailable?: boolean;
 }
@@ -581,6 +583,7 @@ export interface CreateToppingInput {
 export interface UpdateToppingInput {
   name?: string;
   price?: number;
+  imagePath?: string | null;
   stock?: number | null;
   isAvailable?: boolean;
 }
@@ -777,3 +780,21 @@ export const preOrderApi = {
 
 
 
+
+// ── システム全体設定 (メンテナンス/お知らせ) 公開値 (2026-07-06) ──────────
+export interface SystemSettings {
+  maintenance: { enabled: boolean; message: string };
+}
+
+export interface PublicAnnouncement {
+  id: string;
+  title: string;
+  body: string;
+  level: "info" | "warning" | "critical";
+  createdAt: string;
+}
+
+export const systemApi = {
+  public: () => fetchApi<SystemSettings>("/api/system/public"),
+  announcements: () => fetchApi<PublicAnnouncement[]>("/api/system/announcements"),
+};

@@ -33,7 +33,7 @@ import {
 
 // スタッフモーダルとカスタムダイアログ
 import { StaffFormModal } from "@/components/staff/StaffFormModal";
-import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { undoableDelete } from "@/lib/toast-undo";
 
 function StaffManagementContent() {
   const { circleId } = useAuth();
@@ -45,8 +45,6 @@ function StaffManagementContent() {
   const [selectedStaff, setSelectedStaff] = useState<Staff | null>(null);
 
   // 削除確認用ステート
-  const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
-  const [staffToDelete, setStaffToDelete] = useState<Staff | null>(null);
 
   useEffect(() => {
     const authStored = localStorage.getItem("circleAuth");
@@ -79,18 +77,15 @@ function StaffManagementContent() {
   });
 
   // スタッフ削除
-  const deleteStaff = useMutation({
-    mutationFn: (id: string) => staffApi.delete(id),
-    onSuccess: () => {
-      toast.success("スタッフを削除しました");
-      queryClient.invalidateQueries({ queryKey: ["staff", circleId] });
-      setIsDeleteConfirmOpen(false);
-      setStaffToDelete(null);
-    },
-    onError: (error: Error) => {
-      toast.error(error.message || "削除に失敗しました");
-    },
-  });
+  // スタッフ削除は確認ダイアログの代わりに undo 付きトースト
+  const handleOpenDelete = (staff: Staff) =>
+    undoableDelete<Staff>({
+      queryClient,
+      queryKey: ["staff", circleId],
+      id: staff.id,
+      message: `スタッフ「${staff.name}」を削除しました`,
+      commit: () => staffApi.delete(staff.id),
+    });
 
   const handleOpenAdd = () => {
     setSelectedStaff(null);
@@ -100,11 +95,6 @@ function StaffManagementContent() {
   const handleOpenEdit = (staff: Staff) => {
     setSelectedStaff(staff);
     setIsStaffModalOpen(true);
-  };
-
-  const handleOpenDelete = (staff: Staff) => {
-    setStaffToDelete(staff);
-    setIsDeleteConfirmOpen(true);
   };
 
   // 表示用の日時フォーマット
@@ -277,16 +267,6 @@ function StaffManagementContent() {
           staff={selectedStaff}
         />
       )}
-
-      {/* 削除確認ダイアログ (破壊的操作のため ConfirmDialog を使用) */}
-      <ConfirmDialog
-        isOpen={isDeleteConfirmOpen}
-        title="[確認: スタッフの削除]"
-        description={`本当にスタッフ「${staffToDelete?.name}」さんを削除しますか？この操作は取り消せません。`}
-        confirmLabel="削除する"
-        onConfirm={() => staffToDelete && deleteStaff.mutate(staffToDelete.id)}
-        onCancel={() => setIsDeleteConfirmOpen(false)}
-      />
     </DashboardLayout>
   );
 }

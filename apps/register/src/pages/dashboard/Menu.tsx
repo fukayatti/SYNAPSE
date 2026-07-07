@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { CircleAuthGuard } from "@/hooks/useCircleAuth";
 import { menuApi, toppingApi } from "@/lib/api";
 import DashboardLayout from "@/components/DashboardLayout";
@@ -13,8 +13,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
-import { toast } from "sonner";
+import { undoableDelete } from "@/lib/toast-undo";
 import { Plus, Edit, Trash2, Settings, UtensilsCrossed } from "lucide-react";
 import Image from "@/components/image";
 
@@ -35,10 +34,6 @@ function MenuManagementContent() {
   const [selectedTopping, setSelectedTopping] = useState<any | null>(null);
 
   const [isMappingOpen, setIsMappingOpen] = useState(false);
-
-  // 削除確認ダイアログ用ステート (メニュー / トッピング共通で対象を保持)
-  const [menuToDelete, setMenuToDelete] = useState<any | null>(null);
-  const [toppingToDelete, setToppingToDelete] = useState<any | null>(null);
 
   const queryClient = useQueryClient();
 
@@ -70,31 +65,27 @@ function MenuManagementContent() {
     enabled: !!circleId,
   });
 
-  // メニュー削除
-  const deleteMenu = useMutation({
-    mutationFn: (id: string) => menuApi.delete(id),
-    onSuccess: () => {
-      toast.success("メニューを削除しました");
-      queryClient.invalidateQueries({ queryKey: ["menus", circleId] });
-      setMenuToDelete(null);
-    },
-    onError: (error: any) => {
-      toast.error(error.message || "削除に失敗しました");
-    },
-  });
+  // メニュー削除 (確認ダイアログの代わりに undo 付きトースト)
+  const handleDeleteMenu = (menu: any) =>
+    undoableDelete({
+      queryClient,
+      queryKey: ["menus", circleId],
+      id: menu.id,
+      message: `メニュー「${menu.name}」を削除しました`,
+      commit: () => menuApi.delete(menu.id),
+    });
 
-  // トッピング削除
-  const deleteTopping = useMutation({
-    mutationFn: (id: string) => toppingApi.delete(id),
-    onSuccess: () => {
-      toast.success("トッピングを削除しました");
-      queryClient.invalidateQueries({ queryKey: ["toppings", circleId] });
-      queryClient.invalidateQueries({ queryKey: ["menus", circleId] }); // メニューのトッピング一覧も更新
-      setToppingToDelete(null);
-    },
-    onError: (error: any) => {
-      toast.error(error.message || "削除に失敗しました");
-    },
+  // トッピング削除 (undo 付き)
+  const handleDeleteTopping = (topping: any) =>
+    undoableDelete({
+      queryClient,
+      queryKey: ["toppings", circleId],
+      id: topping.id,
+      message: `トッピング「${topping.name}」を削除しました`,
+      commit: async () => {
+        await toppingApi.delete(topping.id);
+        queryClient.invalidateQueries({ queryKey: ["menus", circleId] }); // メニューのトッピング一覧も更新
+      },
   });
 
   const handleOpenMenuAdd = () => {
@@ -236,8 +227,7 @@ function MenuManagementContent() {
                       <Button
                         variant="destructive"
                         size="sm"
-                        onClick={() => setMenuToDelete(menu)}
-                        disabled={deleteMenu.isPending}
+                        onClick={() => handleDeleteMenu(menu)}
                         className="flex-1 rounded-none border-thick border-destructive h-8 text-[10px] font-bold uppercase"
                       >
                         <Trash2 className="mr-1 h-3 w-3" />
@@ -304,8 +294,7 @@ function MenuManagementContent() {
                     <Button
                       variant="destructive"
                       size="sm"
-                      onClick={() => setToppingToDelete(topping)}
-                      disabled={deleteTopping.isPending}
+                      onClick={() => handleDeleteTopping(topping)}
                       className="flex-1 rounded-none border-thick border-destructive h-7 text-[10px] font-bold uppercase"
                     >
                       <Trash2 className="mr-1 h-3 w-3" />
@@ -341,25 +330,6 @@ function MenuManagementContent() {
         onClose={() => setIsMappingOpen(false)}
       />
 
-      {/* メニュー削除確認ダイアログ */}
-      <ConfirmDialog
-        isOpen={!!menuToDelete}
-        title="[確認: メニューの削除]"
-        description={`メニュー「${menuToDelete?.name ?? ""}」を削除しますか？この操作は取り消せません。`}
-        confirmLabel="削除する"
-        onConfirm={() => menuToDelete && deleteMenu.mutate(menuToDelete.id)}
-        onCancel={() => setMenuToDelete(null)}
-      />
-
-      {/* トッピング削除確認ダイアログ */}
-      <ConfirmDialog
-        isOpen={!!toppingToDelete}
-        title="[確認: トッピングの削除]"
-        description={`トッピング「${toppingToDelete?.name ?? ""}」を削除しますか？この操作は取り消せません。`}
-        confirmLabel="削除する"
-        onConfirm={() => toppingToDelete && deleteTopping.mutate(toppingToDelete.id)}
-        onCancel={() => setToppingToDelete(null)}
-      />
     </DashboardLayout>
   );
 }
