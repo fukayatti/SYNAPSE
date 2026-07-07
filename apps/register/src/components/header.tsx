@@ -309,17 +309,19 @@ export default function Header() {
 
   return (
     <header className="sticky top-0 z-50 bg-background border-b-thick border-border text-foreground font-mono">
-      <div className="flex items-center justify-between px-4 py-2 max-w-7xl mx-auto gap-4">
+      <div className="flex items-center justify-between px-2 sm:px-4 py-2 max-w-7xl mx-auto gap-2 sm:gap-4 overflow-x-hidden">
         {/* ロゴ / ブランド */}
         <Link
           to="/"
-          className="font-headline text-base sm:text-lg md:text-xl uppercase tracking-[2px] leading-none select-none hover:opacity-80 flex items-center gap-2 shrink-0"
+          className="font-headline text-sm sm:text-lg md:text-xl uppercase tracking-[2px] leading-none select-none hover:opacity-80 flex items-center gap-1 sm:gap-2 shrink-0"
         >
-          <span className="font-black border-thin border-border px-2 py-1 bg-primary text-primary-foreground text-sm sm:text-base">
+          <span className="font-black border-thin border-border px-1.5 sm:px-2 py-1 bg-primary text-primary-foreground text-[10px] sm:text-base whitespace-nowrap">
             {PRODUCT_NAME.toUpperCase()}
-            {isCircleView && " // BOOTH"}
-            {isEventView && " // EVENT"}
-            {isAdminView && " // SYSTEM"}
+            <span className="hidden sm:inline">
+              {isCircleView && " // BOOTH"}
+              {isEventView && " // EVENT"}
+              {isAdminView && " // SYSTEM"}
+            </span>
           </span>
         </Link>
 
@@ -341,9 +343,9 @@ export default function Header() {
         </nav>
 
         {/* アカウント制御セクション */}
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
           {isAuthenticated && !isLoading ? (
-            <div className="flex items-center gap-2 relative">
+            <div className="flex items-center gap-1.5 sm:gap-2 relative">
               {/* 通知ベルアイコン */}
               <div className="relative">
                 <button
@@ -352,9 +354,9 @@ export default function Header() {
                     setProfileModalOpen(false);
                     setSpacePopoverOpen(false);
                   }}
-                  className="p-2 border-thick border-border bg-background hover:bg-muted select-none cursor-pointer flex items-center justify-center relative h-9 w-9 rounded-none"
+                  className="p-1.5 sm:p-2 border-thick border-border bg-background hover:bg-muted select-none cursor-pointer flex items-center justify-center relative h-8 w-8 sm:h-9 sm:w-9 rounded-none"
                 >
-                  <Bell className="h-4 w-4" />
+                  <Bell className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                   {((notifications && notifications.length > 0) ||
                     (announcements && announcements.length > 0)) && (
                     <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-destructive rounded-none" />
@@ -464,18 +466,18 @@ export default function Header() {
                     setNotifPopoverOpen(false);
                     setProfileModalOpen(false);
                   }}
-                  className="flex items-center gap-2 bg-muted border-thick border-border px-3 py-1.5 font-mono text-[11px] font-bold hover:bg-muted/80 select-none cursor-pointer h-9 rounded-none"
+                  className="flex items-center gap-1 sm:gap-2 bg-muted border-thick border-border px-2 sm:px-3 py-1 sm:py-1.5 font-mono text-[10px] sm:text-[11px] font-bold hover:bg-muted/80 select-none cursor-pointer h-8 sm:h-9 rounded-none"
                 >
-                  {pathname.startsWith("/sys") && <Shield className="h-3.5 w-3.5" />}
-                  {pathname.startsWith("/event") && <Calendar className="h-3.5 w-3.5" />}
-                  {pathname.startsWith("/circle") && <Building2 className="h-3.5 w-3.5" />}
-                  <span className="hidden sm:inline truncate max-w-[120px]">
+                  {pathname.startsWith("/sys") && <Shield className="h-3 w-3 sm:h-3.5 sm:w-3.5" />}
+                  {pathname.startsWith("/event") && <Calendar className="h-3 w-3 sm:h-3.5 sm:w-3.5" />}
+                  {pathname.startsWith("/circle") && <Building2 className="h-3 w-3 sm:h-3.5 sm:w-3.5" />}
+                  <span className="hidden md:inline truncate max-w-[120px]">
                     {currentSpaceName}
                   </span>
-                  <span className="bg-primary text-primary-foreground px-1 py-0.5 text-[8px] font-black scale-90 shrink-0">
+                  <span className="hidden sm:inline bg-primary text-primary-foreground px-1 py-0.5 text-[8px] font-black scale-90 shrink-0">
                     {currentSpaceRole}
                   </span>
-                  <ChevronDown className="h-3.5 w-3.5 shrink-0" />
+                  <ChevronDown className="h-3 w-3 sm:h-3.5 sm:w-3.5 shrink-0" />
                 </button>
 
                 {/* スペース切り替えポップオーバー */}
@@ -551,17 +553,17 @@ export default function Header() {
                   setNotifPopoverOpen(false);
                   setSpacePopoverOpen(false);
                 }}
-                className="flex items-center gap-2 bg-muted border-thick border-border px-3 py-1.5 font-mono text-[11px] font-bold hover:bg-muted/80 select-none cursor-pointer h-9 rounded-none"
+                className="flex items-center gap-1 sm:gap-2 bg-muted border-thick border-border px-2 sm:px-3 py-1 sm:py-1.5 font-mono text-[10px] sm:text-[11px] font-bold hover:bg-muted/80 select-none cursor-pointer h-8 sm:h-9 rounded-none"
               >
                 {me?.image ? (
-                  <img src={me.image} alt="Avatar" className="w-5 h-5 rounded-none border border-border object-cover shrink-0" />
+                  <img src={me.image} alt="Avatar" className="w-4 h-4 sm:w-5 sm:h-5 rounded-none border border-border object-cover shrink-0" />
                 ) : (
-                  <User className="h-3.5 w-3.5 shrink-0" />
+                  <User className="h-3 w-3 sm:h-3.5 sm:w-3.5 shrink-0" />
                 )}
-                <span className="hidden sm:inline truncate max-w-[80px]">
+                <span className="hidden md:inline truncate max-w-[80px]">
                   {userName || "アカウント"}
                 </span>
-                <ChevronDown className="h-3.5 w-3.5 shrink-0" />
+                <ChevronDown className="h-3 w-3 sm:h-3.5 sm:w-3.5 shrink-0" />
               </button>
             </div>
           ) : (
@@ -578,11 +580,11 @@ export default function Header() {
           {/* ハンバーガーメニュー (モバイルのみ) */}
           {links.length > 0 && (
             <button
-              className="md:hidden flex items-center justify-center w-10 h-10 border-thick border-border bg-background text-foreground hover:bg-primary hover:text-primary-foreground transition-all rounded-none"
+              className="md:hidden flex items-center justify-center w-8 h-8 sm:w-10 sm:h-10 border-thick border-border bg-background text-foreground hover:bg-primary hover:text-primary-foreground transition-all rounded-none"
               onClick={() => setMobileOpen((prev) => !prev)}
               aria-label={mobileOpen ? "メニューを閉じる" : "メニューを開く"}
             >
-              {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+              {mobileOpen ? <X className="h-4 w-4 sm:h-5 sm:w-5" /> : <Menu className="h-4 w-4 sm:h-5 sm:w-5" />}
             </button>
           )}
         </div>
