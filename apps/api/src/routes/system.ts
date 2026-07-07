@@ -3,23 +3,27 @@ import { zBody } from "../z-validator";
 import { apiError } from "../http-error";
 import { z } from "zod";
 import {
-  db,
   membership,
   authAttempt,
   systemSetting,
   announcement,
   event,
   circle,
+  type DB,
+  type WorkerEnv,
 } from "@fesflow/db";
 import { eq, and, gt, isNotNull, desc } from "drizzle-orm";
 import { nanoid } from "nanoid";
-import { requireSuperAdmin, type AuthVariables } from "../middleware/auth";
+import { requireSuperAdmin } from "../middleware/auth";
+import type { AppEnv, AppVariables } from "../types";
 
 // ── 公開システム設定 (メンテナンス/お知らせ) ────────────────────────────
 // 全アプリが起動時に読む。認証不要。value は JSON 文字列で保存。
 const MAINT_KEY = "maintenance";
 
-async function readSetting<T>(key: string, fallback: T): Promise<T> {
+// 2026-07-08 (Phase5): db はモジュール Proxy ではなく c.get("db") 経由で受け取る (ALS撤去)。
+// c を持たないモジュールレベルのヘルパは db を引数で受け取る。
+async function readSetting<T>(db: DB, key: string, fallback: T): Promise<T> {
   const rows = await db
     .select()
     .from(systemSetting)
@@ -32,7 +36,7 @@ async function readSetting<T>(key: string, fallback: T): Promise<T> {
   }
 }
 
-async function writeSetting(key: string, value: unknown) {
+async function writeSetting(db: DB, key: string, value: unknown) {
   const json = JSON.stringify(value);
   await db
     .insert(systemSetting)
@@ -46,15 +50,17 @@ async function writeSetting(key: string, value: unknown) {
 const DEFAULT_MAINT = { enabled: false, message: "" };
 
 // 公開ルート: GET /api/system/public
-export const systemRoutes = new Hono();
+export const systemRoutes = new Hono<AppEnv>();
 
 systemRoutes.get("/public", async (c) => {
-  const maintenance = await readSetting(MAINT_KEY, DEFAULT_MAINT);
+  const db = c.get("db");
+  const maintenance = await readSetting(db, MAINT_KEY, DEFAULT_MAINT);
   return c.json({ maintenance });
 });
 
 // 公開お知らせ一覧 (published のみ、新しい順)
 systemRoutes.get("/announcements", async (c) => {
+  const db = c.get("db");
   const rows = await db
     .select()
     .from(announcement)
@@ -73,7 +79,8 @@ systemRoutes.get("/announcements", async (c) => {
 
 // ── 管理ルート (super_admin 限定) ───────────────────────────────────────
 export const adminRoutes = new Hono<{
-  Variables: AuthVariables & { adminEmail: string };
+  Bindings: WorkerEnv;
+  Variables: AppVariables & { adminEmail: string };
 }>();
 
 // 全ルート super_admin ガード
@@ -81,14 +88,16 @@ export const adminRoutes = new Hono<{
 // requireSuperAdmin に集約。ここでは session から adminEmail を取り出すだけにする。
 adminRoutes.use("*", requireSuperAdmin);
 adminRoutes.use("*", async (c, next) => {
-  const session = c.get("session");
+  // requireSuperAdmin が直前で session を必ず set しているため non-null。
+  const session = c.get("session")!;
   c.set("adminEmail", session.user.email.toLowerCase());
   await next();
 });
 
 // メンテナンス設定の取得 (管理画面用)
 adminRoutes.get("/settings", async (c) => {
-  const maintenance = await readSetting(MAINT_KEY, DEFAULT_MAINT);
+  const db = c.get("db");
+  const maintenance = await readSetting(db, MAINT_KEY, DEFAULT_MAINT);
   return c.json({ maintenance });
 });
 
@@ -103,8 +112,9 @@ adminRoutes.put(
     }),
   ),
   async (c) => {
+    const db = c.get("db");
     const input = c.req.valid("json");
-    if (input.maintenance) await writeSetting(MAINT_KEY, input.maintenance);
+    if (input.maintenance) await writeSetting(db, MAINT_KEY, input.maintenance);
     return c.json({ success: true });
   },
 );
@@ -119,6 +129,7 @@ const announcementInput = z.object({
 
 // 全お知らせ (下書き含む)
 adminRoutes.get("/announcements", async (c) => {
+  const db = c.get("db");
   const rows = await db
     .select()
     .from(announcement)
@@ -127,6 +138,7 @@ adminRoutes.get("/announcements", async (c) => {
 });
 
 adminRoutes.post("/announcements", zBody(announcementInput), async (c) => {
+  const db = c.get("db");
   const input = c.req.valid("json");
   const id = nanoid();
   await db.insert(announcement).values({ id, ...input });
@@ -137,6 +149,7 @@ adminRoutes.patch(
   "/announcements/:id",
   zBody(announcementInput.partial()),
   async (c) => {
+    const db = c.get("db");
     const id = c.req.param("id");
     const input = c.req.valid("json");
     await db
@@ -148,6 +161,7 @@ adminRoutes.patch(
 );
 
 adminRoutes.delete("/announcements/:id", async (c) => {
+  const db = c.get("db");
   const id = c.req.param("id");
   await db.delete(announcement).where(eq(announcement.id, id));
   return c.json({ success: true });
@@ -155,6 +169,7 @@ adminRoutes.delete("/announcements/:id", async (c) => {
 
 // 全アカウント (= membership を持つユーザー) の一覧。email 単位で集約。
 adminRoutes.get("/users", async (c) => {
+  const db = c.get("db");
   const memberships = await db.select().from(membership);
   const events = await db.select().from(event);
   const circles = await db.select().from(circle);
@@ -228,9 +243,10 @@ adminRoutes.patch(
     }),
   ),
   async (c) => {
+    const db = c.get("db");
     const id = c.req.param("id");
     const input = c.req.valid("json");
-    const adminEmail = c.get("adminEmail") as string;
+    const adminEmail = c.get("adminEmail");
 
     const rows = await db.select().from(membership).where(eq(membership.id, id));
     if (rows.length === 0) {
@@ -272,6 +288,7 @@ adminRoutes.patch(
 
 // 現在ロック中の認証試行 (アカウントロックアウト) 一覧
 adminRoutes.get("/lockouts", async (c) => {
+  const db = c.get("db");
   const now = new Date();
   const rows = await db
     .select()
@@ -290,6 +307,7 @@ adminRoutes.get("/lockouts", async (c) => {
 
 // ロックアウト解除 (該当行を削除)
 adminRoutes.delete("/lockouts/:id", async (c) => {
+  const db = c.get("db");
   const id = c.req.param("id");
   await db.delete(authAttempt).where(eq(authAttempt.id, id));
   return c.json({ success: true });

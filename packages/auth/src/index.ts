@@ -1,17 +1,19 @@
 /**
- * 認証 (better-auth) エントリ (2026-07-04 Worker 対応にリライト)
+ * 認証 (better-auth) エントリ (2026-07-08 Phase5: ALS+Proxy 撤去 → 明示的 per-request DI)
  *
  * 変更意図:
- * - 旧実装は db シングルトンと process.env.CORS_ORIGIN に依存した
- *   `auth` シングルトンだった。Worker では db も env もリクエスト毎なので
- *   `createAuth(db, env)` ファクトリへ変更する。
- * - 既存コード (context.ts / utils/auth.ts) は `import { auth }` を
- *   使うため、ALS のリクエストストアから実体を解決する Proxy として
- *   `auth` を公開し、呼び出し側を無改修に保つ。
+ * - 旧実装 (2026-07-04) は db シングルトンと process.env.CORS_ORIGIN に依存した
+ *   従来コードの都合で `createAuth(db, env)` ファクトリ化した上で、既存コード
+ *   (utils/auth.ts 等) の `import { auth }` を無改修に保つため ALS のリクエスト
+ *   ストアから実体を解決する Proxy を被せていた。
+ * - Phase5 でこの Proxy を撤去する。呼び出し側は `c.get("auth")`
+ *   (apps/api/src/index.ts の middleware で c.set("auth", createAuth(db, env)) 済み)
+ *   を明示的に使うよう変更済みなので、ここでは createAuth ファクトリと Auth 型だけを
+ *   提供すればよい。
  */
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
-import { getRequestStore, type DB, type WorkerEnv } from "@fesflow/db";
+import type { DB, WorkerEnv } from "@fesflow/db";
 import * as schema from "@fesflow/db/schema/auth";
 import { passkey } from "@better-auth/passkey";
 
@@ -66,22 +68,3 @@ export function createAuth(db: DB, env: WorkerEnv): Auth {
 		},
 	}) as Auth;
 }
-
-/**
- * ALS のリクエストストアから better-auth 実体を解決する Proxy。
- * 関数は実体に bind して返す (this 依存対策)。
- */
-export const auth: Auth = new Proxy({} as Auth, {
-	get(_target, prop) {
-		const real = getRequestStore().auth as Record<PropertyKey, unknown>;
-		if (!real) {
-			throw new Error(
-				"[auth] リクエストストアに auth がありません。ミドルウェアで createAuth を設定してください。",
-			);
-		}
-		const value = real[prop];
-		return typeof value === "function"
-			? (value as (...args: unknown[]) => unknown).bind(real)
-			: value;
-	},
-}) as Auth;

@@ -2,15 +2,17 @@ import { Hono } from "hono";
 import { zBody } from "../z-validator";
 import { apiError } from "../http-error";
 import { z } from "zod";
-import { db, event, membership } from "@fesflow/db";
+import { event, membership } from "@fesflow/db";
 import { eq, and, inArray, isNull } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { getAdminSession, getSession } from "../utils/auth";
+import type { AppEnv } from "../types";
 
-const eventRoutes = new Hono();
+const eventRoutes = new Hono<AppEnv>();
 
 // イベント一覧取得 (2026-07-04 SaaSマルチテナント制限)
 eventRoutes.get("/", async (c) => {
+  const db = c.get("db");
   const session = await getSession(c);
   if (!session || !session.user) {
     apiError("UNAUTHORIZED", "認証が必要です");
@@ -55,6 +57,7 @@ eventRoutes.get("/", async (c) => {
 
 // イベント取得
 eventRoutes.get("/:id", async (c) => {
+  const db = c.get("db");
   const id = c.req.param("id");
   const events = await db
     .select()
@@ -80,6 +83,7 @@ eventRoutes.post(
     })
   ),
   async (c) => {
+    const db = c.get("db");
     const session = await getAdminSession(c);
     if (!session) {
       apiError("FORBIDDEN", "管理者権限が必要です");
@@ -102,6 +106,7 @@ eventRoutes.post(
 
 // イベント削除 (論理削除) — システム管理者(super_admin)のみ
 eventRoutes.delete("/:id", async (c) => {
+  const db = c.get("db");
   const session = await getAdminSession(c);
   if (!session) {
     apiError("FORBIDDEN", "管理者権限が必要です");
@@ -134,6 +139,7 @@ eventRoutes.put(
     })
   ),
   async (c) => {
+    const db = c.get("db");
     const session = await getAdminSession(c);
     if (!session) {
       apiError("FORBIDDEN", "管理者権限が必要です");

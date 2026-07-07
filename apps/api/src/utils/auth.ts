@@ -1,18 +1,27 @@
-import { auth } from "@fesflow/auth";
-import { db, membership, circle, getEnv } from "@fesflow/db";
+import { membership, circle } from "@fesflow/db";
 import { eq, and } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { Context } from "hono";
 import { ROLE_PERMISSIONS, type Permission } from "@fesflow/db";
+import type { AppEnv } from "../types";
 
-export async function getSession(c: Context) {
+// 2026-07-08 (Phase5): db/auth はモジュール Proxy ではなく、index.ts の middleware で
+// c.set("db"/"auth", ...) された実体を c.get() で明示的に受け取る (ALS+Proxy 撤去)。
+// このファイルの関数は全て Context を受け取るので、c.get("db") / c.get("auth") /
+// c.env で解決できる。
+
+export async function getSession(c: Context<AppEnv>) {
+  const auth = c.get("auth");
   return await auth.api.getSession({
     headers: c.req.raw.headers,
   });
 }
 
 
-export async function getAdminSession(c: Context) {
+export async function getAdminSession(c: Context<AppEnv>) {
+  const db = c.get("db");
+  const auth = c.get("auth");
+
   // Better Auth からセッションを取得
   const session = await auth.api.getSession({
     headers: c.req.raw.headers,
@@ -23,7 +32,8 @@ export async function getAdminSession(c: Context) {
   }
 
   const email = session.user.email;
-  const initialAdminEmail = getEnv().INITIAL_SUPER_ADMIN_EMAIL;
+  // 旧 getEnv().INITIAL_SUPER_ADMIN_EMAIL → c.env から直接参照 (Phase5: getEnv 廃止)
+  const initialAdminEmail = c.env.INITIAL_SUPER_ADMIN_EMAIL;
 
   // 2026-07-06: 初期管理者メールアドレスへの自動昇格は emailVerified === true の場合に限定する (監査 C1)。
   // better-auth はメール検証なしでもサインアップ・ログインできるため、検証前は
@@ -77,11 +87,12 @@ export async function getAdminSession(c: Context) {
 }
 
 export async function hasPermission(
-  c: Context,
+  c: Context<AppEnv>,
   circleId: string | null,
   requiredPermission: Permission,
   eventId?: string
 ): Promise<boolean> {
+  const db = c.get("db");
   const session = await getSession(c);
   if (!session || !session.user) return false;
 

@@ -2,17 +2,18 @@ import { Hono } from "hono";
 import { zBody } from "../z-validator";
 import { apiError } from "../http-error";
 import { z } from "zod";
-import { db, membership, inviteToken, circle, event, getEnv, notification } from "@fesflow/db";
+import { membership, inviteToken, circle, event, notification } from "@fesflow/db";
 import { eq, and, inArray, gt, isNull, lt } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { Context } from "hono";
-import { requireAuth, type AuthVariables } from "../middleware/auth";
+import { requireAuth } from "../middleware/auth";
+import type { AppEnv } from "../types";
 
 // 2026-07-07 (Phase 3a): 独自 PIN 認証 (authenticate-pin) を廃止したのに伴い、
 // このルーター配下の全エンドポイントが better-auth セッション必須になったため、
 // requireAuth middleware で一括ガードする (下記 membershipRoutes.use("*", requireAuth))。
 // 各ハンドラ内で個別に auth.api.getSession を呼んでいた定型コードはこれで不要になる。
-const membershipRoutes = new Hono<{ Variables: AuthVariables }>();
+const membershipRoutes = new Hono<AppEnv>();
 membershipRoutes.use("*", requireAuth);
 
 // ロール定義 (SaaS対応 - 2026-07-04)
@@ -90,15 +91,17 @@ function hasPermission(role: Role, permission: string): boolean {
 // 呼ばれる時点でセッションは既に確立済みなので c.get("session") から取得する
 // (auth.api.getSession の再呼び出しをやめる)。
 async function checkMemberWritePermission(
-  c: Context<{ Variables: AuthVariables }>,
+  c: Context<AppEnv>,
   targetCircleId: string | null,
   targetCurrentRole: string,
   targetNewRole?: string,
   targetEventId?: string | null
 ) {
-  const session = c.get("session");
+  const db = c.get("db");
+  const session = c.get("session")!;
   const email = session.user.email.toLowerCase();
-  const initialAdminEmail = getEnv().INITIAL_SUPER_ADMIN_EMAIL;
+  // 旧 getEnv().INITIAL_SUPER_ADMIN_EMAIL → c.env から直接参照 (Phase5: getEnv 廃止)
+  const initialAdminEmail = c.env.INITIAL_SUPER_ADMIN_EMAIL;
 
   // 1. super_admin / system_manager (システムレベルの管理者) は何でも可能
   // 2026-07-06 (C1): initialAdminEmail 一致だけでの system admin 昇格は、
@@ -225,10 +228,12 @@ membershipRoutes.get("/roles", (c) => {
 // super_admin 自動生成は getAdminSession 側で既にセッション必須で行われているため、
 // ここでの自動生成ロジックは完全に削除する。
 membershipRoutes.get("/my", async (c) => {
-  const session = c.get("session");
+  const db = c.get("db");
+  const session = c.get("session")!;
   const userEmail = session.user.email;
 
-  const initialAdminEmail = getEnv().INITIAL_SUPER_ADMIN_EMAIL;
+  // 旧 getEnv().INITIAL_SUPER_ADMIN_EMAIL → c.env から直接参照 (Phase5: getEnv 廃止)
+  const initialAdminEmail = c.env.INITIAL_SUPER_ADMIN_EMAIL;
   if (initialAdminEmail && userEmail.toLowerCase() === initialAdminEmail.toLowerCase()) {
     const existing = await db
       .select()
@@ -306,6 +311,7 @@ membershipRoutes.get("/my", async (c) => {
 // 2026-07-07 (Phase 3a): membership.pin カラム自体を廃止したため、pin 除外の
 // サニタイズ処理は不要になった (返却カラムに元々含まれない)。
 membershipRoutes.get("/circle/:circleId", async (c) => {
+  const db = c.get("db");
   const circleId = c.req.param("circleId");
 
   const circles = await db.select().from(circle).where(eq(circle.id, circleId));
@@ -330,6 +336,7 @@ membershipRoutes.get("/circle/:circleId", async (c) => {
 // 2026-07-07 (Phase 3a): membership.pin カラム自体を廃止したため、pin 除外の
 // サニタイズ処理は不要になった。
 membershipRoutes.get("/event/:eventId", async (c) => {
+  const db = c.get("db");
   const eventId = c.req.param("eventId");
 
   const err = await checkMemberWritePermission(c, null, "viewer", undefined, eventId);
@@ -359,9 +366,10 @@ membershipRoutes.post(
     })
   ),
   async (c) => {
+    const db = c.get("db");
     const input = c.req.valid("json");
 
-    const session = c.get("session");
+    const session = c.get("session")!;
     if (session.user.email.toLowerCase() !== input.userEmail.toLowerCase()) {
       apiError("FORBIDDEN", "他のユーザーの権限は照会できません");
     }
@@ -422,6 +430,7 @@ membershipRoutes.post(
     })
   ),
   async (c) => {
+    const db = c.get("db");
     const input = c.req.valid("json");
     const id = nanoid();
 
@@ -451,12 +460,13 @@ membershipRoutes.patch(
     })
   ),
   async (c) => {
+    const db = c.get("db");
     const id = c.req.param("id");
     const input = c.req.valid("json");
 
     const targets = await db.select().from(membership).where(eq(membership.id, id));
     if (targets.length === 0) apiError("NOT_FOUND", "メンバーが見つかりません");
-    
+
     const target = targets[0]!;
     const err = await checkMemberWritePermission(c, target.circleId, target.role, input.role, target.eventId);
     if (err) apiError(err.code, err.error, { status: err.status });
@@ -472,6 +482,7 @@ membershipRoutes.patch(
 
 // メンバー無効化
 membershipRoutes.patch("/:id/deactivate", async (c) => {
+  const db = c.get("db");
   const id = c.req.param("id");
 
   const targets = await db.select().from(membership).where(eq(membership.id, id));
@@ -491,6 +502,7 @@ membershipRoutes.patch("/:id/deactivate", async (c) => {
 
 // メンバー削除
 membershipRoutes.delete("/:id", async (c) => {
+  const db = c.get("db");
   const id = c.req.param("id");
 
   const targets = await db.select().from(membership).where(eq(membership.id, id));
@@ -520,6 +532,7 @@ membershipRoutes.post(
     })
   ),
   async (c) => {
+    const db = c.get("db");
     const input = c.req.valid("json");
     const id = nanoid();
     const token = nanoid(32);
@@ -597,9 +610,10 @@ membershipRoutes.post(
     })
   ),
   async (c) => {
+    const db = c.get("db");
     const input = c.req.valid("json");
 
-    const session = c.get("session");
+    const session = c.get("session")!;
     const userEmail = session.user.email.toLowerCase();
 
     // トークンを検索
@@ -694,6 +708,7 @@ membershipRoutes.post(
 // （権限昇格チェーンの起点になりうる）ため、メンバー管理権限を要求し、
 // レスポンスから生の token を除外する。
 membershipRoutes.get("/invite/list", async (c) => {
+  const db = c.get("db");
   const circleId = c.req.query("circleId");
   const eventId = c.req.query("eventId");
 
@@ -740,6 +755,7 @@ membershipRoutes.get("/invite/list", async (c) => {
 
 // 招待トークン削除
 membershipRoutes.delete("/invite/:id", async (c) => {
+  const db = c.get("db");
   const id = c.req.param("id");
 
   const tokens = await db.select().from(inviteToken).where(eq(inviteToken.id, id));
@@ -761,7 +777,8 @@ membershipRoutes.delete("/invite/:id", async (c) => {
 
 // 通知一覧取得 (2026-07-04 SaaS通知対応)
 membershipRoutes.get("/notifications/list", async (c) => {
-  const session = c.get("session");
+  const db = c.get("db");
+  const session = c.get("session")!;
   const email = session.user.email.toLowerCase();
 
   const list = await db
@@ -777,8 +794,9 @@ membershipRoutes.get("/notifications/list", async (c) => {
 
 // 通知を既読にする
 membershipRoutes.post("/notifications/:id/read", async (c) => {
+  const db = c.get("db");
   const id = c.req.param("id");
-  const session = c.get("session");
+  const session = c.get("session")!;
 
   await db
     .update(notification)
@@ -798,9 +816,10 @@ membershipRoutes.post(
     })
   ),
   async (c) => {
+    const db = c.get("db");
     const id = c.req.param("id");
     const input = c.req.valid("json");
-    const session = c.get("session");
+    const session = c.get("session")!;
     const email = session.user.email.toLowerCase();
 
     // 通知を検索

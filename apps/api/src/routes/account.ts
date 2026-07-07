@@ -16,14 +16,15 @@ import { Hono, type Context } from "hono";
 import { zBody } from "../z-validator";
 import { apiError } from "../http-error";
 import { z } from "zod";
-import { db, user, membership, notification } from "@fesflow/db";
+import { user, membership, notification } from "@fesflow/db";
 import { eq, and } from "drizzle-orm";
-import { auth } from "@fesflow/auth";
+import type { AppEnv } from "../types";
 
-const accountRoutes = new Hono();
+const accountRoutes = new Hono<AppEnv>();
 
 /** セッションから本人のメール(小文字)を取り出す。未認証なら null。 */
-async function getSelf(c: Context) {
+async function getSelf(c: Context<AppEnv>) {
+  const auth = c.get("auth");
   const session = await auth.api.getSession({ headers: c.req.raw.headers });
   if (!session || !session.user) return null;
   return {
@@ -35,6 +36,7 @@ async function getSelf(c: Context) {
 
 // 自分のアカウント情報を取得 (localStorage が古い場合の正本)
 accountRoutes.get("/me", async (c) => {
+  const db = c.get("db");
   const self = await getSelf(c);
   if (!self) apiError("UNAUTHORIZED", "認証されていません");
 
@@ -62,6 +64,7 @@ accountRoutes.patch(
     })
   ),
   async (c) => {
+    const db = c.get("db");
     const self = await getSelf(c);
     if (!self) apiError("UNAUTHORIZED", "認証されていません");
     const input = c.req.valid("json");
@@ -97,6 +100,7 @@ accountRoutes.patch(
     })
   ),
   async (c) => {
+    const db = c.get("db");
     const self = await getSelf(c);
     if (!self) apiError("UNAUTHORIZED", "認証されていません");
     const newEmail = c.req.valid("json").newEmail.toLowerCase();
@@ -137,6 +141,7 @@ accountRoutes.patch(
 // 同じ circleId/eventId に他にアクティブな同ロールの管理者がいない場合は退出を拒否し、
 // 先にオーナー権限を他のメンバーに譲渡(ロール変更)するよう促す。
 accountRoutes.delete("/membership/:id", async (c) => {
+  const db = c.get("db");
   const self = await getSelf(c);
   if (!self) apiError("UNAUTHORIZED", "認証されていません");
   const id = c.req.param("id");
@@ -187,6 +192,7 @@ accountRoutes.delete("/membership/:id", async (c) => {
 
 // アカウント削除 (本人)。所属・通知を消してから user を削除 (session/account は FK cascade)
 accountRoutes.delete("/", async (c) => {
+  const db = c.get("db");
   const self = await getSelf(c);
   if (!self) apiError("UNAUTHORIZED", "認証されていません");
 

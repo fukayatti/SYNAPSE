@@ -18,10 +18,15 @@
  * 注意: D1(SQLite) の read-modify-write は厳密なアトミック性を持たない。極端な高並列時に
  * カウントが数回甘くなり得るが、緩和目的では許容範囲。
  */
-import { db, authAttempt } from "@fesflow/db";
+import { authAttempt, type DB } from "@fesflow/db";
 import { eq, inArray } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import type { Context } from "hono";
+
+// 2026-07-08 (Phase5): db はモジュール Proxy ではなく引数で受け取る。
+// isLocked/recordFailure/clearAttempts は Context を持たないトップレベル関数のため、
+// (計画の「c を受け取らないトップレベル関数は db を引数で受け取る」方針に従い) 呼び出し側
+// (index.ts の better-auth ハンドラ) から c.get("db") を渡してもらう形に変更した。
 
 /** ロックアウトのしきい値・窓・ロック時間 (既定)。 */
 export interface RateLimitConfig {
@@ -63,7 +68,7 @@ export function clientIp(c: Context): string {
  * 渡した key 群のいずれかが現在ロック中かを判定する。
  * @returns ロック中なら解除までの残り秒数 (最大値)。未ロックなら 0。
  */
-export async function isLocked(keys: string[], now = Date.now()): Promise<number> {
+export async function isLocked(db: DB, keys: string[], now = Date.now()): Promise<number> {
   if (keys.length === 0) return 0;
   const rows = await db
     .select()
@@ -84,6 +89,7 @@ export async function isLocked(keys: string[], now = Date.now()): Promise<number
  * 窓 (windowMs) を過ぎており、かつ非ロックなら計数をリセットして 1 から数え直す。
  */
 export async function recordFailure(
+  db: DB,
   buckets: Bucket[],
   cfg: RateLimitConfig = DEFAULT_RATE_LIMIT,
   now = Date.now(),
@@ -132,7 +138,7 @@ export async function recordFailure(
 /**
  * 認証成功時に、対象バケットの失敗履歴を消去する (正当な利用者を巻き込まないため)。
  */
-export async function clearAttempts(keys: string[]): Promise<void> {
+export async function clearAttempts(db: DB, keys: string[]): Promise<void> {
   if (keys.length === 0) return;
   await db.delete(authAttempt).where(inArray(authAttempt.key, keys));
 }

@@ -1,5 +1,5 @@
 /**
- * API Worker エントリ (2026-07-04 Cloudflare Workers 化にリライト)
+ * API Worker エントリ (2026-07-08 Phase5: ALS+Proxy 撤去 → 明示的 per-request DI にリライト)
  *
  * 変更意図:
  * - 旧 apps/server は @hono/node-server の serve() で Node ポートを開き、
@@ -7,8 +7,15 @@
  *   どちらも Workers では動かないため次のように置き換えた:
  *     - serve() → `export default app` (Workers の fetch ハンドラ)
  *     - fs 保存 → @fesflow/storage (本番 R2 / ローカル MinIO)
- * - リクエスト境界で db/auth/env を AsyncLocalStorage に載せ、
- *   既存ルート (db/auth シングルトン参照) を無改修で動かす。
+ * - 2026-07-04 時点では db/auth/env を AsyncLocalStorage (ALS) に載せ、
+ *   `import { db } from "@fesflow/db"` のようなモジュールシングルトン参照を
+ *   ALS 経由の Proxy で解決する「魔法」で無改修動作させていた。
+ * - Phase5 (2026-07-08) でこの ALS+Proxy を撤去し、Hono の Variables 経由の
+ *   明示的 DI に変更する。ここで db/auth を生成し `c.set("db", db)` /
+ *   `c.set("auth", auth)` するだけで、以降は各ルートが `c.get("db")` /
+ *   `c.get("auth")` を使う (どこから db/auth が来るかコードで追える)。
+ * - nodejs_compat (wrangler.jsonc の compatibility_flags) は ALS 撤去後も
+ *   他の依存 (better-auth 等) が要る可能性があるため変更しない。
  */
 import { Hono } from "hono";
 import { cors } from "hono/cors";
@@ -16,9 +23,9 @@ import { logger } from "hono/logger";
 import { secureHeaders } from "hono/secure-headers";
 import { nanoid } from "nanoid";
 
-import { createDb, runWithRequest, db, membership, type WorkerEnv } from "@fesflow/db";
+import { createDb, membership, type WorkerEnv } from "@fesflow/db";
 import { eq, and } from "drizzle-orm";
-import { createAuth, auth } from "@fesflow/auth";
+import { createAuth } from "@fesflow/auth";
 import { createStorage } from "@fesflow/storage";
 import { getSession } from "./utils/auth";
 import {
@@ -29,6 +36,7 @@ import {
   lockoutMessage,
 } from "./utils/rate-limit";
 import { apiError, registerErrorHandlers } from "./http-error";
+import type { AppEnv } from "./types";
 
 // Hono REST ルート
 import {
@@ -47,9 +55,7 @@ import {
   adminRoutes,
 } from "./routes";
 
-type AppBindings = { Bindings: WorkerEnv };
-
-const app = new Hono<AppBindings>();
+const app = new Hono<AppEnv>();
 
 // Phase4: 統一エラーエンベロープ ({ code, message, fields?, requestId }) を
 // app.onError / app.notFound に一元的に仕込む。以降のルートは AppError/apiError を
@@ -116,14 +122,15 @@ app.use("/*", (c, next) =>
 );
 
 /**
- * リクエストごとに db/auth/env を生成し、AsyncLocalStorage に載せる。
- * これ以降のハンドラ内での `import { db }` / `import { auth }` は
- * このストアから実体を解決する。
+ * リクエストごとに db/auth を生成し、Hono の Variables に載せる (Phase5: 明示的 DI)。
+ * これ以降のハンドラは `c.get("db")` / `c.get("auth")` で実体を明示的に受け取る
+ * (旧: ALS 経由の Proxy で `import { db }` / `import { auth }` を無改修に解決していた)。
+ * env は c.env から直接読めるため store に保持する必要はない (getEnv() は廃止)。
  */
 app.use("/*", async (c, next) => {
   const env = { ...c.env as WorkerEnv };
   const origin = c.req.header("origin");
-  
+
   // better-auth の trustedOrigins を通過させるため、isAllowedOrigin で許可された
   // 動的オリジン（ローカルIP等）をこのリクエスト限定で CORS_ORIGIN に注入する
   if (origin && isAllowedOrigin(origin, env)) {
@@ -132,7 +139,9 @@ app.use("/*", async (c, next) => {
 
   const db = createDb(env.DB);
   const auth = createAuth(db, env);
-  return runWithRequest({ db, auth, env }, () => next());
+  c.set("db", db);
+  c.set("auth", auth);
+  await next();
 });
 
 // Better Auth ハンドラ
@@ -141,6 +150,7 @@ app.use("/*", async (c, next) => {
 // ヘルパ (utils/rate-limit.ts) を IP バケットで流用する。対象は POST の
 // sign-in / sign-up 系のみ (セッション取得等の GET は対象外)。
 app.on(["POST", "GET"], "/api/auth/*", async (c) => {
+  const db = c.get("db");
   const path = c.req.path;
   const isAuthAttempt =
     c.req.method === "POST" &&
@@ -149,7 +159,7 @@ app.on(["POST", "GET"], "/api/auth/*", async (c) => {
   let ipKey = "";
   if (isAuthAttempt) {
     ipKey = `auth:ip:${clientIp(c)}`;
-    const retryAfterSec = await isLocked([ipKey]);
+    const retryAfterSec = await isLocked(db, [ipKey]);
     if (retryAfterSec > 0) {
       // Phase4: RATE_LIMITED エンベロープに統一。Retry-After はエンベロープと併用して
       // AppError 側に持たせ、onError で一括してヘッダに反映させる。
@@ -157,13 +167,14 @@ app.on(["POST", "GET"], "/api/auth/*", async (c) => {
     }
   }
 
+  const auth = c.get("auth");
   const res = await auth.handler(c.req.raw);
 
   if (isAuthAttempt) {
     if (res.status >= 400) {
-      await recordFailure([{ key: ipKey, scope: "auth" }]);
+      await recordFailure(db, [{ key: ipKey, scope: "auth" }]);
     } else if (res.status >= 200 && res.status < 300) {
-      await clearAttempts([ipKey]);
+      await clearAttempts(db, [ipKey]);
     }
   }
 
@@ -213,6 +224,7 @@ const ALLOWED_EXTS = [
 // storage.put 等で予期しない例外が起きた場合も onError が 500 INTERNAL + requestId ログに
 // 変換するので、ここで個別に catch する必要はない。
 app.post("/api/upload", async (c) => {
+  const db = c.get("db");
   const session = await getSession(c);
   if (!session || !session.user) {
     apiError("UNAUTHORIZED", "認証が必要です");

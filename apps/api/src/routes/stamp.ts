@@ -2,12 +2,14 @@ import { Hono } from "hono";
 import { zBody } from "../z-validator";
 import { apiError } from "../http-error";
 import { z } from "zod";
-import { db, userStamp, rewardRedemption } from "@fesflow/db";
+import { userStamp, rewardRedemption } from "@fesflow/db";
 import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { getSession } from "../utils/auth";
+import type { AppEnv } from "../types";
 
-const stampRoutes = new Hono();
+// 2026-07-08 (Phase5): db はモジュール Proxy ではなく c.get("db") で受け取る (ALS撤去)。
+const stampRoutes = new Hono<AppEnv>();
 
 // 2026-07-06: 景品交換に必要なスタンプ数を定数化。
 // 本来はイベント/サークル単位で設定可能にすべきだが、スキーマ変更を伴うため
@@ -22,6 +24,7 @@ const REQUIRED_STAMP_COUNT = 3;
 // 実質的な本人確認手段となる設計のため、現状維持（認可なし）とする。
 // スタンプ数・景品交換済みフラグのみを返しており、他ユーザーの決済情報等の機微情報は含まない。
 stampRoutes.get("/:userId", async (c) => {
+  const db = c.get("db");
   const userId = c.req.param("userId");
 
   // 獲得したスタンプ
@@ -49,6 +52,7 @@ stampRoutes.post(
     })
   ),
   async (c) => {
+    const db = c.get("db");
     const input = c.req.valid("json");
 
     // 交換処理を行うにはスタッフ以上のログインが必要

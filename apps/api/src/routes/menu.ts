@@ -2,15 +2,17 @@ import { Hono } from "hono";
 import { zBody } from "../z-validator";
 import { apiError } from "../http-error";
 import { z } from "zod";
-import { db, menu, menuTopping, topping } from "@fesflow/db";
+import { menu, menuTopping, topping } from "@fesflow/db";
 import { eq, inArray } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { hasPermission } from "../utils/auth";
+import type { AppEnv } from "../types";
 
-const menuRoutes = new Hono();
+const menuRoutes = new Hono<AppEnv>();
 
 // メニュー一覧取得（toppingも含む）
 menuRoutes.get("/", async (c) => {
+  const db = c.get("db");
   const circleId = c.req.query("circleId");
 
   if (!circleId) {
@@ -58,6 +60,7 @@ menuRoutes.get("/", async (c) => {
 
 // メニュー取得
 menuRoutes.get("/:id", async (c) => {
+  const db = c.get("db");
   const id = c.req.param("id");
 
   const menus = await db.select().from(menu).where(eq(menu.id, id));
@@ -109,6 +112,7 @@ menuRoutes.post(
     })
   ),
   async (c) => {
+    const db = c.get("db");
     const input = c.req.valid("json");
 
     if (!(await hasPermission(c, input.circleId, "menu:write"))) {
@@ -163,13 +167,14 @@ menuRoutes.put(
     })
   ),
   async (c) => {
+    const db = c.get("db");
     const id = c.req.param("id");
     const input = c.req.valid("json");
 
     // Get circleId first
     const existingMenu = await db.select().from(menu).where(eq(menu.id, id));
     if (existingMenu.length === 0) apiError("NOT_FOUND", "見つかりません");
-    
+
     if (!(await hasPermission(c, existingMenu[0]!.circleId, "menu:write"))) {
       apiError("FORBIDDEN", "権限がありません");
     }
@@ -216,6 +221,7 @@ menuRoutes.put(
 
 // メニュー削除
 menuRoutes.delete("/:id", async (c) => {
+  const db = c.get("db");
   const id = c.req.param("id");
 
   const existingMenu = await db.select().from(menu).where(eq(menu.id, id));
@@ -243,12 +249,13 @@ menuRoutes.patch(
     })
   ),
   async (c) => {
+    const db = c.get("db");
     const id = c.req.param("id");
     const input = c.req.valid("json");
 
     const existingMenu = await db.select().from(menu).where(eq(menu.id, id));
     if (existingMenu.length === 0) apiError("NOT_FOUND", "見つかりません");
-    
+
     if (!(await hasPermission(c, existingMenu[0]!.circleId, "stock:write"))) {
       apiError("FORBIDDEN", "権限がありません");
     }

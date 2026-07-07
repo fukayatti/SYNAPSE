@@ -7,22 +7,21 @@
  * ルートハンドラ内で hasPermission を直接呼ぶ (過剰な抽象化で壊さないため)。
  *
  * c.set("session", ...) で後段のハンドラにセッションを渡す。型は Hono の
- * Variables 拡張 (AuthVariables) で表現する。
+ * Variables 拡張 (AppVariables, ../types.ts) で表現する。
+ *
+ * 2026-07-08 (Phase5): auth はモジュール Proxy シングルトンではなく、
+ * index.ts の middleware が c.set("auth", ...) した実体を c.get("auth") で
+ * 明示的に受け取る (ALS+Proxy 撤去)。Session 型も ../types.ts に集約した。
  */
 import type { Context, Next } from "hono";
-import { auth } from "@fesflow/auth";
 import { getAdminSession } from "../utils/auth";
 import { apiError } from "../http-error";
+import type { AppEnv, AppVariables, Session } from "../types";
 
-/** better-auth の getSession が返す型 (Awaited<ReturnType<...>>)。 */
-export type Session = NonNullable<
-  Awaited<ReturnType<typeof auth.api.getSession>>
->;
-
+// 後方互換: 従来 middleware/auth.ts からの re-export を参照していた箇所向けに残す。
+export type { Session };
 /** requireAuth/requireSuperAdmin を使うルートで共通利用する Variables 拡張。 */
-export type AuthVariables = {
-  session: Session;
-};
+export type AuthVariables = AppVariables;
 
 /**
  * better-auth セッション必須 middleware。
@@ -30,9 +29,10 @@ export type AuthVariables = {
  * 成功時は c.set("session", session) で後段ハンドラに渡す。
  */
 export async function requireAuth(
-  c: Context<{ Variables: AuthVariables }>,
+  c: Context<AppEnv>,
   next: Next,
 ) {
+  const auth = c.get("auth");
   const session = await auth.api.getSession({ headers: c.req.raw.headers });
   if (!session || !session.user) {
     apiError("UNAUTHORIZED", "認証されていません");
@@ -47,7 +47,7 @@ export async function requireAuth(
  * 該当しなければ 403 を返す。system.ts の adminRoutes.use で行っていたガードを移設。
  */
 export async function requireSuperAdmin(
-  c: Context<{ Variables: AuthVariables }>,
+  c: Context<AppEnv>,
   next: Next,
 ) {
   const session = await getAdminSession(c);

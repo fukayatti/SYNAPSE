@@ -1,15 +1,15 @@
 import { Hono } from "hono";
 import { z } from "zod";
-import { db, wristband, eventUser, event } from "@fesflow/db";
+import { wristband, eventUser, event, type DB } from "@fesflow/db";
 import { eq, and, desc, or, like } from "drizzle-orm";
 import { nanoid } from "nanoid";
-import { auth } from "@fesflow/auth";
 import { hasPermission } from "../utils/auth";
 import { zBody, zQuery } from "../z-validator";
 import { apiError } from "../http-error";
+import type { AppEnv } from "../types";
 
 
-const wristbandRoutes = new Hono();
+const wristbandRoutes = new Hono<AppEnv>();
 
 // 来場者の検索 (ニックネーム、呼出ID、誕生日) - スタッフ権限必須
 wristbandRoutes.get(
@@ -21,6 +21,7 @@ wristbandRoutes.get(
     })
   ),
   async (c) => {
+    const db = c.get("db");
     const { eventId, query } = c.req.valid("query");
 
     // 権限チェック (イベントスタッフ権限 member:read が必要)
@@ -68,7 +69,9 @@ wristbandRoutes.get(
 );
 
 /** イベント内で次に割り当てる呼出用 displayId を採番する。 */
-async function nextDisplayId(eventId: string): Promise<number> {
+// 2026-07-08 (Phase5): db をモジュール Proxy ではなく引数で受け取る (Context を持たない
+// トップレベル関数のため、計画通り db を明示的な引数にした)。
+async function nextDisplayId(db: DB, eventId: string): Promise<number> {
   const rows = await db
     .select({ displayId: eventUser.displayId })
     .from(eventUser)
@@ -79,6 +82,7 @@ async function nextDisplayId(eventId: string): Promise<number> {
 
 // コード (リストバンドID、ユーザーID) によるユーザー照会
 wristbandRoutes.get("/lookup/:code", async (c) => {
+  const db = c.get("db");
   let code = c.req.param("code");
 
   // 2026-07-04: QRコードスキャン等で URL (例: https://.../w/usr_xxx) が入ってきた場合に対応
@@ -158,6 +162,7 @@ wristbandRoutes.post(
     })
   ),
   async (c) => {
+    const db = c.get("db");
     const { userId, wristbandId } = c.req.valid("json");
 
     // 2026-07-04: D1 の外部キー制約エラーを避けるため、DB内の最初のイベントIDを取得してデフォルトとして使用する
@@ -257,6 +262,7 @@ wristbandRoutes.post(
 wristbandRoutes.post(
   "/:id/report-lost",
   async (c) => {
+    const db = c.get("db");
     const id = c.req.param("id");
 
     // 2026-07-05: 存在確認とアクティブ状態のみロック可能に限定する。
@@ -293,6 +299,7 @@ wristbandRoutes.post(
     })
   ),
   async (c) => {
+    const db = c.get("db");
     const { userId, nickname, birthday } = c.req.valid("json");
 
     const users = await db.select().from(eventUser).where(eq(eventUser.id, userId));
@@ -343,6 +350,8 @@ wristbandRoutes.post(
     })
   ),
   async (c) => {
+    const db = c.get("db");
+    const auth = c.get("auth");
     const session = await auth.api.getSession({ headers: c.req.raw.headers });
     if (!session || !session.user) {
       apiError("UNAUTHORIZED", "認証されていません");
@@ -355,7 +364,7 @@ wristbandRoutes.post(
     }
 
     const userId = `usr_${nanoid(12)}`;
-    const displayId = await nextDisplayId(eventId);
+    const displayId = await nextDisplayId(db, eventId);
     await db.insert(eventUser).values({
       id: userId,
       eventId,

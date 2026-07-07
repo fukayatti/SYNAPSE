@@ -3,7 +3,6 @@ import { zBody } from "../z-validator";
 import { AppError, apiError } from "../http-error";
 import { z } from "zod";
 import {
-  db,
   preOrder,
   preOrderItem,
   order,
@@ -13,15 +12,18 @@ import {
   eventUser,
   userStamp,
   circle,
+  type DB,
 } from "@fesflow/db";
 import { eq, and, inArray, desc, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { hasPermission } from "../utils/auth";
+import type { AppEnv } from "../types";
 
-const preOrderRoutes = new Hono();
+const preOrderRoutes = new Hono<AppEnv>();
 
 // 注文番号生成関数 (order.ts と同様の処理)
-async function generateOrderNumber(circleId: string): Promise<string> {
+// 2026-07-08 (Phase5): db をモジュール Proxy ではなく引数で受け取る。
+async function generateOrderNumber(db: DB, circleId: string): Promise<string> {
   const now = new Date();
   const jstOffset = 9 * 60 * 60 * 1000;
   const jstNow = new Date(now.getTime() + jstOffset);
@@ -68,6 +70,7 @@ preOrderRoutes.post(
     })
   ),
   async (c) => {
+    const db = c.get("db");
     try {
       const { userId, circleId, items } = c.req.valid("json");
       const preOrderId = nanoid();
@@ -175,6 +178,7 @@ preOrderRoutes.post(
 // リストバンド/userIdの保持（QRを提示できること）自体が来場者側の実質的な認証手段であり、
 // レスポンスには元々 cashierId 等の内部情報は含まれていないため追加の最小化は不要と判断した。
 preOrderRoutes.get("/user/:code", async (c) => {
+  const db = c.get("db");
   const code = c.req.param("code");
   const circleId = c.req.query("circleId");
 
@@ -250,6 +254,7 @@ preOrderRoutes.post(
     })
   ),
   async (c) => {
+    const db = c.get("db");
     try {
       const id = c.req.param("id");
       const { cashierId } = c.req.valid("json");
@@ -284,7 +289,7 @@ preOrderRoutes.post(
 
       // 正規注文を作成
       const newOrderId = nanoid();
-      const orderNumber = await generateOrderNumber(po.circleId);
+      const orderNumber = await generateOrderNumber(db, po.circleId);
 
       await db.insert(order).values({
         id: newOrderId,

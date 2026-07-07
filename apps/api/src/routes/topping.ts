@@ -2,15 +2,17 @@ import { Hono } from "hono";
 import { zBody } from "../z-validator";
 import { apiError } from "../http-error";
 import { z } from "zod";
-import { db, topping, menuTopping } from "@fesflow/db";
+import { topping, menuTopping } from "@fesflow/db";
 import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { hasPermission } from "../utils/auth";
+import type { AppEnv } from "../types";
 
-const toppingRoutes = new Hono();
+const toppingRoutes = new Hono<AppEnv>();
 
 // トッピング一覧取得
 toppingRoutes.get("/", async (c) => {
+  const db = c.get("db");
   const circleId = c.req.query("circleId");
 
   if (!circleId) {
@@ -32,6 +34,7 @@ toppingRoutes.get("/", async (c) => {
 
 // トッピング取得
 toppingRoutes.get("/:id", async (c) => {
+  const db = c.get("db");
   const id = c.req.param("id");
   const toppings = await db.select().from(topping).where(eq(topping.id, id));
 
@@ -62,6 +65,7 @@ toppingRoutes.post(
     })
   ),
   async (c) => {
+    const db = c.get("db");
     const input = c.req.valid("json");
 
     // 2026-07-05: 認可チェックが皆無だったため追加（専用権限がないためmenu:*を流用）
@@ -98,6 +102,7 @@ toppingRoutes.put(
     })
   ),
   async (c) => {
+    const db = c.get("db");
     const id = c.req.param("id");
     const input = c.req.valid("json");
 
@@ -132,6 +137,7 @@ toppingRoutes.put(
 
 // トッピング削除
 toppingRoutes.delete("/:id", async (c) => {
+  const db = c.get("db");
   const id = c.req.param("id");
 
   // 2026-07-05: 認可チェックが皆無だったため追加。存在確認の上、対象のcircleIdで判定

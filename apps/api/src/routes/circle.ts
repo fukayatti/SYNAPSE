@@ -2,13 +2,14 @@ import { Hono } from "hono";
 import { zBody } from "../z-validator";
 import { apiError } from "../http-error";
 import { z } from "zod";
-import { db, circle, event, membership } from "@fesflow/db";
+import { circle, event, membership } from "@fesflow/db";
 import { eq, and, isNull } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { getAdminSession, hasPermission } from "../utils/auth";
-import { requireAuth, type AuthVariables } from "../middleware/auth";
+import { requireAuth } from "../middleware/auth";
+import type { AppEnv } from "../types";
 
-const circleRoutes = new Hono<{ Variables: AuthVariables }>();
+const circleRoutes = new Hono<AppEnv>();
 
 // サークル一覧取得
 // 2026-07-06 (H2): 公開ブラウズ(来場者アプリ)にも使われるため認証必須化はしない。
@@ -16,6 +17,7 @@ const circleRoutes = new Hono<{ Variables: AuthVariables }>();
 // managerEmail は「対象イベントの member:read を持つ認可済み呼び出し元」にのみ付与し、
 // 匿名/権限のない呼び出し元には含めない (managerName は表示用途で常に返す)。
 circleRoutes.get("/", async (c) => {
+  const db = c.get("db");
   const eventId = c.req.query("eventId");
 
   const query = db
@@ -63,6 +65,7 @@ circleRoutes.get("/", async (c) => {
 // 代表者のメールアドレス(PII)は当該サークルの member:read を持つ認可済み呼び出し元にのみ
 // 付与し、匿名/権限のない呼び出し元には含めない (managerName は表示用途で常に返す)。
 circleRoutes.get("/:id", async (c) => {
+  const db = c.get("db");
   const id = c.req.param("id");
   const circles = await db
     .select({
@@ -119,7 +122,8 @@ circleRoutes.post(
     })
   ),
   async (c) => {
-    const session = c.get("session");
+    const db = c.get("db");
+    const session = c.get("session")!;
     const input = c.req.valid("json");
     const id = nanoid();
 
@@ -191,6 +195,7 @@ circleRoutes.put(
     })
   ),
   async (c) => {
+    const db = c.get("db");
     const session = await getAdminSession(c);
     if (!session) {
       apiError("FORBIDDEN", "管理者権限が必要です");
@@ -226,6 +231,7 @@ circleRoutes.put(
 // 上位管理者のみ実行可能: super_admin もしくは当該イベントの event_manager
 // (circle:delete 権限。circle_manager は自サークルを削除できない)
 circleRoutes.delete("/:id", async (c) => {
+  const db = c.get("db");
   const id = c.req.param("id");
 
   const allowed = await hasPermission(c, id, "circle:delete");
@@ -247,6 +253,7 @@ circleRoutes.patch(
     })
   ),
   async (c) => {
+    const db = c.get("db");
     const id = c.req.param("id");
     const { settings } = c.req.valid("json");
 
@@ -280,6 +287,7 @@ circleRoutes.post(
     })
   ),
   async (c) => {
+    const db = c.get("db");
     const id = c.req.param("id");
     const { membershipId } = c.req.valid("json");
 
@@ -332,6 +340,7 @@ circleRoutes.patch(
     })
   ),
   async (c) => {
+    const db = c.get("db");
     const id = c.req.param("id");
     const { mods } = c.req.valid("json");
 

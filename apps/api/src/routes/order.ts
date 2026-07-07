@@ -3,7 +3,6 @@ import { zBody } from "../z-validator";
 import { AppError, apiError } from "../http-error";
 import { z } from "zod";
 import {
-  db,
   order,
   orderItem,
   orderItemTopping,
@@ -13,12 +12,14 @@ import {
   userStamp,
   circle,
   eventUser,
+  type DB,
 } from "@fesflow/db";
 import { eq, and, desc, sql, inArray, gte } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { hasPermission } from "../utils/auth";
+import type { AppEnv } from "../types";
 
-const orderRoutes = new Hono();
+const orderRoutes = new Hono<AppEnv>();
 
 // 2026-07-05: 注文ステータスの許可された遷移表。
 // completed/cancelled は終端状態でありそこからの遷移は禁止する。
@@ -32,7 +33,9 @@ const ORDER_STATUS_TRANSITIONS: Record<string, string[]> = {
 };
 
 // 注文番号を生成（サークル内で連番）
-async function generateOrderNumber(circleId: string): Promise<string> {
+// 2026-07-08 (Phase5): db をモジュール Proxy ではなく引数で受け取る (Context を持たない
+// トップレベル関数のため、計画通り db を明示的な引数にした)。
+async function generateOrderNumber(db: DB, circleId: string): Promise<string> {
   // 今日の日本時間の開始時刻を取得
   const now = new Date();
   const jstOffset = 9 * 60 * 60 * 1000; // JST is UTC+9
@@ -67,6 +70,7 @@ async function generateOrderNumber(circleId: string): Promise<string> {
 
 // 注文一覧取得
 orderRoutes.get("/", async (c) => {
+  const db = c.get("db");
   const circleId = c.req.query("circleId");
   const status = c.req.query("status");
 
@@ -116,6 +120,7 @@ orderRoutes.get("/", async (c) => {
 
 // 注文取得
 orderRoutes.get("/:id", async (c) => {
+  const db = c.get("db");
   const id = c.req.param("id");
 
   const orders = await db.select().from(order).where(eq(order.id, id));
@@ -175,6 +180,7 @@ orderRoutes.get("/:id", async (c) => {
 
 // 注文番号で取得
 orderRoutes.get("/by-number/:orderNumber", async (c) => {
+  const db = c.get("db");
   const orderNumber = c.req.param("orderNumber");
   const circleId = c.req.query("circleId");
 
@@ -221,6 +227,7 @@ orderRoutes.post(
     })
   ),
   async (c) => {
+    const db = c.get("db");
     try {
       const input = c.req.valid("json");
       const orderId = nanoid();
@@ -275,7 +282,7 @@ orderRoutes.post(
       }
 
       // 注文番号を生成
-      const orderNumber = await generateOrderNumber(input.circleId);
+      const orderNumber = await generateOrderNumber(db, input.circleId);
 
       // メニューの価格を取得
       const menuIds = input.items.map((i) => i.menuId);
@@ -538,12 +545,13 @@ orderRoutes.patch(
     })
   ),
   async (c) => {
+    const db = c.get("db");
     const id = c.req.param("id");
     const input = c.req.valid("json");
 
     const existingOrder = await db.select().from(order).where(eq(order.id, id));
     if (existingOrder.length === 0) apiError("NOT_FOUND", "見つかりません");
-    
+
     const targetOrder = existingOrder[0]!;
 
     if (!(await hasPermission(c, targetOrder.circleId, "order:write"))) {
@@ -589,6 +597,7 @@ orderRoutes.patch(
 
 // 注文完了
 orderRoutes.post("/:id/complete", async (c) => {
+  const db = c.get("db");
   const id = c.req.param("id");
 
   const existingOrder = await db.select().from(order).where(eq(order.id, id));
@@ -617,12 +626,13 @@ orderRoutes.patch(
     })
   ),
   async (c) => {
+    const db = c.get("db");
     const id = c.req.param("id");
     const input = c.req.valid("json");
 
     const existingOrder = await db.select().from(order).where(eq(order.id, id));
     if (existingOrder.length === 0) apiError("NOT_FOUND", "見つかりません");
-    
+
     const targetOrder = existingOrder[0]!;
 
     if (!(await hasPermission(c, targetOrder.circleId, "order:write"))) {
@@ -640,6 +650,7 @@ orderRoutes.patch(
 
 // 売上統計
 orderRoutes.get("/stats/sales", async (c) => {
+  const db = c.get("db");
   const circleId = c.req.query("circleId");
   const dateFrom = c.req.query("dateFrom");
   const dateTo = c.req.query("dateTo");

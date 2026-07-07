@@ -1,16 +1,18 @@
 import { Hono } from "hono";
 import { z } from "zod";
-import { db, staff } from "@fesflow/db";
+import { staff } from "@fesflow/db";
 import { eq, and, isNull } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { hasPermission } from "../utils/auth";
 import { apiError } from "../http-error";
 import { zBody } from "../z-validator";
+import type { AppEnv } from "../types";
 
-const staffRoutes = new Hono();
+const staffRoutes = new Hono<AppEnv>();
 
 // スタッフ一覧取得
 staffRoutes.get("/", async (c) => {
+  const db = c.get("db");
   const circleId = c.req.query("circleId");
 
   if (!circleId) {
@@ -32,6 +34,7 @@ staffRoutes.get("/", async (c) => {
 
 // スタッフ取得
 staffRoutes.get("/:id", async (c) => {
+  const db = c.get("db");
   const id = c.req.param("id");
   const staffList = await db.select().from(staff).where(eq(staff.id, id));
 
@@ -57,6 +60,7 @@ staffRoutes.post(
     })
   ),
   async (c) => {
+    const db = c.get("db");
     const input = c.req.valid("json");
 
     // 2026-07-05: 認可チェックが皆無だったため追加
@@ -85,6 +89,7 @@ staffRoutes.put(
     })
   ),
   async (c) => {
+    const db = c.get("db");
     const id = c.req.param("id");
     const input = c.req.valid("json");
 
@@ -108,6 +113,7 @@ staffRoutes.put(
 
 // スタッフ削除
 staffRoutes.delete("/:id", async (c) => {
+  const db = c.get("db");
   const id = c.req.param("id");
 
   // 2026-07-05: 認可チェックが皆無だったため追加。対象のcircleIdを先に取得して判定
@@ -126,6 +132,7 @@ staffRoutes.delete("/:id", async (c) => {
 
 // 現在のシフト（出勤中で退勤していないスタッフ）
 staffRoutes.get("/shift/current", async (c) => {
+  const db = c.get("db");
   const circleId = c.req.query("circleId");
 
   if (!circleId) {
@@ -150,6 +157,7 @@ staffRoutes.get("/shift/current", async (c) => {
 
 // 出勤
 staffRoutes.post("/:id/clock-in", async (c) => {
+  const db = c.get("db");
   const id = c.req.param("id");
 
   // 2026-07-05: 認可チェックが皆無だったため追加。対象のcircleIdを先に取得して判定
@@ -172,6 +180,7 @@ staffRoutes.post("/:id/clock-in", async (c) => {
 
 // 退勤
 staffRoutes.post("/:id/clock-out", async (c) => {
+  const db = c.get("db");
   const id = c.req.param("id");
 
   // 2026-07-05: 認可チェックが皆無だったため追加。対象のcircleIdを先に取得して判定
