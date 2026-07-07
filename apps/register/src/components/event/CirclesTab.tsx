@@ -138,8 +138,11 @@ export function CirclesTab({
                   <p className="text-[10px] text-muted-foreground truncate mb-3">{cir.description}</p>
                 )}
                 <div className="text-[10px] text-muted-foreground space-y-1 font-mono mb-4">
-                  <p>代表者: {cir.managerName || "未設定"}</p>
-                  <p className="truncate">メール: {cir.managerEmail}</p>
+                  {/* 2026-07-07 (Phase 3b): サークル作成がセルフサービス化されたため
+                      「代表者」= 作成時に circle_manager になったユーザーを表示する
+                      (PIN/管理者代理作成の概念は廃止)。 */}
+                  <p>管理者: {cir.managerName || "未設定"}</p>
+                  {cir.managerEmail && <p className="truncate">メール: {cir.managerEmail}</p>}
                   <p className="opacity-50 text-[8px]">ID: {cir.id}</p>
                 </div>
               </div>

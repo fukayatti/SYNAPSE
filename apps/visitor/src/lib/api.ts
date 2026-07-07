@@ -84,11 +84,6 @@ export const eventApi = {
     fetchApi<Event>(`/api/festivals/${id}/theme`, { method: "PUT", body: data }),
   delete: (id: string) =>
     fetchApi<{ success: boolean }>(`/api/festivals/${id}`, { method: "DELETE" }),
-  login: (data: LoginInput) =>
-    fetchApi<LoginResponse>("/api/festivals/login", {
-      method: "POST",
-      body: data,
-    }),
 };
 
 
@@ -267,16 +262,6 @@ export const membershipApi = {
   deleteInvite: (id: string) =>
     fetchApi<{ success: boolean }>(`/api/memberships/invite/${id}`, {
       method: "DELETE",
-    }),
-  authenticateWithPin: (data: PinAuthInput) =>
-    fetchApi<PinAuthResult>("/api/memberships/authenticate-pin", {
-      method: "POST",
-      body: data,
-    }),
-  updatePin: (id: string, pin: string) =>
-    fetchApi<{ success: boolean }>(`/api/memberships/${id}/pin`, {
-      method: "PATCH",
-      body: { pin },
     }),
   listMy: (userEmail: string) =>
     fetchApi<any[]>(`/api/memberships/my?userEmail=${encodeURIComponent(userEmail)}`),
@@ -513,19 +498,6 @@ export interface InviteToken {
 }
 
 // Input Types
-export interface LoginInput {
-  eventName: string;
-  circleName: string;
-  password: string;
-}
-
-export interface LoginResponse {
-  circleId: string;
-  circleName: string;
-  eventId: string;
-  eventName: string;
-}
-
 export interface CreateEventInput {
   eventName: string;
   description?: string;
@@ -536,18 +508,12 @@ export interface CreateEventInput {
 export interface CreateCircleInput {
   eventId: string;
   name: string;
-  managerPin?: string;
   description?: string;
-  managerEmail: string;
-  managerName?: string;
 }
 
 export interface UpdateCircleInput {
   name?: string;
   description?: string;
-  managerPin?: string;
-  managerEmail?: string;
-  managerName?: string;
 }
 
 export interface CreateMenuInput {
@@ -646,23 +612,6 @@ export interface AcceptInviteInput {
   userEmail: string;
   userName: string;
   pin?: string;
-}
-
-export interface PinAuthInput {
-  circleId?: string;
-  eventId?: string;
-  email?: string;
-  pin: string;
-}
-
-export interface PinAuthResult {
-  success: boolean;
-  membership?: Membership;
-  user?: {
-    id: string;
-    name: string;
-    email: string;
-  };
 }
 
 // Wristband API

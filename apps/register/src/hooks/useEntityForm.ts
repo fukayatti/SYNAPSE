@@ -30,7 +30,7 @@ interface UseEntityFormOptions<TForm extends Record<string, unknown>, TEntity> {
   hasChanged?: (form: TForm, entity: TEntity) => boolean;
   /** 新規作成時、閉じる前に確認すべき入力があるか。省略時は emptyForm との JSON 比較。 */
   hasInput?: (form: TForm) => boolean;
-  /** 自動保存の mutate 発火直後に呼ばれる (例: PIN 欄のクリア)。 */
+  /** 自動保存の mutate 発火直後に呼ばれる (例: パスワード等センシティブ欄のクリア)。 */
   onAfterAutoSave?: (setForm: Dispatch<SetStateAction<TForm>>) => void;
   messages: { createSuccess: string; createError: string; updateSuccess: string };
 }

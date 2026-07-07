@@ -84,11 +84,8 @@ export const eventApi = {
     fetchApi<Event>(`/api/festivals/${id}/theme`, { method: "PUT", body: data }),
   delete: (id: string) =>
     fetchApi<{ success: boolean }>(`/api/festivals/${id}`, { method: "DELETE" }),
-  login: (data: LoginInput) =>
-    fetchApi<LoginResponse>("/api/festivals/login", {
-      method: "POST",
-      body: data,
-    }),
+  // 2026-07-07 (Phase 3a/3b): 独自のイベントパスワードログイン (POST /login) は
+  // バックエンドで廃止済み。認証は better-auth に一本化。
 };
 
 
@@ -278,16 +275,6 @@ export const membershipApi = {
     fetchApi<{ success: boolean }>(`/api/memberships/invite/${id}`, {
       method: "DELETE",
     }),
-  authenticateWithPin: (data: PinAuthInput) =>
-    fetchApi<PinAuthResult>("/api/memberships/authenticate-pin", {
-      method: "POST",
-      body: data,
-    }),
-  updatePin: (id: string, pin: string) =>
-    fetchApi<{ success: boolean }>(`/api/memberships/${id}/pin`, {
-      method: "PATCH",
-      body: { pin },
-    }),
   listMy: (userEmail: string) =>
     fetchApi<any[]>(`/api/memberships/my?userEmail=${encodeURIComponent(userEmail)}`),
 };
@@ -324,7 +311,7 @@ export const accountApi = {
 export const notificationApi = {
   list: () => fetchApi<any[]>("/api/memberships/notifications/list"),
   read: (id: string) => fetchApi<{ success: boolean }>(`/api/memberships/notifications/${id}/read`, { method: "POST" }),
-  respond: (id: string, data: { action: "accept" | "decline"; userName?: string; pin?: string }) =>
+  respond: (id: string, data: { action: "accept" | "decline"; userName?: string }) =>
     fetchApi<{ success: boolean }>(`/api/memberships/notifications/${id}/respond`, {
       method: "POST",
       body: data,
@@ -540,7 +527,6 @@ export interface Membership {
   circleId: string | null;
   eventId: string | null;
   role: string;
-  pin: string | null;
   isActive: boolean;
   invitedAt: Date | null;
   acceptedAt: Date | null;
@@ -568,18 +554,6 @@ export interface InviteToken {
 }
 
 // Input Types
-export interface LoginInput {
-  eventName: string;
-  circleName: string;
-  password: string;
-}
-
-export interface LoginResponse {
-  circleId: string;
-  circleName: string;
-  eventId: string;
-  eventName: string;
-}
 
 export interface CreateEventInput {
   eventName: string;
@@ -588,21 +562,18 @@ export interface CreateEventInput {
   endDate?: string;
 }
 
+// 2026-07-07 (Phase 3a/3b): サークル作成はセルフサービス化。better-auth ログイン
+// ユーザーが eventId/name/description のみを指定して作成し、作成者本人が
+// 自動的に circle_manager になる (managerEmail/managerName/managerPin は廃止)。
 export interface CreateCircleInput {
   eventId: string;
   name: string;
-  managerPin?: string;
   description?: string;
-  managerEmail: string;
-  managerName?: string;
 }
 
 export interface UpdateCircleInput {
   name?: string;
   description?: string;
-  managerPin?: string;
-  managerEmail?: string;
-  managerName?: string;
 }
 
 export interface CreateMenuInput {
@@ -691,7 +662,6 @@ export interface AddMemberInput {
   circleId?: string;
   eventId?: string;
   role: Role;
-  pin?: string;
 }
 
 export interface CreateInviteInput {
@@ -704,28 +674,11 @@ export interface CreateInviteInput {
   targetEmail?: string;
 }
 
+// 2026-07-07 (Phase 3a): 招待受諾は better-auth セッション必須になり、
+// userEmail はセッションから解決されるため入力不要 (pin も廃止)。
 export interface AcceptInviteInput {
   token: string;
-  userEmail: string;
   userName: string;
-  pin?: string;
-}
-
-export interface PinAuthInput {
-  circleId?: string;
-  eventId?: string;
-  email?: string;
-  pin: string;
-}
-
-export interface PinAuthResult {
-  success: boolean;
-  membership?: Membership;
-  user?: {
-    id: string;
-    name: string;
-    email: string;
-  };
 }
 
 // Wristband API

@@ -146,7 +146,7 @@ export default function Home() {
             GET STARTED NOW
           </h2>
           <p className="text-[14px] sm:text-[16px] md:text-[18px] font-mono max-w-xl mx-auto leading-[1.5]">
-            イベント名とサークル名を選択し、PINコードで瞬時にログイン可能。
+            メールアドレス・パスキー・Googleアカウントでログインし、所属スペースへ瞬時に切り替え可能。
           </p>
           <div>
             <Link to="/circle/login" className="block sm:inline-block">

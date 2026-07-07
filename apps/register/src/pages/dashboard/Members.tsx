@@ -63,12 +63,13 @@ function MembersContent() {
   }, []);
 
   // フォーム状態
+  // 2026-07-07 (Phase 3b): 独自PIN認証の廃止に伴い pin 欄を撤去。
+  // メンバーは追加後、招待/better-auth アカウントでログインする前提。
   const [newMember, setNewMember] = useState({
     userId: "",
     userEmail: "",
     userName: "",
     role: "viewer" as Role,
-    pin: "",
   });
 
   const [inviteSettings, setInviteSettings] = useState({
@@ -103,7 +104,6 @@ function MembersContent() {
       circleId?: string;
       eventId?: string;
       role: Role;
-      pin?: string;
     }) => membershipApi.addMember(input),
     onSuccess: () => {
       refetchMembers();
@@ -113,7 +113,6 @@ function MembersContent() {
         userEmail: "",
         userName: "",
         role: "viewer",
-        pin: "",
       });
     },
   });
@@ -162,7 +161,6 @@ function MembersContent() {
       userName: newMember.userName,
       circleId,
       role: newMember.role,
-      pin: newMember.pin || undefined,
     });
   };
 
@@ -237,7 +235,7 @@ function MembersContent() {
         isOpen={showAddForm}
         onClose={() => setShowAddForm(false)}
         title="[新規メンバー追加]"
-        subtitle="メンバーを直接追加します。招待リンクを使う場合は「招待リンク作成」を使用してください。"
+        subtitle="メンバーを直接追加します。追加された相手はこのメールアドレスの better-auth アカウント (メール/パスワード・パスキー・Google) でログインしてください。招待リンクを使う場合は「招待リンク作成」を使用してください。"
       >
         <div className="grid grid-cols-2 gap-4">
           <FormField
@@ -273,14 +271,6 @@ function MembersContent() {
                 </option>
               ))}
           </FormSelect>
-          <FormField
-            id="pin"
-            label="PIN（オプション）"
-            type="password"
-            placeholder="4-6桁の数字"
-            value={newMember.pin}
-            onChange={(e) => setNewMember({ ...newMember, pin: e.target.value })}
-          />
         </div>
 
         <FormSubmitButton
