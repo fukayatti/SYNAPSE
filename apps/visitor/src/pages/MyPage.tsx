@@ -218,10 +218,10 @@ export default function MyOrderPage() {
       </button>
 
       <div className="border-b-thick border-border pb-4">
-        <h1 className="text-2xl sm:text-3xl font-black uppercase tracking-tight">
+        <h1 className="text-xl sm:text-2xl md:text-3xl font-black uppercase tracking-tight leading-tight">
           [マイデジタルQR &amp; 注文履歴]
         </h1>
-        <p className="text-xs uppercase tracking-widest text-gray-600 mt-1">
+        <p className="text-[10px] sm:text-xs uppercase tracking-widest text-gray-600 mt-1">
           店頭でこちらのQRまたはリストバンドをお見せください
         </p>
       </div>
@@ -371,7 +371,7 @@ export default function MyOrderPage() {
 
       {/* 事前オーダー履歴一覧 */}
       <div className="space-y-4">
-        <h2 className="text-2xl font-black uppercase border-b-thick border-border pb-2">
+        <h2 className="text-xl sm:text-2xl font-black uppercase border-b-thick border-border pb-2">
           [事前オーダー状況]
         </h2>
 
