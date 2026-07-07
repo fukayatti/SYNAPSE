@@ -5,7 +5,7 @@ import {
   FormSubmitButton,
   EditModeBanner,
 } from "@/components/ui/FormField";
-import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
+import { UnsavedChangesDialog } from "@/components/ui/UnsavedChangesDialog";
 import { useEntityForm } from "@/hooks/useEntityForm";
 import { Save } from "lucide-react";
 
@@ -70,7 +70,7 @@ export function StaffFormModal({ circleId, isOpen, onClose, staff }: StaffFormMo
         )}
       </Modal>
 
-      <ConfirmationDialog
+      <UnsavedChangesDialog
         isOpen={isConfirmOpen}
         title="[確認: 保存されていないスタッフ入力があります]"
         description="スタッフ登録を完了するには「保存して閉じる」を押してください。破棄する場合は「保存せず閉じる」を選択してください。"

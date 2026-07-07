@@ -1,4 +1,5 @@
 import { authClient } from "@/lib/auth-client";
+import { visitorUrl } from "@/lib/visitor-url";
 import { useForm } from "@tanstack/react-form";
 import { toast } from "sonner";
 import z from "zod";
@@ -84,12 +85,15 @@ export default function SignInForm({
 								navigate((callbackUrl as any) || "/circle/dashboard");
 								toast.success(`${circleMembership.userName}さんとして [${circleMembership.circle?.name || "サークル"}] にログインしました`);
 							} else {
-								navigate((callbackUrl as any) || "/visitor/menu");
+								// 所属が無いアカウントはスタッフ画面に居場所が無いため来場者アプリへ (別SPAなのでフルページ遷移)
 								toast.success("ログインしました");
+								if (callbackUrl) navigate(callbackUrl as any);
+								else window.location.href = visitorUrl("/menu");
 							}
 						} catch (error) {
-							navigate((callbackUrl as any) || "/visitor/menu");
 							toast.success("ログインしました");
+							if (callbackUrl) navigate(callbackUrl as any);
+							else window.location.href = visitorUrl("/menu");
 						}
 					},
 					onError: (error) => {

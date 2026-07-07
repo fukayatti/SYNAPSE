@@ -1,3 +1,5 @@
+import { apiErrorFromResponse, networkApiError } from "./api-error";
+
 function getApiBaseUrl(): string {
   let url = import.meta.env.VITE_API_URL || "https://localhost:8787";
   if (typeof window !== "undefined" && (url.includes("localhost") || url.includes("127.0.0.1"))) {
@@ -51,25 +53,20 @@ async function fetchApi<T>(
     config.body = JSON.stringify(body);
   }
 
+  // Phase4: register と同様、失敗時は型付き ApiError を throw する (code/fields/requestId 保持)。
+  let response: Response;
   try {
     const baseUrl = getApiBaseUrl();
-    const response = await fetch(`${baseUrl}${endpoint}`, config);
-
-    if (!response.ok) {
-      const errorData = await response
-        .json()
-        .catch(() => null);
-      const errorMessage = errorData?.error || errorData?.message || `HTTP error! status: ${response.status}`;
-      throw new Error(errorMessage);
-    }
-
-    return await response.json();
-  } catch (err: any) {
-    if (err.name === "TypeError" || err.message?.includes("fetch")) {
-      throw new Error("サーバー通信エラー: ネットワーク接続を確認してください");
-    }
-    throw err;
+    response = await fetch(`${baseUrl}${endpoint}`, config);
+  } catch (err) {
+    throw networkApiError(err);
   }
+
+  if (!response.ok) {
+    throw await apiErrorFromResponse(response);
+  }
+
+  return await response.json();
 }
 
 // Event API
@@ -84,11 +81,6 @@ export const eventApi = {
     fetchApi<Event>(`/api/festivals/${id}/theme`, { method: "PUT", body: data }),
   delete: (id: string) =>
     fetchApi<{ success: boolean }>(`/api/festivals/${id}`, { method: "DELETE" }),
-  login: (data: LoginInput) =>
-    fetchApi<LoginResponse>("/api/festivals/login", {
-      method: "POST",
-      body: data,
-    }),
 };
 
 
@@ -268,16 +260,6 @@ export const membershipApi = {
     fetchApi<{ success: boolean }>(`/api/memberships/invite/${id}`, {
       method: "DELETE",
     }),
-  authenticateWithPin: (data: PinAuthInput) =>
-    fetchApi<PinAuthResult>("/api/memberships/authenticate-pin", {
-      method: "POST",
-      body: data,
-    }),
-  updatePin: (id: string, pin: string) =>
-    fetchApi<{ success: boolean }>(`/api/memberships/${id}/pin`, {
-      method: "PATCH",
-      body: { pin },
-    }),
   listMy: (userEmail: string) =>
     fetchApi<any[]>(`/api/memberships/my?userEmail=${encodeURIComponent(userEmail)}`),
 };
@@ -329,17 +311,19 @@ export const uploadImage = async (
   formData.append("file", file);
 
   const baseUrl = getApiBaseUrl();
-  const response = await fetch(`${baseUrl}/api/upload`, {
-    method: "POST",
-    body: formData,
-    credentials: "include",
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${baseUrl}/api/upload`, {
+      method: "POST",
+      body: formData,
+      credentials: "include",
+    });
+  } catch (err) {
+    throw networkApiError(err);
+  }
 
   if (!response.ok) {
-    const error = await response
-      .json()
-      .catch(() => ({ error: "Unknown error" }));
-    throw new Error(error.error || "アップロードに失敗しました");
+    throw await apiErrorFromResponse(response);
   }
 
   return response.json();
@@ -513,19 +497,6 @@ export interface InviteToken {
 }
 
 // Input Types
-export interface LoginInput {
-  eventName: string;
-  circleName: string;
-  password: string;
-}
-
-export interface LoginResponse {
-  circleId: string;
-  circleName: string;
-  eventId: string;
-  eventName: string;
-}
-
 export interface CreateEventInput {
   eventName: string;
   description?: string;
@@ -536,18 +507,12 @@ export interface CreateEventInput {
 export interface CreateCircleInput {
   eventId: string;
   name: string;
-  managerPin?: string;
   description?: string;
-  managerEmail: string;
-  managerName?: string;
 }
 
 export interface UpdateCircleInput {
   name?: string;
   description?: string;
-  managerPin?: string;
-  managerEmail?: string;
-  managerName?: string;
 }
 
 export interface CreateMenuInput {
@@ -646,23 +611,6 @@ export interface AcceptInviteInput {
   userEmail: string;
   userName: string;
   pin?: string;
-}
-
-export interface PinAuthInput {
-  circleId?: string;
-  eventId?: string;
-  email?: string;
-  pin: string;
-}
-
-export interface PinAuthResult {
-  success: boolean;
-  membership?: Membership;
-  user?: {
-    id: string;
-    name: string;
-    email: string;
-  };
 }
 
 // Wristband API

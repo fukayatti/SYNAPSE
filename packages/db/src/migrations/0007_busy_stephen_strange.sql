@@ -1,1 +1,0 @@
-ALTER TABLE `topping` ADD `image_path` text;

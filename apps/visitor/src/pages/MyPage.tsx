@@ -1,19 +1,19 @@
 
 import { useState, useEffect } from "react";
-import Script from "@/components/script";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { preOrderApi, wristbandApi, orderApi, circleApi, eventApi } from "@/lib/api";
 import { useVisitor } from "@/hooks/useVisitor";
 import { ModSandbox } from "@/components/ModSandbox";
-import { useGuestUser } from "@/hooks/useGuestUser";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Modal } from "@/components/ui/Modal";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { ErrorState } from "@/components/ui/ErrorState";
+import { EmptyState } from "@/components/ui/EmptyState";
 import { toast } from "sonner";
-import { useRouter } from "@/lib/next-navigation";
+import { useNavigate } from "react-router-dom";
 import {
   ArrowLeft,
   Clock,
@@ -24,21 +24,21 @@ import {
   Link as LinkIcon,
 } from "lucide-react";
 
-import { useAuth } from "@/hooks/useCircleAuth";
-
 export default function MyOrderPage() {
-  const router = useRouter();
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const { userId: guestUserId, isLoaded: isGuestLoaded } = useGuestUser();
-  const { session } = useVisitor();
+  // 来場者は eventUser.id ベアラーのみ (旧 useAuth/useGuestUser シムは撤去済み)
+  const { session, userId: visitorUserId, isLoaded } = useVisitor();
   const eventId = session?.eventId;
 
+  // eventData はヘッダーのロゴ表示のみに使う装飾的な値。取得失敗時は
+  // `eventData?.logoUrl` が undefined のままロゴ非表示になるだけで画面は成立するため、
+  // isError/ErrorState は追加しない (判断: 2026-07-07)。
   const { data: eventData } = useQuery({
     queryKey: ["event", eventId],
     queryFn: () => eventApi.get(eventId!),
     enabled: !!eventId,
   });
-  const { userId: authUserId, isAuthenticated, isLoading: authLoading } = useAuth();
   const [isRegisterOpen, setIsRegisterOpen] = useState(false);
   const [newWristbandId, setNewWristbandId] = useState("");
   const [isReportLostConfirmOpen, setIsReportLostConfirmOpen] = useState(false);
@@ -122,19 +122,29 @@ export default function MyOrderPage() {
     loadModHooks();
   }, [directOrders.length]);
 
-  const userId = isAuthenticated && authUserId ? authUserId : guestUserId;
-
-  const isLoaded = isGuestLoaded && !authLoading;
+  const userId = visitorUserId ?? "";
 
   // 事前オーダー取得
-  const { data: preOrders, isLoading: preOrdersLoading } = useQuery({
+  const {
+    data: preOrders,
+    isLoading: preOrdersLoading,
+    isError: preOrdersError,
+    error: preOrdersErrorObj,
+    refetch: refetchPreOrders,
+  } = useQuery({
     queryKey: ["myPreOrders", userId],
     queryFn: () => preOrderApi.getByCode(userId),
     enabled: !!userId,
   });
 
   // ユーザー＆リストバンド状態取得
-  const { data: userStatus, isLoading: statusLoading } = useQuery({
+  const {
+    data: userStatus,
+    isLoading: statusLoading,
+    isError: statusError,
+    error: statusErrorObj,
+    refetch: refetchStatus,
+  } = useQuery({
     queryKey: ["userWristbandStatus", userId],
     queryFn: () => wristbandApi.lookup(userId),
     enabled: !!userId,
@@ -186,6 +196,20 @@ export default function MyOrderPage() {
     );
   }
 
+  // userStatus はマイQR・リストバンド状態など画面全体の前提になるため取得失敗時はページ全体を止める。
+  // preOrders は下部の履歴セクションのみに影響するため、そちらは該当セクション内で個別に表示する。
+  if (statusError) {
+    return (
+      <div className="max-w-3xl mx-auto p-4 font-mono">
+        <ErrorState
+          error={statusErrorObj}
+          title="ユーザー情報の取得に失敗しました"
+          onRetry={() => refetchStatus()}
+        />
+      </div>
+    );
+  }
+
   const activeWristband = userStatus?.wristband;
   const targetWbId = activeWristband?.id || userId;
   // 来場者アプリと register(模擬店POS)は別オリジンのため、店頭スキャン用QRは
@@ -210,7 +234,7 @@ export default function MyOrderPage() {
       )}
 
       <button
-        onClick={() => router.push("/menu")}
+        onClick={() => navigate("/menu")}
         className="text-xs uppercase tracking-widest underline hover:text-info flex items-center gap-1"
       >
         <ArrowLeft className="h-4 w-4" />
@@ -375,7 +399,9 @@ export default function MyOrderPage() {
           [事前オーダー状況]
         </h2>
 
-        {preOrders && preOrders.length > 0 ? (
+        {preOrdersError ? (
+          <ErrorState error={preOrdersErrorObj} onRetry={() => refetchPreOrders()} />
+        ) : preOrders && preOrders.length > 0 ? (
           <div className="space-y-4">
             {preOrders.map((po) => (
               <div
@@ -416,9 +442,7 @@ export default function MyOrderPage() {
             ))}
           </div>
         ) : (
-          <div className="border-thick border-dashed border-border p-8 text-center text-muted-foreground">
-            現在、未処理の事前オーダーはありません。
-          </div>
+          <EmptyState icon={Clock} message="現在、未処理の事前オーダーはありません" />
         )}
       </div>
     </div>

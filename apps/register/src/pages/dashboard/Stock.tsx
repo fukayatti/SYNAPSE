@@ -13,9 +13,9 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
+import { ErrorState } from "@/components/ui/ErrorState";
 import { toast } from "sonner";
 import { AlertTriangle, Package } from "lucide-react";
-import Image from "@/components/image";
 
 function StockManagementContent() {
   const [circleId, setCircleId] = useState<string>("");
@@ -41,6 +41,8 @@ function StockManagementContent() {
   const {
     data: menus,
     isLoading,
+    isError,
+    error,
     refetch,
   } = useQuery({
     queryKey: ["menus", circleId],
@@ -75,6 +77,14 @@ function StockManagementContent() {
           <Skeleton className="h-12 w-64" />
           <Skeleton className="h-64" />
         </div>
+      </DashboardLayout>
+    );
+  }
+
+  if (isError) {
+    return (
+      <DashboardLayout title={circleName} subtitle="在庫管理" type="circle">
+        <ErrorState error={error} onRetry={() => refetch()} />
       </DashboardLayout>
     );
   }
@@ -125,11 +135,10 @@ function StockManagementContent() {
                 >
                   <div className="relative h-12 w-12 rounded-none overflow-hidden flex-shrink-0 border-thick border-border">
                     {menu.imagePath ? (
-                      <Image
+                      <img
                         src={menu.imagePath}
                         alt={menu.name}
-                        fill
-                        className="object-cover"
+                        className="absolute inset-0 h-full w-full object-cover"
                       />
                     ) : (
                       <div className="flex h-full w-full items-center justify-center bg-muted">
@@ -150,6 +159,10 @@ function StockManagementContent() {
                       type="number"
                       className="w-20 border-thick border-border rounded-none h-8 text-xs bg-background focus-visible:ring-0 text-center"
                       defaultValue={menu.stockQuantity ?? 0}
+                      // 2026-07-07 (Phase6 UX堅牢化): 保存中に連続で blur すると重複リクエストに
+                      // なりうるため、更新中は入力を disabled にする (行単位の pending 追跡はせず
+                      // mutation 全体の isPending で握る簡易対応)。
+                      disabled={updateStock.isPending}
                       onBlur={(e) => {
                         const newValue = Number(e.target.value);
                         if (newValue !== menu.stockQuantity) {

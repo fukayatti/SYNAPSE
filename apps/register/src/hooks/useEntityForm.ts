@@ -2,6 +2,7 @@ import { useState, useEffect, type Dispatch, type SetStateAction } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import type { SaveStatus } from "@/components/ui/FormField";
+import { handleApiErrorToast } from "@/lib/api-error";
 
 // 2026-07-04: Circle/Menu/Topping/Staff/EventStaff の各 FormModal が
 // 「新規=作成 / 編集=onBlur 自動保存 / 未保存入力ありなら閉じる前に確認」という
@@ -30,7 +31,7 @@ interface UseEntityFormOptions<TForm extends Record<string, unknown>, TEntity> {
   hasChanged?: (form: TForm, entity: TEntity) => boolean;
   /** 新規作成時、閉じる前に確認すべき入力があるか。省略時は emptyForm との JSON 比較。 */
   hasInput?: (form: TForm) => boolean;
-  /** 自動保存の mutate 発火直後に呼ばれる (例: PIN 欄のクリア)。 */
+  /** 自動保存の mutate 発火直後に呼ばれる (例: パスワード等センシティブ欄のクリア)。 */
   onAfterAutoSave?: (setForm: Dispatch<SetStateAction<TForm>>) => void;
   messages: { createSuccess: string; createError: string; updateSuccess: string };
 }
@@ -70,7 +71,10 @@ export function useEntityForm<TForm extends Record<string, unknown>, TEntity>(
       invalidate();
       onClose();
     },
-    onError: (err: any) => toast.error(err?.message || messages.createError),
+    // Phase4: ApiError.code (401/403/429/VALIDATION) に応じた分岐は handleApiErrorToast に
+    // 委譲する。それ以外の code (BAD_REQUEST/CONFLICT/INTERNAL等) は err.message をそのまま
+    // 使いたいので、フォールバック文言は handleApiErrorToast 内の "従来どおり表示" に任せる。
+    onError: (err: any) => handleApiErrorToast(err),
   });
 
   const updateMutation = useMutation({
@@ -84,7 +88,14 @@ export function useEntityForm<TForm extends Record<string, unknown>, TEntity>(
       setSaveStatus("saved");
     },
     onError: (err: any) => {
-      toast.error(`自動保存失敗: ${err?.message ?? ""}`);
+      // 401(ログイン誘導)/403/429/VALIDATION は handleApiErrorToast の分岐に任せ、
+      // それ以外 (BAD_REQUEST/CONFLICT/INTERNAL等) は「自動保存失敗」の文脈を保つため
+      // 専用のトーストを出す (toastId で「自動保存中...」のローディングトーストを差し替える)。
+      if (err?.code === "UNAUTHORIZED" || err?.code === "FORBIDDEN" || err?.code === "RATE_LIMITED" || err?.code === "VALIDATION") {
+        handleApiErrorToast(err, { toastId });
+      } else {
+        toast.error(`自動保存失敗: ${err?.message ?? ""}`, { id: toastId });
+      }
       setSaveStatus("error");
     },
   });

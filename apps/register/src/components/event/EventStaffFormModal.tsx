@@ -5,7 +5,7 @@ import {
   FormSelect,
   FormSubmitButton,
 } from "@/components/ui/FormField";
-import { ConfirmationDialog } from "@/components/ui/ConfirmationDialog";
+import { UnsavedChangesDialog } from "@/components/ui/UnsavedChangesDialog";
 import { useEntityForm } from "@/hooks/useEntityForm";
 import { UserPlus } from "lucide-react";
 
@@ -82,7 +82,7 @@ export function EventStaffFormModal({ eventId, isOpen, onClose }: EventStaffForm
         </FormSubmitButton>
       </Modal>
 
-      <ConfirmationDialog
+      <UnsavedChangesDialog
         isOpen={isConfirmOpen}
         title="[確認: スタッフ招待フォームを閉じます]"
         description="招待を発行するには「招待を発行する」を押してください。破棄する場合は「保存せず閉じる」を選択してください。"

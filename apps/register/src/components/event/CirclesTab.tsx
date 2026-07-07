@@ -6,6 +6,7 @@ import { Card, CardTitle, CardContent, CardDescription } from "@/components/ui/c
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { ErrorState } from "@/components/ui/ErrorState";
 import { Building2, Plus, Edit, Trash2, Users } from "lucide-react";
 import { toast } from "sonner";
 
@@ -17,12 +18,19 @@ interface CirclesTabProps {
   eventId: string;
   circles: any[] | undefined;
   circlesLoading: boolean;
+  /** サークル一覧取得の isError (省略時はエラー分岐を表示しない) */
+  circlesError?: boolean;
+  error?: unknown;
+  onRetry?: () => void;
 }
 
 export function CirclesTab({
   eventId,
   circles,
-  circlesLoading
+  circlesLoading,
+  circlesError,
+  error,
+  onRetry,
 }: CirclesTabProps) {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -106,6 +114,8 @@ export function CirclesTab({
             <Skeleton key={i} className="h-40" />
           ))}
         </div>
+      ) : circlesError ? (
+        <ErrorState error={error} onRetry={onRetry} />
       ) : circles && circles.length > 0 ? (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           {circles.map((cir) => (
@@ -138,8 +148,11 @@ export function CirclesTab({
                   <p className="text-[10px] text-muted-foreground truncate mb-3">{cir.description}</p>
                 )}
                 <div className="text-[10px] text-muted-foreground space-y-1 font-mono mb-4">
-                  <p>代表者: {cir.managerName || "未設定"}</p>
-                  <p className="truncate">メール: {cir.managerEmail}</p>
+                  {/* 2026-07-07 (Phase 3b): サークル作成がセルフサービス化されたため
+                      「代表者」= 作成時に circle_manager になったユーザーを表示する
+                      (PIN/管理者代理作成の概念は廃止)。 */}
+                  <p>管理者: {cir.managerName || "未設定"}</p>
+                  {cir.managerEmail && <p className="truncate">メール: {cir.managerEmail}</p>}
                   <p className="opacity-50 text-[8px]">ID: {cir.id}</p>
                 </div>
               </div>
@@ -178,6 +191,7 @@ export function CirclesTab({
         title="[確認: サークルの削除]"
         description={`本当にサークル「${circleToDelete?.name}」を削除してよろしいですか？この操作はサークルに紐づくメニューや売上データもすべて削除されます。`}
         confirmLabel="削除する"
+        isPending={deleteCircleMutation.isPending}
         onConfirm={() => circleToDelete && deleteCircleMutation.mutate(circleToDelete.id)}
         onCancel={() => setIsDeleteOpen(false)}
       />

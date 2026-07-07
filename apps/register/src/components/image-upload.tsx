@@ -4,7 +4,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Upload, X, Image as ImageIcon, Loader2 } from "lucide-react";
-import Image from "@/components/image";
 
 interface ImageUploadProps {
   value: string;
@@ -98,7 +97,7 @@ export function ImageUpload({
         // プレビュー表示
         <div className="relative">
           <div className="relative h-48 w-full rounded-lg overflow-hidden border">
-            <Image src={value} alt="プレビュー" fill className="object-cover" />
+            <img src={value} alt="プレビュー" className="absolute inset-0 h-full w-full object-cover" />
           </div>
           <Button
             type="button"

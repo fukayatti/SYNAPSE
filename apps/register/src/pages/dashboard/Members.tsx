@@ -29,6 +29,7 @@ import {
 } from "@/components/ui/FormField";
 import { undoableDelete } from "@/lib/toast-undo";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { ErrorState } from "@/components/ui/ErrorState";
 import {
   UserPlus,
   Link as LinkIcon,
@@ -63,12 +64,13 @@ function MembersContent() {
   }, []);
 
   // フォーム状態
+  // 2026-07-07 (Phase 3b): 独自PIN認証の廃止に伴い pin 欄を撤去。
+  // メンバーは追加後、招待/better-auth アカウントでログインする前提。
   const [newMember, setNewMember] = useState({
     userId: "",
     userEmail: "",
     userName: "",
     role: "viewer" as Role,
-    pin: "",
   });
 
   const [inviteSettings, setInviteSettings] = useState({
@@ -79,13 +81,23 @@ function MembersContent() {
   });
 
   // API呼び出し
-  const { data: members, refetch: refetchMembers } = useQuery({
+  const {
+    data: members,
+    isError: membersError,
+    error: membersErrorObj,
+    refetch: refetchMembers,
+  } = useQuery({
     queryKey: ["members", circleId],
     queryFn: () => membershipApi.listByCircle(circleId!),
     enabled: !!circleId,
   });
 
-  const { data: inviteTokens, refetch: refetchTokens } = useQuery({
+  const {
+    data: inviteTokens,
+    isError: inviteTokensError,
+    error: inviteTokensErrorObj,
+    refetch: refetchTokens,
+  } = useQuery({
     queryKey: ["inviteTokens", circleId],
     queryFn: () => membershipApi.listInvites(circleId!),
     enabled: !!circleId,
@@ -103,7 +115,6 @@ function MembersContent() {
       circleId?: string;
       eventId?: string;
       role: Role;
-      pin?: string;
     }) => membershipApi.addMember(input),
     onSuccess: () => {
       refetchMembers();
@@ -113,7 +124,6 @@ function MembersContent() {
         userEmail: "",
         userName: "",
         role: "viewer",
-        pin: "",
       });
     },
   });
@@ -162,7 +172,6 @@ function MembersContent() {
       userName: newMember.userName,
       circleId,
       role: newMember.role,
-      pin: newMember.pin || undefined,
     });
   };
 
@@ -237,7 +246,7 @@ function MembersContent() {
         isOpen={showAddForm}
         onClose={() => setShowAddForm(false)}
         title="[新規メンバー追加]"
-        subtitle="メンバーを直接追加します。招待リンクを使う場合は「招待リンク作成」を使用してください。"
+        subtitle="メンバーを直接追加します。追加された相手はこのメールアドレスの better-auth アカウント (メール/パスワード・パスキー・Google) でログインしてください。招待リンクを使う場合は「招待リンク作成」を使用してください。"
       >
         <div className="grid grid-cols-2 gap-4">
           <FormField
@@ -273,14 +282,6 @@ function MembersContent() {
                 </option>
               ))}
           </FormSelect>
-          <FormField
-            id="pin"
-            label="PIN（オプション）"
-            type="password"
-            placeholder="4-6桁の数字"
-            value={newMember.pin}
-            onChange={(e) => setNewMember({ ...newMember, pin: e.target.value })}
-          />
         </div>
 
         <FormSubmitButton
@@ -370,7 +371,9 @@ function MembersContent() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          {inviteTokens && inviteTokens.length > 0 ? (
+          {inviteTokensError ? (
+            <ErrorState error={inviteTokensErrorObj} onRetry={() => refetchTokens()} />
+          ) : inviteTokens && inviteTokens.length > 0 ? (
             <div className="space-y-3">
               {inviteTokens.map((token) => (
                 <div
@@ -435,7 +438,9 @@ function MembersContent() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {members && members.length > 0 ? (
+          {membersError ? (
+            <ErrorState error={membersErrorObj} onRetry={() => refetchMembers()} />
+          ) : members && members.length > 0 ? (
             <div className="space-y-3">
               {members.map((member) => (
                 <div

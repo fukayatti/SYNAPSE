@@ -1,3 +1,5 @@
+import { apiErrorFromResponse, networkApiError } from "./api-error";
+
 function getApiBaseUrl(): string {
   let url = import.meta.env.VITE_API_URL || "https://localhost:8787";
   if (typeof window !== "undefined" && (url.includes("localhost") || url.includes("127.0.0.1"))) {
@@ -51,25 +53,25 @@ async function fetchApi<T>(
     config.body = JSON.stringify(body);
   }
 
+  // Phase4: 従来は失敗時に必ず `new Error(文字列)` へ潰しており、401/403/429 の区別も
+  // バリデーションのフィールド単位エラーもフロントから見えなかった。ここでは
+  // レスポンス本文を統一エラーエンベロープとしてパースし、型付きの ApiError を throw する。
+  // 呼び出し側 (providers.tsx の共通ハンドラ、または各画面) が ApiError.code / fields /
+  // requestId を見て UX を分岐できるようにする。
+  let response: Response;
   try {
     const baseUrl = getApiBaseUrl();
-    const response = await fetch(`${baseUrl}${endpoint}`, config);
-
-    if (!response.ok) {
-      const errorData = await response
-        .json()
-        .catch(() => null);
-      const errorMessage = errorData?.error || errorData?.message || `HTTP error! status: ${response.status}`;
-      throw new Error(errorMessage);
-    }
-
-    return await response.json();
-  } catch (err: any) {
-    if (err.name === "TypeError" || err.message?.includes("fetch")) {
-      throw new Error("サーバー通信エラー: ネットワーク接続を確認してください");
-    }
-    throw err;
+    response = await fetch(`${baseUrl}${endpoint}`, config);
+  } catch (err) {
+    // fetch 自体の失敗 (オフライン・DNS解決失敗等)。ApiError.code = "NETWORK" として区別する。
+    throw networkApiError(err);
   }
+
+  if (!response.ok) {
+    throw await apiErrorFromResponse(response);
+  }
+
+  return await response.json();
 }
 
 // Event API
@@ -84,11 +86,8 @@ export const eventApi = {
     fetchApi<Event>(`/api/festivals/${id}/theme`, { method: "PUT", body: data }),
   delete: (id: string) =>
     fetchApi<{ success: boolean }>(`/api/festivals/${id}`, { method: "DELETE" }),
-  login: (data: LoginInput) =>
-    fetchApi<LoginResponse>("/api/festivals/login", {
-      method: "POST",
-      body: data,
-    }),
+  // 2026-07-07 (Phase 3a/3b): 独自のイベントパスワードログイン (POST /login) は
+  // バックエンドで廃止済み。認証は better-auth に一本化。
 };
 
 
@@ -278,16 +277,6 @@ export const membershipApi = {
     fetchApi<{ success: boolean }>(`/api/memberships/invite/${id}`, {
       method: "DELETE",
     }),
-  authenticateWithPin: (data: PinAuthInput) =>
-    fetchApi<PinAuthResult>("/api/memberships/authenticate-pin", {
-      method: "POST",
-      body: data,
-    }),
-  updatePin: (id: string, pin: string) =>
-    fetchApi<{ success: boolean }>(`/api/memberships/${id}/pin`, {
-      method: "PATCH",
-      body: { pin },
-    }),
   listMy: (userEmail: string) =>
     fetchApi<any[]>(`/api/memberships/my?userEmail=${encodeURIComponent(userEmail)}`),
 };
@@ -324,7 +313,7 @@ export const accountApi = {
 export const notificationApi = {
   list: () => fetchApi<any[]>("/api/memberships/notifications/list"),
   read: (id: string) => fetchApi<{ success: boolean }>(`/api/memberships/notifications/${id}/read`, { method: "POST" }),
-  respond: (id: string, data: { action: "accept" | "decline"; userName?: string; pin?: string }) =>
+  respond: (id: string, data: { action: "accept" | "decline"; userName?: string }) =>
     fetchApi<{ success: boolean }>(`/api/memberships/notifications/${id}/respond`, {
       method: "POST",
       body: data,
@@ -339,17 +328,20 @@ export const uploadImage = async (
   formData.append("file", file);
 
   const baseUrl = getApiBaseUrl();
-  const response = await fetch(`${baseUrl}/api/upload`, {
-    method: "POST",
-    body: formData,
-    credentials: "include",
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${baseUrl}/api/upload`, {
+      method: "POST",
+      body: formData,
+      credentials: "include",
+    });
+  } catch (err) {
+    throw networkApiError(err);
+  }
 
   if (!response.ok) {
-    const error = await response
-      .json()
-      .catch(() => ({ error: "Unknown error" }));
-    throw new Error(error.error || "アップロードに失敗しました");
+    // Phase4: /api/upload も統一エラーエンベロープを返すため fetchApi と同じパースを使う。
+    throw await apiErrorFromResponse(response);
   }
 
   return response.json();
@@ -540,7 +532,6 @@ export interface Membership {
   circleId: string | null;
   eventId: string | null;
   role: string;
-  pin: string | null;
   isActive: boolean;
   invitedAt: Date | null;
   acceptedAt: Date | null;
@@ -568,18 +559,6 @@ export interface InviteToken {
 }
 
 // Input Types
-export interface LoginInput {
-  eventName: string;
-  circleName: string;
-  password: string;
-}
-
-export interface LoginResponse {
-  circleId: string;
-  circleName: string;
-  eventId: string;
-  eventName: string;
-}
 
 export interface CreateEventInput {
   eventName: string;
@@ -588,21 +567,18 @@ export interface CreateEventInput {
   endDate?: string;
 }
 
+// 2026-07-07 (Phase 3a/3b): サークル作成はセルフサービス化。better-auth ログイン
+// ユーザーが eventId/name/description のみを指定して作成し、作成者本人が
+// 自動的に circle_manager になる (managerEmail/managerName/managerPin は廃止)。
 export interface CreateCircleInput {
   eventId: string;
   name: string;
-  managerPin?: string;
   description?: string;
-  managerEmail: string;
-  managerName?: string;
 }
 
 export interface UpdateCircleInput {
   name?: string;
   description?: string;
-  managerPin?: string;
-  managerEmail?: string;
-  managerName?: string;
 }
 
 export interface CreateMenuInput {
@@ -691,7 +667,6 @@ export interface AddMemberInput {
   circleId?: string;
   eventId?: string;
   role: Role;
-  pin?: string;
 }
 
 export interface CreateInviteInput {
@@ -704,28 +679,11 @@ export interface CreateInviteInput {
   targetEmail?: string;
 }
 
+// 2026-07-07 (Phase 3a): 招待受諾は better-auth セッション必須になり、
+// userEmail はセッションから解決されるため入力不要 (pin も廃止)。
 export interface AcceptInviteInput {
   token: string;
-  userEmail: string;
   userName: string;
-  pin?: string;
-}
-
-export interface PinAuthInput {
-  circleId?: string;
-  eventId?: string;
-  email?: string;
-  pin: string;
-}
-
-export interface PinAuthResult {
-  success: boolean;
-  membership?: Membership;
-  user?: {
-    id: string;
-    name: string;
-    email: string;
-  };
 }
 
 // Wristband API

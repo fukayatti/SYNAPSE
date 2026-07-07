@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 
-// 2026-07-05: Modal / ConfirmDialog / ConfirmationDialog で個別にフォーカス管理を
+// 2026-07-05: Modal / ConfirmDialog / UnsavedChangesDialog で個別にフォーカス管理を
 // 実装するとロジックが重複するため共通化。開いた際にダイアログ内へフォーカスを移し、
 // Tab / Shift+Tab をダイアログ内で循環させ、閉じたら開く前のフォーカス元へ戻す。
 // Escape 処理もここに統合し、各ダイアログでの重複実装をなくす。
@@ -14,7 +14,7 @@ const FOCUSABLE_SELECTOR = [
   '[tabindex]:not([tabindex="-1"])',
 ].join(", ");
 
-// Modal の上に ConfirmationDialog が重なる等、トラップが同時に複数開くケースがある。
+// Modal の上に UnsavedChangesDialog が重なる等、トラップが同時に複数開くケースがある。
 // 全トラップが document の keydown を購読すると Tab/Escape を奪い合うため、
 // モジュールレベルのスタックで「最前面 (最後に開いたもの) だけが動作する」ようにする。
 const trapStack: symbol[] = [];

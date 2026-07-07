@@ -1,9 +1,10 @@
 
 import { useState, useEffect } from "react";
-import { useRouter, useParams } from "@/lib/next-navigation";
+import { useNavigate, useParams } from "react-router-dom";
 import { useMutation } from "@tanstack/react-query";
 import { membershipApi } from "@/lib/api";
 import { saveAuthInfo, type RoleType } from "@/hooks/useCircleAuth";
+import { authClient } from "@/lib/auth-client";
 import {
   Card,
   CardContent,
@@ -15,45 +16,45 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import Loader from "@/components/loader";
-import { CheckCircle, XCircle, UserPlus } from "lucide-react";
+import { CheckCircle, XCircle, UserPlus, LogIn } from "lucide-react";
 
+// 2026-07-07 (Phase 3a/3b): 招待受諾は better-auth セッション必須になった
+// (userEmail はセッションから解決されるため入力不要、PIN も廃止)。
+// 未ログインでこのページに来た場合は、まず better-auth ログイン/サインアップへ
+// 誘導し、ログイン後に招待トークン付きでこのページへ戻ってこられるようにする。
 export default function InvitePage() {
   // react-router の動的セグメント /invite/:token から取得 (旧 Next の use(params) を置換)
   const { token = "" } = useParams();
-  const router = useRouter();
-  const [isLoading, setIsLoading] = useState(true);
+  const navigate = useNavigate();
+  const { data: session, isPending: sessionPending } = authClient.useSession();
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
 
-  const [formData, setFormData] = useState({
-    userEmail: "",
-    userName: "",
-    userId: "",
-    pin: "",
-  });
+  const [userName, setUserName] = useState("");
+
+  useEffect(() => {
+    if (session?.user?.name) {
+      setUserName((prev) => prev || session.user.name);
+    }
+  }, [session]);
 
   const acceptInviteMutation = useMutation({
-    mutationFn: async (input: {
-      token: string;
-      userEmail: string;
-      userName: string;
-      pin?: string;
-    }) => {
+    mutationFn: async (input: { token: string; userName: string }) => {
       return await membershipApi.acceptInvite(input);
     },
     onSuccess: (data) => {
-      // 認証情報を保存
+      // 認証情報を保存 (circleId 等は次回ログイン時の /api/memberships/my で解決される)
       saveAuthInfo({
-        circleId: null, // 後で取得する
+        circleId: null,
         eventId: null,
-        userEmail: formData.userEmail,
-        userName: formData.userName,
-        role: "viewer" as RoleType, // デフォルト
+        userEmail: session?.user?.email || null,
+        userName: userName || session?.user?.name || null,
+        role: "circle_staff" as RoleType,
         membershipId: data.membershipId,
       });
       setSuccess(true);
       setTimeout(() => {
-        router.push("/dashboard");
+        navigate("/circle/dashboard");
       }, 2000);
     },
     onError: (err: Error) => {
@@ -61,27 +62,49 @@ export default function InvitePage() {
     },
   });
 
-  useEffect(() => {
-    // トークンの検証は実際にはサーバー側で行う
-    // ここでは単純にUIを表示
-    setIsLoading(false);
-  }, [token]);
-
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     acceptInviteMutation.mutate({
       token,
-      userEmail: formData.userEmail,
-      userName: formData.userName,
-      pin: formData.pin || undefined,
+      userName: userName.trim(),
     });
   };
 
-  if (isLoading) {
+  if (sessionPending) {
     return (
       <div className="flex min-h-screen items-center justify-center">
         <Loader />
+      </div>
+    );
+  }
+
+  // 未ログイン: まず better-auth ログイン/サインアップへ誘導する。
+  // callbackUrl で招待受諾ページへ戻ってこられるようにする。
+  if (!session) {
+    const callbackUrl = encodeURIComponent(`/circle/invite/${token}`);
+    return (
+      <div className="flex min-h-screen items-center justify-center p-4">
+        <Card className="w-full max-w-md">
+          <CardHeader className="text-center">
+            <div className="mx-auto mb-4 h-12 w-12 rounded-full bg-primary/10 flex items-center justify-center">
+              <UserPlus className="h-6 w-6 text-primary" />
+            </div>
+            <CardTitle>サークルへの招待</CardTitle>
+            <CardDescription>
+              招待を受け取るには、まずログイン（またはアカウント作成）してください。
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button
+              className="w-full"
+              onClick={() => navigate(`/circle/login?callbackUrl=${callbackUrl}`)}
+            >
+              <LogIn className="h-4 w-4 mr-2" />
+              ログイン / アカウント作成へ進む
+            </Button>
+          </CardContent>
+        </Card>
       </div>
     );
   }
@@ -112,51 +135,21 @@ export default function InvitePage() {
             <UserPlus className="h-6 w-6 text-primary" />
           </div>
           <CardTitle>サークルへの招待</CardTitle>
-          <CardDescription>招待リンクからサークルに参加します</CardDescription>
+          <CardDescription>
+            {session.user.email} として参加します
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="email">メールアドレス</Label>
-              <Input
-                id="email"
-                type="email"
-                placeholder="example@email.com"
-                required
-                value={formData.userEmail}
-                onChange={(e) =>
-                  setFormData({ ...formData, userEmail: e.target.value })
-                }
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="name">お名前</Label>
+              <Label htmlFor="name">お名前（表示名）</Label>
               <Input
                 id="name"
                 placeholder="山田太郎"
                 required
-                value={formData.userName}
-                onChange={(e) =>
-                  setFormData({ ...formData, userName: e.target.value })
-                }
+                value={userName}
+                onChange={(e) => setUserName(e.target.value)}
               />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="pin">PIN（オプション）</Label>
-              <Input
-                id="pin"
-                type="password"
-                placeholder="簡易ログイン用の4-6桁の数字"
-                value={formData.pin}
-                onChange={(e) =>
-                  setFormData({ ...formData, pin: e.target.value })
-                }
-              />
-              <p className="text-xs text-muted-foreground">
-                PINを設定すると、次回から簡単にログインできます
-              </p>
             </div>
 
             {error && (
@@ -169,7 +162,7 @@ export default function InvitePage() {
             <Button
               type="submit"
               className="w-full"
-              disabled={acceptInviteMutation.isPending}
+              disabled={acceptInviteMutation.isPending || !userName.trim()}
             >
               {acceptInviteMutation.isPending ? (
                 <>

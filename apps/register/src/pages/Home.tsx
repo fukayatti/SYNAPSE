@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { PRODUCT_NAME } from "@fesflow/config";
+import { visitorUrl } from "@/lib/visitor-url";
 
 // Next.js app/page.tsx から移植 (2026-07-04)。next/link → react-router、
 // 製品名は @fesflow/config の PRODUCT_NAME を参照するよう変更。
@@ -9,7 +10,9 @@ export default function Home() {
     {
       title: "メニュー閲覧",
       description: "QRコードからアクセスして簡単にメニューを確認",
-      href: "/visitor/menu",
+      // 来場者アプリ (別SPA) へのフルページ遷移
+      href: visitorUrl("/menu"),
+      external: true,
       tag: "CUSTOMER",
       index: "01",
     },
@@ -17,6 +20,7 @@ export default function Home() {
       title: "レジシステム",
       description: "直感的な操作で素早く注文を入力",
       href: "/circle/register",
+      external: false,
       tag: "POS",
       index: "02",
     },
@@ -24,6 +28,7 @@ export default function Home() {
       title: "厨房管理",
       description: "注文をリアルタイムで確認・管理",
       href: "/circle/backyard",
+      external: false,
       tag: "KITCHEN",
       index: "03",
     },
@@ -31,6 +36,7 @@ export default function Home() {
       title: "売上分析",
       description: "売上データを一目で確認",
       href: "/circle/dashboard/sales",
+      external: false,
       tag: "ANALYTICS",
       index: "04",
     },
@@ -62,11 +68,11 @@ export default function Home() {
                 ログインして始める
               </Button>
             </Link>
-            <Link to="/visitor/menu" className="w-full sm:w-auto">
+            <a href={visitorUrl("/menu")} className="w-full sm:w-auto">
               <Button size="lg" variant="outline" className="w-full sm:w-auto">
                 メニューを見る
               </Button>
-            </Link>
+            </a>
           </div>
         </div>
       </section>
@@ -104,16 +110,29 @@ export default function Home() {
                     {feature.description}
                   </p>
                 </div>
-                <Link to={feature.href} className="block w-full mt-auto">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="w-full justify-between group-hover:bg-background group-hover:text-foreground group-hover:border-background"
-                  >
-                    アクセス
-                    <span className="font-mono font-bold">→</span>
-                  </Button>
-                </Link>
+                {feature.external ? (
+                  <a href={feature.href} className="block w-full mt-auto">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="w-full justify-between group-hover:bg-background group-hover:text-foreground group-hover:border-background"
+                    >
+                      アクセス
+                      <span className="font-mono font-bold">→</span>
+                    </Button>
+                  </a>
+                ) : (
+                  <Link to={feature.href} className="block w-full mt-auto">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="w-full justify-between group-hover:bg-background group-hover:text-foreground group-hover:border-background"
+                    >
+                      アクセス
+                      <span className="font-mono font-bold">→</span>
+                    </Button>
+                  </Link>
+                )}
               </div>
             ))}
           </div>
@@ -127,7 +146,7 @@ export default function Home() {
             GET STARTED NOW
           </h2>
           <p className="text-[14px] sm:text-[16px] md:text-[18px] font-mono max-w-xl mx-auto leading-[1.5]">
-            イベント名とサークル名を選択し、PINコードで瞬時にログイン可能。
+            メールアドレス・パスキー・Googleアカウントでログインし、所属スペースへ瞬時に切り替え可能。
           </p>
           <div>
             <Link to="/circle/login" className="block sm:inline-block">

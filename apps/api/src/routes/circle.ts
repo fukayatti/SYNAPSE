@@ -1,13 +1,14 @@
 import { Hono } from "hono";
-import { zValidator } from "@hono/zod-validator";
+import { zBody } from "../z-validator";
+import { apiError } from "../http-error";
 import { z } from "zod";
 import { db, circle, event, membership } from "@fesflow/db";
 import { eq, and, isNull } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { getAdminSession, hasPermission } from "../utils/auth";
-import { hashSecret } from "../utils/password";
+import { requireAuth, type AuthVariables } from "../middleware/auth";
 
-const circleRoutes = new Hono();
+const circleRoutes = new Hono<{ Variables: AuthVariables }>();
 
 // サークル一覧取得
 // 2026-07-06 (H2): 公開ブラウズ(来場者アプリ)にも使われるため認証必須化はしない。
@@ -87,7 +88,7 @@ circleRoutes.get("/:id", async (c) => {
     .where(and(eq(circle.id, id), isNull(circle.deletedAt)));
 
   if (circles.length === 0) {
-    return c.json({ error: "サークルが見つかりません" }, 404);
+    apiError("NOT_FOUND", "サークルが見つかりません");
   }
 
   const found = circles[0]!;
@@ -100,25 +101,25 @@ circleRoutes.get("/:id", async (c) => {
 });
 
 // サークル作成
+// 2026-07-07 (Phase 3a): セルフサービス化。旧仕様は管理者(getAdminSession)のみが
+// managerEmail/managerPin を指定してサークル + 代表者メンバーシップを代理作成する
+// ものだったが、新仕様では「better-auth セッションを持つ任意のログインユーザー」が
+// サークルを作成でき、作成と同時に自分自身 (session.user.email) が circle_manager に
+// なる (作成者=管理者)。managerEmail/managerName/managerPin の入力は廃止。
+// eventId は引き続き必須 (サークルはイベント配下)。イベントをまたぐ不正の防止は
+// 最小限 (イベント存在確認のみ) にとどめる。
 circleRoutes.post(
   "/",
-  zValidator(
-    "json",
+  requireAuth,
+  zBody(
     z.object({
       eventId: z.string(),
       name: z.string().min(1, "サークル名は必須です"),
-      managerPin: z.string().min(4, "一時PINは4文字以上必要です").max(6, "一時PINは6文字以下にしてください").optional(),
       description: z.string().optional(),
-      managerEmail: z.string().email("有効なメールアドレスを入力してください"),
-      managerName: z.string().optional(),
     })
   ),
   async (c) => {
-    const session = await getAdminSession(c);
-    if (!session) {
-      return c.json({ error: "管理者権限が必要です" }, 403);
-    }
-
+    const session = c.get("session");
     const input = c.req.valid("json");
     const id = nanoid();
 
@@ -128,7 +129,7 @@ circleRoutes.post(
       .from(event)
       .where(eq(event.id, input.eventId));
     if (events.length === 0) {
-      return c.json({ error: "イベントが見つかりません" }, 404);
+      apiError("NOT_FOUND", "イベントが見つかりません");
     }
 
     // 同じイベント内で同じ名前のサークルがないか確認
@@ -140,19 +141,7 @@ circleRoutes.post(
       );
 
     if (existingCircles.length > 0) {
-      return c.json({ error: "同じ名前のサークルが既に存在します" }, 400);
-    }
-
-    // 後方互換性のためにランダムなサークルパスワードを生成しハッシュ化
-    // 2026-07-06: bcrypt(saltRounds=4) は強度が低すぎるため、PBKDF2 ベースの
-    // hashSecret に置換 (H1)。
-    const randomPassword = nanoid(16);
-    const hashedPassword = await hashSecret(randomPassword);
-
-    // PINをハッシュ化
-    let pinHash: string | null = null;
-    if (input.managerPin) {
-      pinHash = await hashSecret(input.managerPin);
+      apiError("BAD_REQUEST", "同じ名前のサークルが既に存在します");
     }
 
     // サークルと代表者メンバーシップを作成
@@ -162,27 +151,26 @@ circleRoutes.post(
       id,
       eventId: input.eventId,
       name: input.name,
-      password: hashedPassword,
       description: input.description,
     });
 
     // 2026-07-06 (M5): D1 はトランザクション非対応のため、membership insert が
     // 失敗すると代表者不在のサークルが残ってしまう。失敗時は先に作成した circle 行を
     // 補償削除してからエラーを返す。
+    // 2026-07-07 (Phase 3a): 代表者は常に作成者本人 (session.user.email)。
     const membershipId = nanoid();
     try {
       await db.insert(membership).values({
         id: membershipId,
-        userEmail: input.managerEmail.toLowerCase(), // メールアドレスは小文字で保存
-        userName: input.managerName || `${input.name} 代表者`,
+        userEmail: session.user.email.toLowerCase(), // メールアドレスは小文字で保存
+        userName: session.user.name || `${input.name} 代表者`,
         circleId: id,
         role: "circle_manager",
-        pin: pinHash,
         isActive: true,
       });
     } catch (e) {
       await db.delete(circle).where(eq(circle.id, id));
-      return c.json({ error: "サークルの作成に失敗しました" }, 500);
+      apiError("INTERNAL", "サークルの作成に失敗しました");
     }
 
     return c.json({ id }, 201);
@@ -190,22 +178,22 @@ circleRoutes.post(
 );
 
 // サークル更新
+// 2026-07-07 (Phase 3a): PIN 廃止に合わせて整理。managerEmail/managerPin による
+// 代表者付け替えロジックは撤去し、サークル名/説明の更新のみを扱う。
+// 代表者の付け替えは招待 (membership.ts の invite) やオーナー権限譲渡
+// (POST /:id/transfer-owner, 下記) 側に委ねる。
 circleRoutes.put(
   "/:id",
-  zValidator(
-    "json",
+  zBody(
     z.object({
       name: z.string().min(1).optional(),
       description: z.string().optional(),
-      managerPin: z.string().min(4).max(6).optional(),
-      managerEmail: z.string().email("有効なメールアドレスを入力してください").optional(),
-      managerName: z.string().optional(),
     })
   ),
   async (c) => {
     const session = await getAdminSession(c);
     if (!session) {
-      return c.json({ error: "管理者権限が必要です" }, 403);
+      apiError("FORBIDDEN", "管理者権限が必要です");
     }
 
     const id = c.req.param("id");
@@ -217,7 +205,7 @@ circleRoutes.put(
       .from(circle)
       .where(eq(circle.id, id));
     if (existingCircle.length === 0) {
-      return c.json({ error: "サークルが見つかりません" }, 404);
+      apiError("NOT_FOUND", "サークルが見つかりません");
     }
 
     const updates: Partial<typeof circle.$inferSelect> = {};
@@ -226,59 +214,8 @@ circleRoutes.put(
     if (input.description !== undefined)
       updates.description = input.description;
 
-    // PINをハッシュ化
-    // 2026-07-06: bcrypt(saltRounds=4) は強度が低すぎるため、PBKDF2 ベースの
-    // hashSecret に置換 (H1)。
-    let pinHash: string | null = null;
-    if (input.managerPin) {
-      pinHash = await hashSecret(input.managerPin);
-    }
-
-    // サークルと代表者メンバーシップを更新
-    // 2026-07-04: D1 の制限回避のため db.transaction を廃止し、順次実行に変更。
     if (Object.keys(updates).length > 0) {
       await db.update(circle).set(updates).where(eq(circle.id, id));
-    }
-
-    if (input.managerEmail || pinHash || input.managerName) {
-      const managers = await db
-        .select()
-        .from(membership)
-        .where(
-          and(
-            eq(membership.circleId, id),
-            eq(membership.role, "circle_manager")
-          )
-        );
-
-      const manager = managers[0];
-      if (manager) {
-        // 既存の代表者を更新
-        const setValues: any = {};
-        if (input.managerEmail) setValues.userEmail = input.managerEmail.toLowerCase();
-        if (input.managerName !== undefined) setValues.userName = input.managerName || manager.userName;
-        if (pinHash) setValues.pin = pinHash;
-
-        if (Object.keys(setValues).length > 0) {
-          await db
-            .update(membership)
-            .set(setValues)
-            .where(eq(membership.id, manager.id));
-        }
-      } else {
-        // 既存の代表者がいない場合は新規作成
-        const currentCircle = existingCircle[0];
-        const membershipId = nanoid();
-        await db.insert(membership).values({
-          id: membershipId,
-          userEmail: (input.managerEmail || "").toLowerCase(),
-          userName: input.managerName || `${input.name || (currentCircle ? currentCircle.name : "サークル")} 代表者`,
-          circleId: id,
-          role: "circle_manager",
-          pin: pinHash,
-          isActive: true,
-        });
-      }
     }
 
     return c.json({ success: true });
@@ -293,7 +230,7 @@ circleRoutes.delete("/:id", async (c) => {
 
   const allowed = await hasPermission(c, id, "circle:delete");
   if (!allowed) {
-    return c.json({ error: "削除する権限がありません" }, 403);
+    apiError("FORBIDDEN", "削除する権限がありません");
   }
 
   // 物理削除せず deletedAt に時刻を書き込む (論理削除)
@@ -304,8 +241,7 @@ circleRoutes.delete("/:id", async (c) => {
 // サークル運用設定 (注文モード・組み込み拡張のON/OFF等) の更新
 circleRoutes.patch(
   "/:id/settings",
-  zValidator(
-    "json",
+  zBody(
     z.object({
       settings: z.record(z.string(), z.any()),
     })
@@ -316,12 +252,12 @@ circleRoutes.patch(
 
     const allowed = await hasPermission(c, id, "circle:write");
     if (!allowed) {
-      return c.json({ error: "権限がありません" }, 403);
+      apiError("FORBIDDEN", "権限がありません");
     }
 
     const existingCircle = await db.select().from(circle).where(eq(circle.id, id));
     if (existingCircle.length === 0) {
-      return c.json({ error: "サークルが見つかりません" }, 404);
+      apiError("NOT_FOUND", "サークルが見つかりません");
     }
 
     await db
@@ -338,8 +274,7 @@ circleRoutes.patch(
 // 上位管理者(event_manager / super_admin)のみ実行可能。
 circleRoutes.post(
   "/:id/transfer-owner",
-  zValidator(
-    "json",
+  zBody(
     z.object({
       membershipId: z.string(),
     })
@@ -351,7 +286,7 @@ circleRoutes.post(
     // 譲渡は「メンバーの権限変更」に相当するため circle:write 権限で判定
     const allowed = await hasPermission(c, id, "circle:write");
     if (!allowed) {
-      return c.json({ error: "権限がありません" }, 403);
+      apiError("FORBIDDEN", "権限がありません");
     }
 
     // 譲渡先メンバーが当該サークルに所属しているか確認
@@ -360,7 +295,7 @@ circleRoutes.post(
       .from(membership)
       .where(and(eq(membership.id, membershipId), eq(membership.circleId, id)));
     if (targets.length === 0) {
-      return c.json({ error: "譲渡先のメンバーが見つかりません" }, 404);
+      apiError("NOT_FOUND", "譲渡先のメンバーが見つかりません");
     }
 
     // 既存の circle_manager を circle_staff に降格 (譲渡先自身は除く)
@@ -391,8 +326,7 @@ circleRoutes.post(
 // サークルの拡張機能（モッド）設定の更新
 circleRoutes.patch(
   "/:id/mods",
-  zValidator(
-    "json",
+  zBody(
     z.object({
       mods: z.record(z.string(), z.any()),
     })
@@ -404,7 +338,7 @@ circleRoutes.patch(
     // 該当サークルへの書き込み権限をチェック
     const allowed = await hasPermission(c, id, "circle:write");
     if (!allowed) {
-      return c.json({ error: "権限がありません" }, 403);
+      apiError("FORBIDDEN", "権限がありません");
     }
 
     // 対象サークルの存在確認
@@ -413,7 +347,7 @@ circleRoutes.patch(
       .from(circle)
       .where(eq(circle.id, id));
     if (existingCircle.length === 0) {
-      return c.json({ error: "サークルが見つかりません" }, 404);
+      apiError("NOT_FOUND", "サークルが見つかりません");
     }
 
     // データベースの更新
