@@ -64,7 +64,7 @@
 ## Directory map
 - `docs`: 設計資料 (`docs/reference` は旧 FesOrder のドメイン資料)
 - `apps/api`: バックエンド (Hono Worker, D1+R2, REST+tRPC+better-auth)
-- `apps/register`: 模擬店/イベント/システム管理向けアプリ (Vite SPA, :3000)
+- `apps/app`: 模擬店/イベント/システム管理向けアプリ (Vite SPA, :3000)
 - `apps/visitor`: 来場者向けアプリ (Vite SPA, :3001)。register とは独立ビルド。
   入場は /w/:id (リストバンドQR) → オンボーディング(ニックネーム+誕生日) → マイページ。
   管理者の権限/ダッシュボードは持たない。VITE_REGISTER_URL で店頭スキャン先を指定。
@@ -74,8 +74,8 @@
 - `packages/auth`: better-auth ファクトリ
 - `packages/api`: tRPC ルーター (`@fesflow/api`)
 - `packages/storage`: R2/MinIO 抽象化
-- 移植補助シム: `apps/register/src/components/{link,image,script}.tsx`,
-  `apps/register/src/lib/next-navigation.ts` (旧 next/* 互換)
+- 移植補助シム: `apps/app/src/components/{link,image,script}.tsx`,
+  `apps/app/src/lib/next-navigation.ts` (旧 next/* 互換)
 
 ## PR expectations
 PRには以下を書く。

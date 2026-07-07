@@ -2,7 +2,7 @@
 	// register (模擬店向け) SPA を Cloudflare Workers Static Assets で配信する。
 	// Worker スクリプトは持たず、ビルド済み dist を静的配信 + SPA フォールバック。
 	"$schema": "node_modules/wrangler/config-schema.json",
-	"name": "fesflow-register",
+	"name": "fesflow-app",
 	"compatibility_date": "2025-06-01",
 	// 2026-07-07 単一ドメイン化: サブドメイン (staff./admin.) を廃し、apex fesflow.shikosai.net の
 	// パスプレフィックスで配信する。register は circle/event/sys の3スペースを兼ねる1SPA。

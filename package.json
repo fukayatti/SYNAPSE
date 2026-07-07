@@ -22,7 +22,7 @@
     "check-types": "turbo check-types",
     "test": "turbo test",
     "dev:api": "turbo -F api dev",
-    "dev:register": "turbo -F register dev",
+    "dev:app": "turbo -F app dev",
     "dev:visitor": "turbo -F visitor dev",
     "deploy": "turbo deploy",
     "db:generate": "turbo -F @fesflow/db db:generate",
