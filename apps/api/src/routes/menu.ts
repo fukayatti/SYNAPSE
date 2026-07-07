@@ -96,11 +96,15 @@ menuRoutes.post(
       name: z.string().min(1, "メニュー名は必須です"),
       price: z.number().min(0, "価格は0以上である必要があります"),
       description: z.string().optional(),
-      imagePath: z.string(),
+      // 画像は任意。未指定でメニュー追加できるようにする (2026-07-06: 画像なしだと
+      // imagePath が送られず 400 Bad Request になっていた不具合の修正)。
+      imagePath: z.string().optional(),
       additionalInfo: z.string().optional(),
       stockQuantity: z.number().min(0).optional(),
       soldOut: z.boolean().optional(),
       toppingIds: z.array(z.string()).optional(),
+      // 既定トッピング (レジで自動適用)
+      defaultToppingIds: z.array(z.string()).optional(),
     })
   ),
   async (c) => {
@@ -118,10 +122,12 @@ menuRoutes.post(
       name: input.name,
       price: input.price,
       description: input.description,
-      imagePath: input.imagePath,
+      // image_path は NOT NULL のため未指定時は空文字を入れる (フロントは空=画像なし扱い)
+      imagePath: input.imagePath ?? "",
       additionalInfo: input.additionalInfo,
       stockQuantity: input.stockQuantity ?? 0,
       soldOut: input.soldOut ?? false,
+      defaultToppingIds: JSON.stringify(input.defaultToppingIds ?? []),
     });
 
     // トッピングを関連付け
@@ -153,6 +159,7 @@ menuRoutes.put(
       stockQuantity: z.number().min(0).optional(),
       soldOut: z.boolean().optional(),
       toppingIds: z.array(z.string()).optional(),
+      defaultToppingIds: z.array(z.string()).optional(),
     })
   ),
   async (c) => {
@@ -179,6 +186,8 @@ menuRoutes.put(
     if (input.stockQuantity !== undefined)
       updates.stockQuantity = input.stockQuantity;
     if (input.soldOut !== undefined) updates.soldOut = input.soldOut;
+    if (input.defaultToppingIds !== undefined)
+      updates.defaultToppingIds = JSON.stringify(input.defaultToppingIds);
 
     if (Object.keys(updates).length > 0) {
       await db.update(menu).set(updates).where(eq(menu.id, id));

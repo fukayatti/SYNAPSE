@@ -13,7 +13,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ToggleSwitch } from "@/components/ui/ToggleSwitch";
 import { OptionCard } from "@/components/ui/OptionCard";
-import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { undoableDelete } from "@/lib/toast-undo";
 import { toast } from "sonner";
 import { Megaphone, Plus, Trash2, Info, AlertTriangle, OctagonAlert, Save, X } from "lucide-react";
 
@@ -34,7 +34,6 @@ const EMPTY: AnnouncementInput = { title: "", body: "", level: "info", published
 export function AnnouncementsTab() {
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState<null | { id?: string; data: AnnouncementInput }>(null);
-  const [pendingDelete, setPendingDelete] = useState<AdminAnnouncement | null>(null);
 
   const { data: list, isLoading } = useQuery({
     queryKey: ["adminAnnouncements"],
@@ -67,18 +66,17 @@ export function AnnouncementsTab() {
     onError: (e: any) => toast.error(e.message || "更新に失敗しました"),
   });
 
-  const deleteM = useMutation({
-    mutationFn: (id: string) => adminApi.deleteAnnouncement(id),
-    onSuccess: () => {
-      invalidate();
-      setPendingDelete(null);
-      toast.success("お知らせを削除しました");
-    },
-    onError: (e: any) => {
-      toast.error(e.message || "削除に失敗しました");
-      setPendingDelete(null);
-    },
-  });
+  const handleDelete = (a: AdminAnnouncement) =>
+    undoableDelete<AdminAnnouncement>({
+      queryClient,
+      queryKey: ["adminAnnouncements"],
+      id: a.id,
+      message: `「${a.title}」を削除しました`,
+      commit: async () => {
+        await adminApi.deleteAnnouncement(a.id);
+        queryClient.invalidateQueries({ queryKey: ["publicAnnouncements"] });
+      },
+    });
 
   const togglePublish = (a: AdminAnnouncement) =>
     updateM.mutate({ id: a.id, data: { published: !a.published } });
@@ -168,7 +166,7 @@ export function AnnouncementsTab() {
                     編集
                   </Button>
                   <Button
-                    onClick={() => setPendingDelete(a)}
+                    onClick={() => handleDelete(a)}
                     className="rounded-none border-thick border-border h-8 text-destructive hover:bg-destructive hover:text-destructive-foreground px-2 bg-background shadow-none"
                   >
                     <Trash2 className="h-3.5 w-3.5" />
@@ -187,14 +185,6 @@ export function AnnouncementsTab() {
         />
       )}
 
-      <ConfirmDialog
-        isOpen={!!pendingDelete}
-        title="[お知らせの削除]"
-        description={`「${pendingDelete?.title ?? ""}」を削除しますか？`}
-        confirmLabel="削除する"
-        onConfirm={() => pendingDelete && deleteM.mutate(pendingDelete.id)}
-        onCancel={() => setPendingDelete(null)}
-      />
     </div>
   );
 }

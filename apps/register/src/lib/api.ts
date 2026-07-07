@@ -433,6 +433,8 @@ export interface Menu {
   imagePath: string | null;
   stockQuantity: number | null;
   soldOut: boolean;
+  /** 既定トッピングID配列を JSON 文字列で保持 (例: '["t1","t2"]') */
+  defaultToppingIds?: string;
 }
 
 export interface Topping {
@@ -441,6 +443,7 @@ export interface Topping {
   name: string;
   price: number;
   description: string | null;
+  imagePath: string | null;
   soldOut: boolean;
 }
 
@@ -604,6 +607,7 @@ export interface CreateMenuInput {
   stock?: number;
   isAvailable?: boolean;
   toppingIds?: string[];
+  defaultToppingIds?: string[];
 }
 
 export interface UpdateMenuInput {
@@ -616,6 +620,7 @@ export interface UpdateMenuInput {
   stock?: number | null;
   isAvailable?: boolean;
   toppingIds?: string[];
+  defaultToppingIds?: string[];
 }
 
 export interface CreateToppingInput {
@@ -623,6 +628,7 @@ export interface CreateToppingInput {
   name: string;
   price: number;
   description?: string;
+  imagePath?: string;
   stock?: number;
   isAvailable?: boolean;
 }
@@ -631,6 +637,7 @@ export interface UpdateToppingInput {
   name?: string;
   price?: number;
   description?: string | null;
+  imagePath?: string | null;
   stock?: number | null;
   isAvailable?: boolean;
 }

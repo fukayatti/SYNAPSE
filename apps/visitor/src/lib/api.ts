@@ -389,6 +389,7 @@ export interface Topping {
   name: string;
   price: number;
   description: string | null;
+  imagePath: string | null;
   soldOut: boolean;
 }
 
@@ -565,6 +566,7 @@ export interface CreateToppingInput {
   circleId: string;
   name: string;
   price: number;
+  imagePath?: string;
   stock?: number;
   isAvailable?: boolean;
 }
@@ -572,6 +574,7 @@ export interface CreateToppingInput {
 export interface UpdateToppingInput {
   name?: string;
   price?: number;
+  imagePath?: string | null;
   stock?: number | null;
   isAvailable?: boolean;
 }

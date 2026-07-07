@@ -187,7 +187,7 @@ export function SettingsTab({ eventId, event }: SettingsTabProps) {
                   />
                   <button
                     onClick={() => setForm((prev) => ({ ...prev, logoUrl: "" }))}
-                    className="text-[10px] font-bold text-destructive uppercase hover:underline block mx-auto cursor-pointer"
+                    className="text-[10px] font-bold text-destructive uppercase underline block mx-auto cursor-pointer"
                   >
                     画像を削除
                   </button>

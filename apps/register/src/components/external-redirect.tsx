@@ -7,7 +7,11 @@ import { useEffect } from "react";
  */
 export default function ExternalRedirect({ to }: { to: string }) {
   useEffect(() => {
-    window.location.replace(to);
+    // 2026-07-06: 現在の URL のクエリ文字列を引き継ぐ (?circleId 等が転送で落ちないように)。
+    // 遷移先が既にクエリを持つ場合はそのまま尊重する。
+    const search = typeof window !== "undefined" ? window.location.search : "";
+    const dest = to.includes("?") || !search ? to : `${to}${search}`;
+    window.location.replace(dest);
   }, [to]);
   return null;
 }

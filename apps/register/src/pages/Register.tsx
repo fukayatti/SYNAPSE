@@ -3,7 +3,8 @@ import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { CircleAuthGuard } from "@/hooks/useCircleAuth";
 import { menuApi, toppingApi, orderApi, circleApi, wristbandApi } from "@/lib/api";
-import { extractIdFromCode } from "@/lib/utils";
+import { extractIdFromCode, cn } from "@/lib/utils";
+import { undoableAction } from "@/lib/toast-undo";
 import { ModSandbox } from "@/components/ModSandbox";
 import { QrScannerModal } from "@/components/pos/qr-scanner-modal";
 import {
@@ -127,11 +128,27 @@ function RegisterPageContent() {
     }
   }, [circleId, circle, menus, toppings]);
 
+  // メニューの既定トッピング (JSON) を解決して CartItem 用のトッピング配列にする
+  const resolveDefaultToppings = (menuId: string): CartItem["toppings"] => {
+    const m = menus?.find((x) => x.id === menuId);
+    if (!m?.defaultToppingIds || !toppings) return [];
+    try {
+      const ids: string[] = JSON.parse(m.defaultToppingIds);
+      return ids
+        .map((id) => toppings.find((t) => t.id === id))
+        .filter((t): t is NonNullable<typeof t> => !!t && !t.soldOut)
+        .map((t) => ({ toppingId: t.id, toppingName: t.name, toppingPrice: t.price }));
+    } catch {
+      return [];
+    }
+  };
+
   const addToCart = (menuId: string, menuName: string, menuPrice: number) => {
     setCart((prev) => {
       const existing = prev.find((i) => i.menuId === menuId);
       if (existing) return prev.map((i) => i.menuId === menuId ? { ...i, quantity: i.quantity + 1 } : i);
-      return [...prev, { menuId, menuName, menuPrice, quantity: 1, toppings: [] }];
+      // 新規行は既定トッピングを自動適用
+      return [...prev, { menuId, menuName, menuPrice, quantity: 1, toppings: resolveDefaultToppings(menuId) }];
     });
   };
 
@@ -179,7 +196,15 @@ function RegisterPageContent() {
     });
   };
 
-  const clearCart = () => { setCart([]); toast.info("カートをクリア"); };
+  const clearCart = () => {
+    const prev = cart;
+    undoableAction({
+      message: "カートをクリアしました",
+      optimistic: () => setCart([]),
+      commit: () => {}, // クライアントのみ (サーバ反映なし)
+      rollback: () => setCart(prev),
+    });
+  };
 
   if (menusLoading) {
     return (
@@ -299,10 +324,7 @@ function RegisterPageContent() {
               {activeCustomer && (
                 <Button
                   variant="destructive"
-                  onClick={() => {
-                    setActiveCustomer(null);
-                    toast.info("顧客情報をクリアしました");
-                  }}
+                  onClick={() => setActiveCustomer(null)}
                   className="h-10 border-thick border-border font-mono text-xs rounded-none shrink-0"
                 >
                   クリア
@@ -435,22 +457,41 @@ function RegisterPageContent() {
                     </button>
                   </div>
 
-                  {/* トッピング */}
+                  {/* トッピング (インラインチップ: タップでトグル。ポップアップ廃止) */}
                   {toppings && toppings.length > 0 && (
-                    <div className="space-y-1">
+                    <div className="space-y-1.5">
                       <p className="text-xs font-bold uppercase tracking-wider">トッピング:</p>
-                      {toppings.map((topping) => (
-                        <label key={topping.id} className="flex items-center gap-2 text-sm cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={item.toppings.some((t) => t.toppingId === topping.id)}
-                            onChange={() => addToppingToItem(item.menuId, topping.id, topping.name, topping.price)}
-                            disabled={topping.soldOut}
-                            className="w-4 h-4"
-                          />
-                          <span>{topping.name} (+¥{topping.price})</span>
-                        </label>
-                      ))}
+                      <div className="flex flex-wrap gap-1.5">
+                        {toppings.map((topping) => {
+                          const selected = item.toppings.some((t) => t.toppingId === topping.id);
+                          return (
+                            <button
+                              key={topping.id}
+                              type="button"
+                              disabled={topping.soldOut}
+                              onClick={() => addToppingToItem(item.menuId, topping.id, topping.name, topping.price)}
+                              className={cn(
+                                "flex items-center gap-1.5 border-thick rounded-none px-2 py-1 text-xs font-bold transition-all disabled:opacity-40 disabled:cursor-not-allowed",
+                                selected
+                                  ? "border-primary bg-primary text-primary-foreground"
+                                  : "border-border bg-background hover:bg-muted",
+                              )}
+                            >
+                              {topping.imagePath && (
+                                <img
+                                  src={topping.imagePath}
+                                  alt=""
+                                  className="h-5 w-5 object-cover border-thin border-current shrink-0"
+                                />
+                              )}
+                              <span>{topping.name}</span>
+                              <span className={selected ? "opacity-80" : "text-muted-foreground"}>
+                                +¥{topping.price}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
                     </div>
                   )}
 

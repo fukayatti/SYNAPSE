@@ -1,0 +1,1 @@
+ALTER TABLE `menu` ADD `default_topping_ids` text DEFAULT '[]' NOT NULL;

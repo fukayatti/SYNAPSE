@@ -178,6 +178,8 @@ export const menu = sqliteTable(
     additionalInfo: text("additional_info"),
     soldOut: integer("sold_out", { mode: "boolean" }).default(false).notNull(),
     stockQuantity: integer("stock_quantity").default(0).notNull(),
+    // 既定トッピング (2026-07-07): レジで追加時に自動適用するトッピングID配列 (JSON)。
+    defaultToppingIds: text("default_topping_ids").default("[]").notNull(),
     createdAt: integer("created_at", { mode: "timestamp_ms" })
       .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
       .notNull(),
@@ -200,6 +202,7 @@ export const topping = sqliteTable(
     name: text("name").notNull(),
     price: integer("price").notNull(),
     description: text("description"),
+    imagePath: text("image_path"),
     soldOut: integer("sold_out", { mode: "boolean" }).default(false).notNull(),
     createdAt: integer("created_at", { mode: "timestamp_ms" })
       .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
