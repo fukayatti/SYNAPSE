@@ -1,7 +1,10 @@
 import { Button } from "@/components/ui/button";
 import { useFocusTrap } from "@/hooks/useFocusTrap";
 
-interface ConfirmationDialogProps {
+// フォームを未保存のまま閉じようとした時の3択 (保存/破棄/継続) ダイアログ。
+// 汎用の2択確認は ConfirmDialog を使う (2026-07-07 リネーム: 旧 ConfirmationDialog)。
+
+interface UnsavedChangesDialogProps {
   isOpen: boolean;
   title: string;
   description: string;
@@ -10,14 +13,14 @@ interface ConfirmationDialogProps {
   onCancel: () => void;  // 編集に戻る
 }
 
-export function ConfirmationDialog({
+export function UnsavedChangesDialog({
   isOpen,
   title,
   description,
   onConfirm,
   onDiscard,
   onCancel
-}: ConfirmationDialogProps) {
+}: UnsavedChangesDialogProps) {
   // Escape は「編集に戻る」扱い (処理は useFocusTrap 側に統合)
   const focusTrapRef = useFocusTrap<HTMLDivElement>(isOpen, { onEscape: onCancel });
 

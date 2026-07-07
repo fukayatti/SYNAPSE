@@ -263,9 +263,8 @@ app.post("/api/upload", async (c) => {
 });
 
 // R2 / MinIO からアップロードファイルを配信するルート。
-// 2026-07-07 単一ドメイン化: api Worker は /api/* のみを受けるため、配信パスを
-// /uploads/* → /api/uploads/* へ移設。旧 /uploads/* も後方互換で残す
-// (api. サブドメインを当面併存させる場合や既存の絶対URL救済のため)。
+// 2026-07-07 単一ドメイン化: api Worker は /api/* のみを受けるため配信パスは /api/uploads/*。
+// (旧 /uploads/* の後方互換ルートは 2026-07-07 リファクタリング Phase1 で撤去済み)
 const serveUpload = async (c: any) => {
   try {
     // 先頭の "/api/" または "/" を除去して R2 キー (uploads/xxx) を得る
@@ -289,7 +288,6 @@ const serveUpload = async (c: any) => {
   }
 };
 app.get("/api/uploads/*", serveUpload);
-app.get("/uploads/*", serveUpload); // 後方互換 (旧絶対URL / api. サブドメイン併存時)
 
 app.get("/", (c) => c.text("OK"));
 

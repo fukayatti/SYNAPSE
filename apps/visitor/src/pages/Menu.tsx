@@ -1,11 +1,10 @@
 
 import { useEffect, useState, Suspense } from "react";
-import { useSearchParams, useRouter } from "@/lib/next-navigation";
-import Script from "@/components/script";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { ModSandbox } from "@/components/ModSandbox";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { eventApi, circleApi, menuApi, preOrderApi, orderApi } from "@/lib/api";
-import { useGuestUser } from "@/hooks/useGuestUser";
+import { useVisitor } from "@/hooks/useVisitor";
 import {
   Card,
   CardContent,
@@ -19,7 +18,6 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Modal } from "@/components/ui/Modal";
 import { toast } from "sonner";
-import Image from "@/components/image";
 import { EventTheme } from "@/components/EventTheme";
 import { ShoppingCart, Plus, Minus, CheckCircle } from "lucide-react";
 
@@ -31,10 +29,12 @@ interface CartItem {
 }
 
 function MenuPageContent() {
-  const searchParams = useSearchParams();
-  const router = useRouter();
+  const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
   const circleIdParam = searchParams.get("circleId");
-  const { userId } = useGuestUser();
+  // 未入場 (リストバンド未発行) は空文字。閲覧は許可し注文送信側でゲートする
+  const { userId: visitorUserId } = useVisitor();
+  const userId = visitorUserId ?? "";
 
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
   const [selectedCircleId, setSelectedCircleId] = useState<string | null>(
@@ -101,7 +101,7 @@ function MenuPageContent() {
     onSuccess: () => {
       toast.success("事前オーダーを送信しました！店頭でマイQRを提示してください。");
       setCart([]);
-      router.push("/mypage");
+      navigate("/mypage");
     },
     onError: (error: any) => {
       toast.error(error.message || "事前オーダーの送信に失敗しました");
@@ -141,7 +141,7 @@ function MenuPageContent() {
 
       toast.success(`注文を受け付けました！呼出番号: ${orderData.orderNumber}`);
       setCart([]);
-      router.push("/mypage");
+      navigate("/mypage");
     },
     onError: (error: any) => {
       toast.error(error.message || "注文の送信に失敗しました");
@@ -234,7 +234,7 @@ function MenuPageContent() {
           </p>
           <div className="border-t-[3px] border-border pt-sp-4 flex flex-col gap-sp-2">
             <Button
-              onClick={() => router.push("/mypage")}
+              onClick={() => navigate("/mypage")}
               className="w-full h-12 border-thick border-border bg-background text-foreground font-mono font-bold hover:bg-accent hover:text-accent-foreground"
             >
               注文履歴を確認する (マイQR)
@@ -267,7 +267,7 @@ function MenuPageContent() {
         onClick={() => {
           if (circleIdParam) {
             // 横断閲覧 (イベントメニュー) から来た場合はイベントの出店一覧へ戻す
-            router.push("/events");
+            navigate("/events");
             return;
           }
           setSelectedCircleId(null);
@@ -293,7 +293,7 @@ function MenuPageContent() {
         >
           <div className="bg-primary/80 border-thick border-primary-foreground p-sp-3 sm:p-sp-4 max-w-2xl w-full">
             {circleData.iconImagePath && (
-              <Image
+              <img
                 src={circleData.iconImagePath}
                 alt={circleData.name}
                 width={64}
@@ -329,11 +329,10 @@ function MenuPageContent() {
                   <CardHeader>
                     <div className="relative h-48 w-full overflow-hidden border-b-thick border-border">
                       {menu.imagePath ? (
-                        <Image
+                        <img
                           src={menu.imagePath}
                           alt={menu.name}
-                          fill
-                          className="object-cover"
+                          className="absolute inset-0 h-full w-full object-cover"
                         />
                       ) : (
                         <div className="flex h-full w-full items-center justify-center bg-muted">
@@ -555,7 +554,7 @@ function MenuPageContent() {
                     console.error("Failed to save direct order:", e);
                   }
                 } else if (actionType === "NAVIGATE" && typeof payload === "string") {
-                  router.push(payload as any);
+                  navigate(payload);
                 }
               }}
             />
@@ -599,7 +598,7 @@ function MenuPageContent() {
                     console.error("Failed to save direct order:", e);
                   }
                 } else if (actionType === "NAVIGATE" && typeof payload === "string") {
-                  router.push(payload as any);
+                  navigate(payload);
                 }
               }}
             />

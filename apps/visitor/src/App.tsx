@@ -29,9 +29,6 @@ export default function App() {
 						<Route path="/menu" element={<Menu />} />
 						<Route path="/mypage" element={<MyPage />} />
 
-						{/* 旧 register の来場者パスからのリダイレクト互換 */}
-						<Route path="/visitor/menu" element={<Navigate to="/menu" replace />} />
-						<Route path="/visitor/my-qr" element={<Navigate to="/mypage" replace />} />
 
 						<Route path="*" element={<Navigate to="/" replace />} />
 					</Routes>

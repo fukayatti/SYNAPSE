@@ -18,8 +18,7 @@ import {
   Loader2,
   Download,
 } from "lucide-react";
-import Link from "@/components/link";
-import { VISITOR_BASE_URL } from "@/components/external-redirect";
+import { VISITOR_BASE_URL } from "@/lib/visitor-url";
 import { QRCodeSVG } from "qrcode.react";
 import { toPng } from "html-to-image";
 import jsPDF from "jspdf";

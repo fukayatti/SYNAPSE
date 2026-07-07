@@ -15,7 +15,6 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { undoableDelete } from "@/lib/toast-undo";
 import { Plus, Edit, Trash2, Settings, UtensilsCrossed } from "lucide-react";
-import Image from "@/components/image";
 
 // モーダルインポート
 import { MenuFormModal } from "@/components/menu/MenuFormModal";
@@ -168,10 +167,9 @@ function MenuManagementContent() {
                 <Card key={menu.id} className="rounded-none bg-background shadow-none p-0 overflow-hidden">
                   <div className="relative h-40 w-full overflow-hidden border-b-thick border-border">
                     {menu.imagePath ? (
-                      <Image
+                      <img
                         src={menu.imagePath}
                         alt={menu.name}
-                        fill
                         className="object-cover absolute inset-0 h-full w-full"
                       />
                     ) : (

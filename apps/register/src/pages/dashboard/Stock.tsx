@@ -15,7 +15,6 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 import { AlertTriangle, Package } from "lucide-react";
-import Image from "@/components/image";
 
 function StockManagementContent() {
   const [circleId, setCircleId] = useState<string>("");
@@ -125,11 +124,10 @@ function StockManagementContent() {
                 >
                   <div className="relative h-12 w-12 rounded-none overflow-hidden flex-shrink-0 border-thick border-border">
                     {menu.imagePath ? (
-                      <Image
+                      <img
                         src={menu.imagePath}
                         alt={menu.name}
-                        fill
-                        className="object-cover"
+                        className="absolute inset-0 h-full w-full object-cover"
                       />
                     ) : (
                       <div className="flex h-full w-full items-center justify-center bg-muted">

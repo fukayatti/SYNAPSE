@@ -3,7 +3,7 @@ import { useFocusTrap } from "@/hooks/useFocusTrap";
 
 // 2026-07-04: ネイティブ window.confirm() はブラウザにブロックされ得るため、
 // 破壊的操作 (退出・削除・アンインストール等) の確認をアプリ内ダイアログで行う。
-// 未保存フォームの3択は ConfirmationDialog、汎用の2択はこちらを使う。
+// 未保存フォームの3択は UnsavedChangesDialog、汎用の2択はこちらを使う。
 
 interface ConfirmDialogProps {
   isOpen: boolean;

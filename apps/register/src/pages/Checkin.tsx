@@ -1,6 +1,7 @@
 
 import { useEffect, useState, Suspense } from "react";
-import { useSearchParams, useRouter, usePathname } from "@/lib/next-navigation";
+import { useNavigate, useLocation, useSearchParams } from "react-router-dom";
+import { visitorUrl } from "@/lib/visitor-url";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { wristbandApi } from "@/lib/api";
 import { authClient } from "@/lib/auth-client";
@@ -10,9 +11,9 @@ import { toast } from "sonner";
 import { QrCode, ShieldCheck, ArrowRight, UserCheck } from "lucide-react";
 
 function CheckinContent() {
-  const searchParams = useSearchParams();
-  const router = useRouter();
-  const pathname = usePathname();
+  const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
+  const { pathname } = useLocation();
   const queryClient = useQueryClient();
   const wristbandIdParam = searchParams.get("wb");
   
@@ -25,9 +26,9 @@ function CheckinContent() {
   useEffect(() => {
     if (!isSessionPending && !session) {
       const currentUrl = `${pathname}?${searchParams.toString()}`;
-      router.push(`/login?callbackUrl=${encodeURIComponent(currentUrl)}` as any);
+      navigate(`/circle/login?callbackUrl=${encodeURIComponent(currentUrl)}`);
     }
-  }, [session, isSessionPending, router, pathname, searchParams]);
+  }, [session, isSessionPending, navigate, pathname, searchParams]);
 
   const registerMutation = useMutation({
     mutationFn: async (wbId: string) => {
@@ -75,7 +76,7 @@ function CheckinContent() {
             リストバンドのQRコードをスマートフォンでスキャンしてアクセスしてください。
           </p>
           <Button
-            onClick={() => router.push("/my-order")}
+            onClick={() => { window.location.href = visitorUrl("/mypage"); }}
             className="w-full h-12 border-thick border-border bg-primary text-primary-foreground font-bold uppercase rounded-none hover:bg-background hover:text-foreground"
           >
             マイページ（マイQR）へ移動
@@ -115,7 +116,7 @@ function CheckinContent() {
         </div>
 
         <Button
-          onClick={() => router.push("/my-order")}
+          onClick={() => { window.location.href = visitorUrl("/mypage"); }}
           className="w-full h-14 border-thick border-border bg-background text-foreground text-lg font-black uppercase rounded-none hover:bg-success hover:text-primary-foreground transition-all"
         >
           マイページ（マイQR）へ進む

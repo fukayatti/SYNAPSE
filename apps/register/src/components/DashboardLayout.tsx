@@ -1,7 +1,6 @@
 import { ReactNode, useState, useEffect } from "react";
-import { useLocation } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import Link from "@/components/link";
 import { cn } from "@/lib/utils";
 import { circleApi, parseCircleSettings } from "@/lib/api";
 import {
@@ -173,7 +172,7 @@ export default function DashboardLayout({
 
               if (type === "circle" && item.href) {
                 return (
-                  <Link key={idx} href={item.href as any} className="block w-full" onClick={() => setIsMobileMenuOpen(false)}>
+                  <Link key={idx} to={item.href} className="block w-full" onClick={() => setIsMobileMenuOpen(false)}>
                     <span className={baseClass}>
                       <Icon className="h-4 w-4 shrink-0" />
                       {item.title}
@@ -217,7 +216,7 @@ export default function DashboardLayout({
 
               if (type === "circle" && item.href) {
                 return (
-                  <Link key={idx} href={item.href as any} className="block md:w-full">
+                  <Link key={idx} to={item.href} className="block md:w-full">
                     <span className={baseClass}>
                       <Icon className="h-4 w-4 shrink-0" />
                       {item.title}

@@ -1,11 +1,9 @@
 
 import { useState, useEffect } from "react";
-import Script from "@/components/script";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { preOrderApi, wristbandApi, orderApi, circleApi, eventApi } from "@/lib/api";
 import { useVisitor } from "@/hooks/useVisitor";
 import { ModSandbox } from "@/components/ModSandbox";
-import { useGuestUser } from "@/hooks/useGuestUser";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -13,7 +11,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Modal } from "@/components/ui/Modal";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { toast } from "sonner";
-import { useRouter } from "@/lib/next-navigation";
+import { useNavigate } from "react-router-dom";
 import {
   ArrowLeft,
   Clock,
@@ -24,13 +22,11 @@ import {
   Link as LinkIcon,
 } from "lucide-react";
 
-import { useAuth } from "@/hooks/useCircleAuth";
-
 export default function MyOrderPage() {
-  const router = useRouter();
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const { userId: guestUserId, isLoaded: isGuestLoaded } = useGuestUser();
-  const { session } = useVisitor();
+  // 来場者は eventUser.id ベアラーのみ (旧 useAuth/useGuestUser シムは撤去済み)
+  const { session, userId: visitorUserId, isLoaded } = useVisitor();
   const eventId = session?.eventId;
 
   const { data: eventData } = useQuery({
@@ -38,7 +34,6 @@ export default function MyOrderPage() {
     queryFn: () => eventApi.get(eventId!),
     enabled: !!eventId,
   });
-  const { userId: authUserId, isAuthenticated, isLoading: authLoading } = useAuth();
   const [isRegisterOpen, setIsRegisterOpen] = useState(false);
   const [newWristbandId, setNewWristbandId] = useState("");
   const [isReportLostConfirmOpen, setIsReportLostConfirmOpen] = useState(false);
@@ -122,9 +117,7 @@ export default function MyOrderPage() {
     loadModHooks();
   }, [directOrders.length]);
 
-  const userId = isAuthenticated && authUserId ? authUserId : guestUserId;
-
-  const isLoaded = isGuestLoaded && !authLoading;
+  const userId = visitorUserId ?? "";
 
   // 事前オーダー取得
   const { data: preOrders, isLoading: preOrdersLoading } = useQuery({
@@ -210,7 +203,7 @@ export default function MyOrderPage() {
       )}
 
       <button
-        onClick={() => router.push("/menu")}
+        onClick={() => navigate("/menu")}
         className="text-xs uppercase tracking-widest underline hover:text-info flex items-center gap-1"
       >
         <ArrowLeft className="h-4 w-4" />
