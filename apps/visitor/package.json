@@ -10,6 +10,7 @@
     "deploy": "CI=true WRANGLER_SEND_METRICS=false wrangler deploy"
   },
   "dependencies": {
+    "@better-auth/passkey": "^1.6.23",
     "@fesflow/config": "workspace:*",
     "@tanstack/react-query": "^5.85.5",
     "better-auth": "catalog:",
@@ -34,6 +35,7 @@
     "@types/node": "^22.20.0",
     "@types/react": "19.2.2",
     "@types/react-dom": "19.2.2",
+    "@vitejs/plugin-basic-ssl": "^2.3.0",
     "@vitejs/plugin-react": "^4.3.4",
     "tailwindcss": "^4.1.10",
     "typescript": "^5.8.2",

@@ -17,8 +17,9 @@
     "typescript": "^5"
   },
   "dependencies": {
+    "@better-auth/passkey": "^1.6.23",
+    "@fesflow/db": "workspace:*",
     "better-auth": "catalog:",
-    "zod": "catalog:",
-    "@fesflow/db": "workspace:*"
+    "zod": "catalog:"
   }
 }

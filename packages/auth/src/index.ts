@@ -13,6 +13,7 @@ import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { getRequestStore, type DB, type WorkerEnv } from "@fesflow/db";
 import * as schema from "@fesflow/db/schema/auth";
+import { passkey } from "@better-auth/passkey";
 
 /** db と env から better-auth インスタンスを生成する。 */
 export function createAuth(db: DB, env: WorkerEnv) {
@@ -41,6 +42,13 @@ export function createAuth(db: DB, env: WorkerEnv) {
 		emailAndPassword: {
 			enabled: true,
 		},
+		socialProviders: {
+			google: {
+				clientId: env.GOOGLE_CLIENT_ID || "",
+				clientSecret: env.GOOGLE_CLIENT_SECRET || "",
+			},
+		},
+		plugins: [passkey()],
 		advanced: {
 			defaultCookieAttributes: {
 				sameSite: "none",

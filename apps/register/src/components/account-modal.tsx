@@ -20,6 +20,7 @@ import {
   saveAuthInfo,
   clearAuthInfo,
 } from "@/hooks/useCircleAuth";
+import { authClient } from "@/lib/auth-client";
 
 export type Space = {
   id: string;
@@ -216,6 +217,34 @@ export default function AccountModal({
           </Button>
         </section>
 
+        {/* パスキー設定 */}
+        <section className="space-y-2 mb-6">
+          <h3 className="text-xs font-black uppercase tracking-wider text-muted-foreground">[パスキー]</h3>
+          <Button
+            variant="outline"
+            className="w-full h-9 rounded-none border-thin text-xs uppercase font-black flex items-center justify-center gap-2"
+            onClick={async () => {
+              try {
+                const res = await authClient.passkey.addPasskey({
+                  fetchOptions: {
+                    onError(ctx) {
+                      toast.error(ctx.error.message || "パスキーの追加に失敗しました");
+                    }
+                  }
+                });
+                if (res?.error) {
+                  toast.error(res.error.message || "パスキーの追加に失敗しました");
+                } else if (res?.data) {
+                  toast.success("パスキーを追加しました");
+                }
+              } catch (e: any) {
+                toast.error(e.message || "予期せぬエラーが発生しました");
+              }
+            }}
+          >
+            パスキーを追加する
+          </Button>
+        </section>
 
         {/* アクション */}
         <div className="space-y-2 border-t border-border/20 pt-4">
