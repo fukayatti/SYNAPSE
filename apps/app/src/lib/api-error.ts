@@ -110,16 +110,16 @@ export function formatFieldsForToast(fields: Record<string, string>): string {
 
 // ── UX 分岐 (Phase4) ──────────────────────────────────────────────────────
 // register の3スペース (/circle, /event, /sys) はそれぞれ専用の /login を持つため、
-// 401 誘導先は現在の URL プレフィックスから決める。/circle/login にログインすれば
-// SignInForm が所属を見て自動的に適切なダッシュボードへ飛ばす (sign-in-form.tsx 既存挙動)
-// ため、"どのプレフィックスでも /circle/login に飛ばす" という既存ガード (useCircleAuth.tsx の
-// CircleAuthGuard 等) の慣習に合わせつつ、callbackUrl だけプレフィックスに応じて渡す。
-function loginPathForCurrentSpace(): string {
-  if (typeof window === "undefined") return "/circle/login";
-  const path = window.location.pathname;
-  if (path.startsWith("/event")) return "/event/login";
-  if (path.startsWith("/sys")) return "/sys/login";
-  return "/circle/login";
+// 401 誘導先は現在の URL プレフィックスから決める。/login にログインすれば
+// どこでも行ける
+// ため、"どのプレフィックスでも /login に飛ばす" という既存ガード (useCircleAuth.tsx の
+// AuthGuard系) の挙動と合わせる。
+export function getLoginUrl() {
+  if (typeof window === "undefined") return "/login";
+  
+  // 今は単一のログイン画面に統合されたため、全て /login を返す。
+  // 必要ならここで url=/xxx のクエリパラメータを足しても良い。
+  return "/login";
 }
 
 /** 現在地が既にいずれかのログイン画面かどうか (401ループ防止用)。 */

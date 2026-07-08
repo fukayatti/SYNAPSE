@@ -98,7 +98,7 @@ export default function InvitePage() {
           <CardContent>
             <Button
               className="w-full"
-              onClick={() => navigate(`/circle/login?callbackUrl=${callbackUrl}`)}
+              onClick={() => navigate(`/login?callbackUrl=${callbackUrl}`)}
             >
               <LogIn className="h-4 w-4 mr-2" />
               ログイン / アカウント作成へ進む

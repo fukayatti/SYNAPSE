@@ -26,7 +26,7 @@ function CheckinContent() {
   useEffect(() => {
     if (!isSessionPending && !session) {
       const currentUrl = `${pathname}?${searchParams.toString()}`;
-      navigate(`/circle/login?callbackUrl=${encodeURIComponent(currentUrl)}`);
+      navigate(`/login?callbackUrl=${encodeURIComponent(currentUrl)}`);
     }
   }, [session, isSessionPending, navigate, pathname, searchParams]);
 

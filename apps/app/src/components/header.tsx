@@ -135,7 +135,7 @@ export default function Header() {
     setProfileModalOpen(false);
     setNotifPopoverOpen(false);
     setMobileOpen(false);
-    navigate("/circle/login");
+    navigate("/login");
   };
 
   // 切り替え可能なスペース一覧。現在アクティブなロールに依存させず、ユーザーの所属
@@ -466,18 +466,18 @@ export default function Header() {
                     setNotifPopoverOpen(false);
                     setProfileModalOpen(false);
                   }}
-                  className="flex items-center gap-1 sm:gap-2 bg-muted border-thick border-border px-2 sm:px-3 py-1 sm:py-1.5 font-mono text-[11px] font-bold hover:bg-muted/80 select-none cursor-pointer h-8 sm:h-9 rounded-none"
+                  className="flex items-center justify-center gap-1 sm:gap-2 bg-muted border-thick border-border px-1.5 sm:px-3 py-1 sm:py-1.5 font-mono text-[11px] font-bold hover:bg-muted/80 select-none cursor-pointer h-8 w-8 sm:w-auto sm:h-9 rounded-none"
                 >
-                  {pathname.startsWith("/sys") && <Shield className="h-3.5 w-3.5" />}
-                  {pathname.startsWith("/event") && <Calendar className="h-3.5 w-3.5" />}
-                  {pathname.startsWith("/circle") && <Building2 className="h-3.5 w-3.5" />}
+                  {pathname.startsWith("/sys") ? <Shield className="h-3.5 w-3.5 shrink-0" /> :
+                   pathname.startsWith("/event") ? <Calendar className="h-3.5 w-3.5 shrink-0" /> :
+                   <Building2 className="h-3.5 w-3.5 shrink-0" />}
                   <span className="hidden sm:inline truncate max-w-[120px]">
                     {currentSpaceName}
                   </span>
                   <span className="bg-primary text-primary-foreground px-1 py-0.5 text-[8px] font-black scale-90 shrink-0 hidden sm:inline">
                     {currentSpaceRole}
                   </span>
-                  <ChevronDown className="h-3.5 w-3.5 shrink-0" />
+                  <ChevronDown className="h-3.5 w-3.5 shrink-0 hidden sm:inline" />
                 </button>
 
                 {/* スペース切り替えポップオーバー */}
@@ -553,7 +553,7 @@ export default function Header() {
                   setNotifPopoverOpen(false);
                   setSpacePopoverOpen(false);
                 }}
-                className="flex items-center gap-1 sm:gap-2 bg-muted border-thick border-border px-2 sm:px-3 py-1 sm:py-1.5 font-mono text-[11px] font-bold hover:bg-muted/80 select-none cursor-pointer h-8 sm:h-9 rounded-none"
+                className="flex items-center justify-center gap-1 sm:gap-2 bg-muted border-thick border-border px-1.5 sm:px-3 py-1 sm:py-1.5 font-mono text-[11px] font-bold hover:bg-muted/80 select-none cursor-pointer h-8 w-8 sm:w-auto sm:h-9 rounded-none"
               >
                 {me?.image ? (
                   <img src={me.image} alt="Avatar" className="w-5 h-5 rounded-none border border-border object-cover shrink-0" />
@@ -563,14 +563,14 @@ export default function Header() {
                 <span className="hidden sm:inline truncate max-w-[80px]">
                   {userName || "アカウント"}
                 </span>
-                <ChevronDown className="h-3.5 w-3.5 shrink-0" />
+                <ChevronDown className="h-3.5 w-3.5 shrink-0 hidden sm:inline" />
               </button>
             </div>
           ) : (
             <Button
               variant="outline"
               size="sm"
-              onClick={() => navigate("/circle/login")}
+              onClick={() => navigate("/login")}
               className="h-8 text-xs font-mono px-3 rounded-none"
             >
               ログイン

@@ -106,7 +106,7 @@ export default function AccountModal({
       clearAuthInfo();
       toast.success("アカウントを削除しました");
       onClose();
-      navigate("/circle/login");
+      navigate("/login");
     },
     onError: (e: any) => toast.error(e.message || "削除に失敗しました"),
   });

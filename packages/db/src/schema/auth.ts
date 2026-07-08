@@ -99,6 +99,7 @@ export const passkey = sqliteTable("passkey", {
 	deviceType: text("device_type").notNull(),
 	backedUp: integer("backed_up", { mode: "boolean" }).notNull(),
 	transports: text("transports"),
+	aaguid: text("aaguid"),
 	createdAt: integer("created_at", { mode: "timestamp_ms" })
 		.default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
 		.notNull(),

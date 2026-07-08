@@ -4,6 +4,7 @@
 	// AsyncLocalStorage (node:async_hooks) を有効化する。
 	"$schema": "node_modules/wrangler/config-schema.json",
 	"name": "fesflow-api",
+	"account_id": "617bef5ab8279861ced319f362981d45",
 	"main": "src/index.ts",
 	"compatibility_date": "2025-06-01",
 	"compatibility_flags": ["nodejs_compat"],
