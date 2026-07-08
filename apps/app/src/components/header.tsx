@@ -317,7 +317,7 @@ export default function Header() {
         >
           <span className="font-black border-thin border-border px-2 py-1 bg-primary text-primary-foreground text-sm sm:text-base">
             {PRODUCT_NAME.toUpperCase()}
-            <span className="hidden sm:inline">
+            <span className="hidden md:inline">
               {isCircleView && " // BOOTH"}
               {isEventView && " // EVENT"}
               {isAdminView && " // SYSTEM"}
