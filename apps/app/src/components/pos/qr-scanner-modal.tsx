@@ -264,6 +264,8 @@ export function QrScannerModal({
                 ref={videoRef}
                 className="h-full w-full object-cover"
                 playsInline
+                muted
+                autoPlay
               />
               <div className="absolute inset-0 flex items-center justify-center">
                 <div className="h-32 w-32 border-thick border-dashed border-red-500 animate-pulse" />
