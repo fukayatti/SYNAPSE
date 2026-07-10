@@ -1,16 +1,27 @@
 
 // 2026-07-10: スマホでのデバッグ用コンソール (eruda) をスーパー管理者向けに提供するコンポーネント。
 // 条件: role === "super_admin" かつ ?debug=true がクエリに含まれる場合のみ有効。
-// ページ遷移後もクエリが外れないよう sessionStorage で debug フラグを保持する。
+// ページ遷移後もデバッグモードが維持されるよう sessionStorage で debug フラグを保持する。
 // eruda は CDN から動的に import するため、通常ビルドのバンドルには含まれない。
+//
+// [URL の扱い] 2026-07-10 修正:
+// 以前は navigate() で ?debug=true を即座に除去していたが、ブラウザからのフルリロードと
+// 組み合わさると「消えた」ように見えるため、URLの書き換えは行わないようにした。
+// ?debug=true は URL に残り続け、sessionStorage にも保存されるため
+// SPA 内の遷移でクエリが外れても eruda は継続して動作する。
 
 import { useEffect, useRef } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useLocation } from "react-router-dom";
 import { getAuthInfo } from "@/hooks/useCircleAuth";
 
 const DEBUG_SESSION_KEY = "fesflow_debug";
 
-/** ?debug=true を sessionStorage に記憶し、以降の遷移でも維持する */
+/**
+ * ?debug=true が URL にあれば sessionStorage に記憶する。
+ * - URL に付いていれば記憶して true を返す
+ * - URL に付いていなくても sessionStorage に記憶があれば true を返す
+ * - これにより SPA 内ページ遷移でクエリが外れても eruda は維持される
+ */
 function syncDebugFlag(search: string): boolean {
   const params = new URLSearchParams(search);
   if (params.get("debug") === "true") {
@@ -27,7 +38,6 @@ function isMobile(): boolean {
 
 export function DebugConsole() {
   const location = useLocation();
-  const navigate = useNavigate();
   const erudaLoadedRef = useRef(false);
 
   useEffect(() => {
@@ -54,28 +64,8 @@ export function DebugConsole() {
       console.warn("[DebugConsole] eruda の読み込みに失敗しました");
     };
     document.head.appendChild(script);
-
-    return () => {
-      // アンマウント時はスクリプトタグだけ除去。eruda 自体の destroy は副作用が多いため行わない。
-      document.head.removeChild(script);
-    };
     // location.search が変わるたびに syncDebugFlag を再実行してフラグを更新する
   }, [location.search]);
-
-  // URLに ?debug=true がついていて sessionStorage に保存できたら、
-  // クエリを除去して「きれいなURL」に書き換える（ただし debug フラグは維持）
-  useEffect(() => {
-    const params = new URLSearchParams(location.search);
-    if (params.get("debug") === "true") {
-      params.delete("debug");
-      const newSearch = params.toString();
-      // replace で履歴を汚さずに書き換える
-      navigate(
-        { pathname: location.pathname, search: newSearch ? `?${newSearch}` : "" },
-        { replace: true }
-      );
-    }
-  }, [location.pathname, location.search, navigate]);
 
   // このコンポーネント自体は何も描画しない
   return null;
