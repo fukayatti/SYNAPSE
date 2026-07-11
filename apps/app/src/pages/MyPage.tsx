@@ -1,143 +1,41 @@
-
 import { useState, useEffect } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { preOrderApi, wristbandApi, orderApi, circleApi, eventApi } from "@/lib/api";
+import { useQuery } from "@tanstack/react-query";
+import { wristbandApi, eventApi } from "@/lib/api";
 import { useVisitor } from "@/hooks/useVisitor";
-import { ModSandbox } from "@/components/ModSandbox";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Modal } from "@/components/ui/Modal";
-import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { ErrorState } from "@/components/ui/ErrorState";
-import { EmptyState } from "@/components/ui/EmptyState";
-import { toast } from "sonner";
 import { useNavigate } from "react-router-dom";
-import {
-  ArrowLeft,
-  Clock,
-  CheckCircle2,
-  AlertTriangle,
-  ShieldAlert,
-  QrCode,
-  Link as LinkIcon,
-} from "lucide-react";
+import { ArrowLeft, QrCode, Receipt, ChevronRight } from "lucide-react";
 
-export default function MyOrderPage() {
+/**
+ * 来場者マイページ (2026-07-11 注文履歴を /orders に分離しマイQR/身分表示に専念)。
+ *
+ * 来場者は eventUser.id ベアラーのみ (旧 useAuth/useGuestUser シムは撤去済み)。
+ * リストバンドの登録/再発行/紛失処理はスマホ側では行わず、本部(イベント管理)で行う。
+ */
+export default function MyPage() {
   const navigate = useNavigate();
-  const queryClient = useQueryClient();
-  // 来場者は eventUser.id ベアラーのみ (旧 useAuth/useGuestUser シムは撤去済み)
   const { session, userId: visitorUserId, isLoaded } = useVisitor();
   const eventId = session?.eventId;
+  const userId = visitorUserId ?? "";
 
-  // eventData はヘッダーのロゴ表示のみに使う装飾的な値。取得失敗時は
-  // `eventData?.logoUrl` が undefined のままロゴ非表示になるだけで画面は成立するため、
-  // isError/ErrorState は追加しない (判断: 2026-07-07)。
+  // eventData はヘッダーのロゴ表示のみに使う装飾的な値。取得失敗しても
+  // ロゴが出ないだけで画面は成立するため ErrorState は出さない (判断: 2026-07-07)。
   const { data: eventData } = useQuery({
     queryKey: ["event", eventId],
     queryFn: () => eventApi.get(eventId!),
     enabled: !!eventId,
   });
-  const [isRegisterOpen, setIsRegisterOpen] = useState(false);
-  const [newWristbandId, setNewWristbandId] = useState("");
-  const [isReportLostConfirmOpen, setIsReportLostConfirmOpen] = useState(false);
-  const [origin, setOrigin] = useState("");
-  const [modHooks, setModHooks] = useState<{ id: string; hook: any }[]>([]);
-  const [directOrders, setDirectOrders] = useState<any[]>([]);
 
+  const [origin, setOrigin] = useState("");
   useEffect(() => {
     if (typeof window !== "undefined") {
       setOrigin(window.location.origin);
     }
   }, []);
 
-  // 代引き注文のロードとポーリング
-  useEffect(() => {
-    const fetchLatestStatuses = async () => {
-      const stored = localStorage.getItem("fesorder_direct_orders");
-      if (!stored) return;
-      try {
-        const orders = JSON.parse(stored);
-        if (!orders.length) return;
-
-        // 初期状態で即セット
-        setDirectOrders((prev) => (prev.length === 0 ? orders : prev));
-
-        const updated = await Promise.all(
-          orders.map(async (o: any) => {
-            try {
-              const res = await fetch(`/api/orders/${o.orderId}`);
-              if (!res.ok) return o;
-              const data = await res.json();
-              return { ...o, status: data.status };
-            } catch {
-              return o;
-            }
-          })
-        );
-        localStorage.setItem("fesorder_direct_orders", JSON.stringify(updated));
-        setDirectOrders(updated);
-      } catch (err) {
-        console.error("Failed to sync direct orders status:", err);
-      }
-    };
-
-    fetchLatestStatuses();
-    const intervalId = setInterval(fetchLatestStatuses, 10000);
-    return () => clearInterval(intervalId);
-  }, []);
-
-  useEffect(() => {
-    const loadModHooks = async () => {
-      try {
-        const stored = localStorage.getItem("fesorder_direct_orders");
-        const parsed = stored ? JSON.parse(stored) : [];
-        const circleIds = Array.from(new Set(parsed.map((o: any) => o.circleId))) as string[];
-        
-        const hooks: { id: string; hook: any }[] = [];
-        for (const cid of circleIds) {
-          try {
-            const circleData = await circleApi.get(cid);
-            if (circleData && circleData.mods) {
-              const modsPayload = JSON.parse(circleData.mods);
-              Object.values(modsPayload.installed || {}).forEach((m: any) => {
-                if (m.enabled && m.manifest.hooks?.myOrderBodyBottom) {
-                  hooks.push({
-                    id: m.manifest.id,
-                    hook: m.manifest.hooks.myOrderBodyBottom,
-                  });
-                }
-              });
-            }
-          } catch (e) {
-            // Ignore individual fetch errors
-          }
-        }
-        setModHooks(hooks);
-      } catch (err) {
-        console.error("Failed to load mod hooks:", err);
-      }
-    };
-    loadModHooks();
-  }, [directOrders.length]);
-
-  const userId = visitorUserId ?? "";
-
-  // 事前オーダー取得
-  const {
-    data: preOrders,
-    isLoading: preOrdersLoading,
-    isError: preOrdersError,
-    error: preOrdersErrorObj,
-    refetch: refetchPreOrders,
-  } = useQuery({
-    queryKey: ["myPreOrders", userId],
-    queryFn: () => preOrderApi.getByCode(userId),
-    enabled: !!userId,
-  });
-
-  // ユーザー＆リストバンド状態取得
+  // ユーザー＆リストバンド状態取得 (マイQRの表示IDに使う)
   const {
     data: userStatus,
     isLoading: statusLoading,
@@ -150,44 +48,7 @@ export default function MyOrderPage() {
     enabled: !!userId,
   });
 
-
-  // リストバンド新規登録・再発行ミューテーション
-  const registerMutation = useMutation({
-    mutationFn: async (wbId: string) => {
-      // 既存のアクティブなリストバンドがある場合、まず紛失ロックを行ってから登録する（乗っ取り防止制限をセルフ無効化で回避するため）
-      if (activeWristband) {
-        await wristbandApi.reportLost(activeWristband.id);
-      }
-      return await wristbandApi.register(userId, wbId);
-    },
-    onSuccess: () => {
-      toast.success("リストバンドの紐付けを完了しました！");
-      setIsRegisterOpen(false);
-      setNewWristbandId("");
-      queryClient.invalidateQueries({ queryKey: ["userWristbandStatus", userId] });
-    },
-    onError: (error: any) => {
-      toast.error(error.message || "紐付けに失敗しました");
-    },
-  });
-
-  // リストバンド紛失報告ミューテーション
-  const reportLostMutation = useMutation({
-    mutationFn: async (wbId: string) => {
-      return await wristbandApi.reportLost(wbId);
-    },
-    onSuccess: () => {
-      toast.warning("旧リストバンドを無効化（ロック）しました。スマホQRはそのままご利用いただけます。");
-      queryClient.invalidateQueries({ queryKey: ["userWristbandStatus", userId] });
-      setIsReportLostConfirmOpen(false);
-    },
-    onError: (error: any) => {
-      toast.error(error.message || "紛失報告に失敗しました");
-      setIsReportLostConfirmOpen(false);
-    },
-  });
-
-  if (!isLoaded || preOrdersLoading || statusLoading) {
+  if (!isLoaded || statusLoading) {
     return (
       <div className="max-w-3xl mx-auto p-4 space-y-4 font-mono">
         <Skeleton className="h-12 w-48" />
@@ -197,7 +58,6 @@ export default function MyOrderPage() {
   }
 
   // userStatus はマイQR・リストバンド状態など画面全体の前提になるため取得失敗時はページ全体を止める。
-  // preOrders は下部の履歴セクションのみに影響するため、そちらは該当セクション内で個別に表示する。
   if (statusError) {
     return (
       <div className="max-w-3xl mx-auto p-4 font-mono">
@@ -213,9 +73,9 @@ export default function MyOrderPage() {
   const activeWristband = userStatus?.wristband;
   const targetWbId = activeWristband?.id || userId;
   // 来場者アプリと register(模擬店POS)は別オリジンのため、店頭スキャン用QRは
-  // register(スタッフ)側の /checkin を指すよう VITE_STAFF_URL を優先する (2026-07-04 アプリ分離)
+  // register(スタッフ)側の /checkin を指すよう VITE_STAFF_URL を優先する (2026-07-04 アプリ分離)。
+  // 単一ドメイン化 (2026-07-07): 店頭スキャンは /circle/checkin へ移設。
   const registerBase = (import.meta.env.VITE_STAFF_URL as string) || origin;
-  // 単一ドメイン化 (2026-07-07): 店頭スキャンは /circle/checkin へ移設
   const userCheckinUrl = registerBase ? `${registerBase}/circle/checkin?wb=${targetWbId}` : targetWbId;
   const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(
     userCheckinUrl
@@ -234,7 +94,7 @@ export default function MyOrderPage() {
       )}
 
       <button
-        onClick={() => navigate("/menu")}
+        onClick={() => navigate("/visitor/menu")}
         className="text-xs uppercase tracking-widest underline hover:text-info flex items-center gap-1"
       >
         <ArrowLeft className="h-4 w-4" />
@@ -243,208 +103,76 @@ export default function MyOrderPage() {
 
       <div className="border-b-thick border-border pb-4">
         <h1 className="text-xl sm:text-2xl md:text-3xl font-black uppercase tracking-tight leading-tight">
-          [マイデジタルQR &amp; 注文履歴]
+          [マイデジタルQR]
         </h1>
-        <p className="text-[10px] sm:text-xs uppercase tracking-widest text-gray-600 mt-1">
+        <p className="text-[10px] sm:text-xs uppercase tracking-widest text-muted-foreground mt-1">
           店頭でこちらのQRまたはリストバンドをお見せください
         </p>
       </div>
 
-      {/* リストバンド紛失・連携状態ステータスバー */}
-      <div className="border-thick border-border bg-muted p-4 space-y-3">
-        <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="font-bold text-sm">【リストバンド連携状態】:</span>
-            {activeWristband ? (
-              <span className="bg-success text-primary-foreground px-2 py-0.5 text-xs font-black uppercase">
-                紐付け完了 ({activeWristband.id})
-              </span>
-            ) : (
-              <span className="bg-primary text-primary-foreground px-2 py-0.5 text-xs font-black uppercase">
-                未紐付け / スマホ運用中
-              </span>
-            )}
-          </div>
-          <div className="flex gap-2 flex-wrap">
-            <Button
-              onClick={() => setIsRegisterOpen(true)}
-              className="h-9 border-thick border-border bg-background text-foreground text-xs font-bold uppercase rounded-none hover:bg-primary hover:text-primary-foreground"
-            >
-              <LinkIcon className="mr-1 h-3.5 w-3.5" />
-              {activeWristband ? "再発行・付け替え" : "バンドを登録"}
-            </Button>
-            {activeWristband && (
-              <Button
-                onClick={() => setIsReportLostConfirmOpen(true)}
-                disabled={reportLostMutation.isPending}
-                className="h-9 border-thick border-border bg-error text-primary-foreground text-xs font-bold uppercase rounded-none hover:bg-primary"
-              >
-                <ShieldAlert className="mr-1 h-3.5 w-3.5" />
-                紛失報告 (ロック)
-              </Button>
-            )}
+      {/* リストバンド未登録の案内。
+          2026-07-11: 登録/再発行/紛失処理はすべて本部(受付/イベント管理)で行う。
+          未登録のうちは「使えるQR」を出さない (アクセスしただけで使えると誤解させないため)。
+          本部でリストバンドを登録すると、下のマイQRが表示される。 */}
+      {!activeWristband && (
+        <div className="border-thick border-border bg-muted p-4 flex items-start gap-3">
+          <QrCode className="h-5 w-5 shrink-0 mt-0.5" />
+          <div className="space-y-1">
+            <p className="font-bold text-sm">リストバンドが未登録です</p>
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              マイQRは、受付・本部でリストバンドを登録すると表示されます。
+              受付で発行された来場登録QR（またはリストバンドのQR）を読み取って登録してください。
+              登録すると、なくしても本部で再発行できます。
+            </p>
           </div>
         </div>
+      )}
 
-        {!activeWristband && (
-          <div className="bg-background border-thick border-border p-3 text-xs flex items-start gap-2">
-            <AlertTriangle className="h-5 w-5 text-foreground shrink-0 mt-0.5" />
-            <div>
-              <span className="font-bold">💡 スマホのままで大丈夫です！</span>
-              <p className="text-gray-600 mt-0.5">
-                リストバンドが無くなった場合や未紐付けでも、下記の「マイデジタルQR」を店頭でスタッフに見せればそのままお受取りいただけます。
-              </p>
+      {/* デジタルQRカード
+          2026-07-11: リストバンド未登録の来場者に「使えるQR」を出さないよう、activeWristband がある場合のみ表示する。 */}
+      {activeWristband && (
+        <Card className="border-heavy border-border bg-primary text-primary-foreground rounded-none p-4 sm:p-6 text-center shadow-none">
+          <CardHeader className="p-0 mb-4">
+            <div className="inline-block bg-background text-foreground px-3 py-1 text-xs font-black uppercase tracking-widest mx-auto">
+              MEMBER DIGITAL QR
             </div>
-          </div>
-        )}
-      </div>
+          </CardHeader>
+          <CardContent className="p-0 space-y-4">
+            <div className="bg-background p-3 sm:p-4 inline-block border-thick border-background mx-auto">
+              <img
+                src={qrImageUrl}
+                alt="My Digital QR"
+                width={180}
+                height={180}
+                className="mx-auto block"
+              />
+            </div>
+            <div className="space-y-1">
+              <p className="text-xs text-primary-foreground/70 uppercase tracking-widest">
+                USER ID (呼出しID: #{userStatus?.user.displayId || "---"})
+              </p>
+              <p className="text-base sm:text-xl font-bold tracking-wider break-all px-2">{userId}</p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
-      {/* リストバンド紐付けモーダル */}
-      <Modal
-        isOpen={isRegisterOpen}
-        onClose={() => setIsRegisterOpen(false)}
-        title="[リストバンド紐付け]"
-        maxWidth="md"
+      {/* 注文履歴への導線 (履歴は /orders に分離) */}
+      <button
+        onClick={() => navigate("/visitor/orders")}
+        className="group w-full flex items-center justify-between gap-2 border-thick border-border bg-background hover:bg-muted transition-all p-4 text-left"
       >
-        <p className="text-xs text-gray-600">
-          手元の物理リストバンドのQRコードをスキャンするか、IDを入力してください。
-          {activeWristband && (
-            <span className="block mt-1 font-bold text-error">
-              ⚠️ 登録すると、現在のリストバンド ({activeWristband.id}) は自動的にロック（無効化）されます。
-            </span>
-          )}
-        </p>
-        <Input
-          type="text"
-          placeholder="リストバンドIDを入力 (例: wb_12345)"
-          className="h-12 border-thick border-border text-base rounded-none"
-          value={newWristbandId}
-          onChange={(e) => setNewWristbandId(e.target.value)}
-        />
-        <Button
-          onClick={() => {
-            if (newWristbandId.trim()) {
-              registerMutation.mutate(newWristbandId.trim());
-            }
-          }}
-          disabled={registerMutation.isPending || !newWristbandId.trim()}
-          className="w-full h-12 border-thick border-border bg-primary text-primary-foreground text-base font-bold uppercase rounded-none hover:bg-background hover:text-foreground"
-        >
-          紐付けを完了する
-        </Button>
-      </Modal>
-
-      {/* リストバンド紛失報告 確認ダイアログ */}
-      <ConfirmDialog
-        isOpen={isReportLostConfirmOpen}
-        title="[リストバンド紛失報告]"
-        description="失くしたリストバンドを即時ロック・無効化しますか？この操作は取り消せません。"
-        confirmLabel="ロックする"
-        cancelLabel="キャンセル"
-        destructive
-        onConfirm={() => {
-          if (activeWristband) {
-            reportLostMutation.mutate(activeWristband.id);
-          }
-        }}
-        onCancel={() => setIsReportLostConfirmOpen(false)}
-      />
-
-      {/* デジタルQRカード */}
-      <Card className="border-heavy border-border bg-primary text-primary-foreground rounded-none p-4 sm:p-6 text-center shadow-none">
-        <CardHeader className="p-0 mb-4">
-          <div className="inline-block bg-background text-foreground px-3 py-1 text-xs font-black uppercase tracking-widest mx-auto">
-            MEMBER DIGITAL QR
-          </div>
-        </CardHeader>
-        <CardContent className="p-0 space-y-4">
-          <div className="bg-background p-3 sm:p-4 inline-block border-thick border-background mx-auto">
-            <img
-              src={qrImageUrl}
-              alt="My Digital QR"
-              width={180}
-              height={180}
-              className="mx-auto block"
-            />
-          </div>
-          <div className="space-y-1">
-            <p className="text-xs text-gray-400 uppercase tracking-widest">
-              USER ID (呼出しID: #{userStatus?.user.displayId || "---"})
-            </p>
-            <p className="text-base sm:text-xl font-bold tracking-wider break-all px-2">{userId}</p>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* 外部モッドの動的インジェクション (マイオーダー画面用) */}
-      {modHooks.map((m) => {
-        const { id, hook } = m;
-        return (
-          <div key={`${id}-body-bottom`} className="w-full">
-            <ModSandbox
-              modId={id}
-              hookName="myOrderBodyBottom"
-              html={typeof hook === "string" ? hook : undefined}
-              jsUrl={typeof hook === "object" ? hook.js : undefined}
-              cssUrl={typeof hook === "object" ? hook.css : undefined}
-              data={directOrders}
-            />
-          </div>
-        );
-      })}
-
-      {/* 事前オーダー履歴一覧 */}
-      <div className="space-y-4">
-        <h2 className="text-xl sm:text-2xl font-black uppercase border-b-thick border-border pb-2">
-          [事前オーダー状況]
-        </h2>
-
-        {preOrdersError ? (
-          <ErrorState error={preOrdersErrorObj} onRetry={() => refetchPreOrders()} />
-        ) : preOrders && preOrders.length > 0 ? (
-          <div className="space-y-4">
-            {preOrders.map((po) => (
-              <div
-                key={po.id}
-                className="border-thick border-border bg-background p-5 space-y-3"
-              >
-                <div className="flex justify-between items-start border-b-[2px] border-border pb-2">
-                  <div className="flex items-center gap-2">
-                    {po.status === "pending" ? (
-                      <span className="bg-warning text-foreground border-thin border-border px-2 py-0.5 text-xs font-black uppercase flex items-center gap-1">
-                        <Clock className="h-3.5 w-3.5" /> 店頭未受取
-                      </span>
-                    ) : (
-                      <span className="bg-success text-primary-foreground px-2 py-0.5 text-xs font-black uppercase flex items-center gap-1">
-                        <CheckCircle2 className="h-3.5 w-3.5" /> 受取完了
-                      </span>
-                    )}
-                    <span className="text-xs text-gray-500">
-                      {new Date(po.createdAt).toLocaleTimeString("ja-JP")}
-                    </span>
-                  </div>
-                  <span className="text-xl font-black">
-                    ¥{po.totalPrice.toLocaleString()}
-                  </span>
-                </div>
-
-                <div className="bg-muted p-3 border-thick border-border">
-                  <ul className="divide-y divide-border/10 text-sm">
-                    {po.items.map((item) => (
-                      <li key={item.id} className="py-1 flex justify-between">
-                        <span className="font-bold">{item.menu?.name || "メニュー"}</span>
-                        <span>x {item.quantity}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <EmptyState icon={Clock} message="現在、未処理の事前オーダーはありません" />
-        )}
-      </div>
+        <span className="flex items-center gap-3">
+          <span className="flex h-10 w-10 items-center justify-center border-thick border-border bg-primary text-primary-foreground shrink-0">
+            <Receipt className="h-5 w-5" />
+          </span>
+          <span>
+            <span className="block text-sm font-black uppercase tracking-tight">注文履歴を見る</span>
+            <span className="block text-[11px] text-muted-foreground">事前オーダー・店頭注文の状況を確認</span>
+          </span>
+        </span>
+        <ChevronRight className="h-5 w-5 shrink-0 transition-transform group-hover:translate-x-1" />
+      </button>
     </div>
   );
 }

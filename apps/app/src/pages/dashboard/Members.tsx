@@ -66,15 +66,20 @@ function MembersContent() {
   // フォーム状態
   // 2026-07-07 (Phase 3b): 独自PIN認証の廃止に伴い pin 欄を撤去。
   // メンバーは追加後、招待/better-auth アカウントでログインする前提。
+  // 2026-07-11: 初期ロールを "viewer" → "circle_staff" に修正。
+  // ロール選択 (FormSelect) は circle_manager / circle_staff しか選択肢に出さず、かつ
+  // バックエンド (membership.ts の z.enum) は viewer を受け付けない。初期値が viewer だと
+  // 「モーダルを開いてそのまま送信」した時に select 表示 (先頭=マネージャー) と実 state (viewer) が
+  // 食い違ったまま viewer が送られ 400 で失敗していた。選択肢の先頭と一致する有効な最小権限ロールにする。
   const [newMember, setNewMember] = useState({
     userId: "",
     userEmail: "",
     userName: "",
-    role: "viewer" as Role,
+    role: "circle_staff" as Role,
   });
 
   const [inviteSettings, setInviteSettings] = useState({
-    role: "viewer" as Role,
+    role: "circle_staff" as Role,
     maxUses: 1,
     expiresInHours: 24,
     targetEmail: "",
@@ -118,12 +123,13 @@ function MembersContent() {
     }) => membershipApi.addMember(input),
     onSuccess: () => {
       refetchMembers();
+      toast.success("メンバーを追加しました");
       setShowAddForm(false);
       setNewMember({
         userId: "",
         userEmail: "",
         userName: "",
-        role: "viewer",
+        role: "circle_staff",
       });
     },
   });
@@ -138,9 +144,18 @@ function MembersContent() {
       createdBy: string;
       targetEmail?: string;
     }) => membershipApi.createInvite(input),
-    onSuccess: () => {
+    onSuccess: (data) => {
       refetchTokens();
-      toast.success("招待を作成しました");
+      // 招待作成後すぐ共有できるよう、生成されたリンクをクリップボードへコピーする。
+      // 従来は「作成しました」だけで、リンクは下の一覧までスクロールして copy し直す必要があり
+      // フローが途切れていた (2026-07-11)。
+      if (data?.token) {
+        const link = `${window.location.origin}/circle/invite/${data.token}`;
+        navigator.clipboard?.writeText(link).catch(() => {});
+        toast.success("招待リンクを作成し、クリップボードにコピーしました");
+      } else {
+        toast.success("招待を作成しました");
+      }
       setInviteSettings((prev) => ({ ...prev, targetEmail: "" }));
       setShowInviteForm(false);
     },
@@ -211,36 +226,32 @@ function MembersContent() {
   };
 
   return (
-    <DashboardLayout title={circleName} subtitle="メンバー管理" type="circle">
+    <DashboardLayout
+      title={circleName}
+      subtitle="メンバー管理"
+      type="circle"
+      // 主要アクションは共通ヘッダー右側へ集約 (旧: children 内の二重見出し行) (2026-07-11)
+      actions={
+        <PermissionGuard permission="member:write">
+          <Button
+            onClick={() => setShowAddForm(true)}
+            variant="outline"
+            className="rounded-none border-thick border-border h-8 text-[11px] font-bold shadow-none px-3 bg-background hover:bg-neutral-100"
+          >
+            <UserPlus className="mr-1.5 h-3.5 w-3.5" />
+            メンバー追加
+          </Button>
+          <Button
+            onClick={() => setShowInviteForm(true)}
+            className="rounded-none border-thick border-primary bg-primary text-primary-foreground hover:bg-background hover:text-foreground h-8 text-[11px] font-bold shadow-none px-3"
+          >
+            <LinkIcon className="mr-1.5 h-3.5 w-3.5" />
+            招待リンク作成
+          </Button>
+        </PermissionGuard>
+      }
+    >
       <div className="space-y-6 font-mono">
-        <div className="flex items-center justify-between border-b-thick border-border pb-3">
-          <div>
-            <h2 className="text-sm font-bold flex items-center gap-2 uppercase tracking-wider">
-              <Users className="h-4 w-4" />
-              メンバー管理
-            </h2>
-          </div>
-          <div className="flex gap-2">
-            <PermissionGuard permission="member:write">
-              <Button
-                onClick={() => setShowAddForm(true)}
-                variant="outline"
-                className="rounded-none border-thick border-border h-8 text-[11px] font-bold shadow-none px-3 bg-background hover:bg-neutral-100"
-              >
-                <UserPlus className="mr-1.5 h-3.5 w-3.5" />
-                メンバー追加
-              </Button>
-              <Button
-                onClick={() => setShowInviteForm(true)}
-                className="rounded-none border-thick border-primary bg-primary text-primary-foreground hover:bg-background hover:text-foreground h-8 text-[11px] font-bold shadow-none px-3"
-              >
-                <LinkIcon className="mr-1.5 h-3.5 w-3.5" />
-                招待リンク作成
-              </Button>
-            </PermissionGuard>
-          </div>
-        </div>
-
       {/* メンバー追加モーダル */}
       <Modal
         isOpen={showAddForm}

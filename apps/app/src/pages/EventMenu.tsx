@@ -16,8 +16,8 @@ import { Store, ArrowRight, QrCode, Calendar, ChevronRight } from "lucide-react"
  * 各サークルのメニューへの導線を提供する「下見」画面。閲覧は誰でも可。実際の注文は
  * 発行済みリストバンドが必要 (Menu 側でゲート)。
  *
- * - /events            … 入場済みなら自分のイベントへ、未入場ならイベント選択
- * - /events/:eventId   … 指定イベントのサークル一覧
+ * - /visitor/events            … 入場済みなら自分のイベントへ、未入場ならイベント選択
+ * - /visitor/events/:eventId   … 指定イベントのサークル一覧
  */
 export default function EventMenu() {
   const { eventId: eventIdParam } = useParams();
@@ -37,7 +37,7 @@ export default function EventMenu() {
     <EventMenuContent
       eventId={eventId}
       isEntered={isEntered}
-      onBrowseCircle={(circleId) => navigate(`/menu?circleId=${circleId}`)}
+      onBrowseCircle={(circleId) => navigate(`/visitor/menu?circleId=${circleId}`)}
     />
   );
 }
@@ -190,7 +190,7 @@ function EventMenuContent({
         {isEntered && (
           <div className="mt-8">
             <Link
-              to="/mypage"
+              to="/visitor/mypage"
               className="inline-flex items-center gap-1 text-[11px] font-black uppercase tracking-wider underline hover:text-accent"
             >
               マイページ (注文履歴・スタンプ)
@@ -245,7 +245,7 @@ function EventPicker() {
             <button
               key={event.id}
               type="button"
-              onClick={() => navigate(`/events/${event.id}`)}
+              onClick={() => navigate(`/visitor/events/${event.id}`)}
               className="group text-left border-thick border-border bg-background hover:bg-muted transition-all p-4 flex items-center gap-3 cursor-pointer"
             >
               {event.logoUrl ? (

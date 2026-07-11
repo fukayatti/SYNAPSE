@@ -61,8 +61,12 @@ export function createAuth(db: DB, env: WorkerEnv): Auth {
 		plugins: [passkey()],
 		advanced: {
 			defaultCookieAttributes: {
-				sameSite: "none",
-				secure: true,
+				// 2026-07-11: ローカル開発環境(http)で secure: true だとブラウザに Cookie が保存されず、
+				// ページ遷移/リロードのたびにログインが強制される問題を解決するため、ローカル環境のみ secure: false / sameSite: lax にフォールバックする。
+				sameSite: (env.BETTER_AUTH_URL?.includes("localhost") || env.BETTER_AUTH_URL?.includes("127.0.0.1"))
+					? "lax"
+					: "none",
+				secure: !(env.BETTER_AUTH_URL?.includes("localhost") || env.BETTER_AUTH_URL?.includes("127.0.0.1")),
 				httpOnly: true,
 			},
 		},
