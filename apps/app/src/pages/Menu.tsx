@@ -21,7 +21,7 @@ import { ErrorState } from "@/components/ui/ErrorState";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { toast } from "sonner";
 import { EventTheme } from "@/components/EventTheme";
-import { ShoppingCart, Plus, Minus, CheckCircle } from "lucide-react";
+import { ShoppingCart, Plus, Minus, CheckCircle, UtensilsCrossed } from "lucide-react";
 
 interface CartItem {
   menuId: string;
@@ -232,26 +232,36 @@ function MenuPageContent() {
     }
   }, [selectedCircleId, circleData, cart]);
 
-  // 直接アクセスの制限 (店頭QRコードスキャン必須化)
+  // 出店未選択のときの案内画面。
+  // 2026-07-11: 従来は "ACCESS DENIED // 注文不可" という強い表現で、初見の来場者には
+  // 拒否されたように見えて不親切だった。メニュー閲覧自体は自由なので、
+  // 「出店一覧から選ぶ」か「店頭QRをスキャンする」という前向きな導線に変える。
   if (!circleIdParam && !selectedCircleId) {
     return (
       <div className="max-w-xl mx-auto p-sp-3 sm:p-sp-4 text-center font-mono my-12">
         <div className="border-heavy border-border p-sp-5 space-y-sp-4 bg-background">
-          <div className="inline-block bg-primary text-primary-foreground font-headline uppercase text-[10px] sm:text-[12px] tracking-[3px] px-sp-3 py-sp-2 border-thick border-primary">
-            ACCESS DENIED // 注文不可
+          <div className="inline-flex items-center justify-center h-14 w-14 border-thick border-border bg-primary text-primary-foreground mx-auto">
+            <UtensilsCrossed className="h-7 w-7" />
           </div>
-          <h1 className="text-[24px] sm:text-[32px] font-headline uppercase tracking-tight leading-[1.1] text-foreground">
-            店頭のQRコードを<br />スキャンしてください
+          <h1 className="text-[22px] sm:text-[30px] font-headline uppercase tracking-tight leading-[1.15] text-foreground">
+            見たい出店を<br />選んでください
           </h1>
           <p className="text-[13px] sm:text-[14px] leading-[1.6] text-muted-foreground">
-            モバイルオーダーを開始するには、店頭に掲示されているサークル専用のQRコードをスマートフォンでスキャンしてください。
+            出店一覧からお店を選ぶと、メニューを見て事前注文ができます。
+            店頭に掲示されたQRコードをスマートフォンで読み取っても、その店のメニューが直接開きます。
           </p>
           <div className="border-t-[3px] border-border pt-sp-4 flex flex-col gap-sp-2">
+            <Button
+              onClick={() => navigate("/events")}
+              className="w-full h-12 border-thick border-border bg-primary text-primary-foreground font-mono font-bold uppercase hover:bg-background hover:text-foreground"
+            >
+              出店一覧を見る
+            </Button>
             <Button
               onClick={() => navigate("/mypage")}
               className="w-full h-12 border-thick border-border bg-background text-foreground font-mono font-bold hover:bg-accent hover:text-accent-foreground"
             >
-              注文履歴を確認する (マイQR)
+              マイページ (マイQR・注文履歴)
             </Button>
           </div>
         </div>
