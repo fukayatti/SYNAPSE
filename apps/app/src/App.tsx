@@ -33,6 +33,7 @@ import Entry from "@/pages/Entry";
 import Onboarding from "@/pages/Onboarding";
 import Menu from "@/pages/Menu";
 import MyPage from "@/pages/MyPage";
+import Orders from "@/pages/Orders";
 import EventMenu from "@/pages/EventMenu";
 
 function AdminLayout() {
@@ -73,6 +74,7 @@ export default function App() {
 					<Route path="/w/:id" element={<Entry />} />
 					<Route path="/onboarding" element={<Onboarding />} />
 					<Route path="/mypage" element={<MyPage />} />
+					<Route path="/orders" element={<Orders />} />
 					
 					{/* Visitor event / menu routes */}
 					<Route path="/events" element={<EventMenu />} />

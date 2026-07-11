@@ -115,7 +115,8 @@ function MenuPageContent() {
     onSuccess: () => {
       toast.success("事前オーダーを送信しました！店頭でマイQRを提示してください。");
       setCart([]);
-      navigate("/mypage");
+      // 送信直後は注文履歴に遷移し、事前オーダーの状態を確認できるようにする (2026-07-11 履歴を /orders に分離)
+      navigate("/orders");
     },
     onError: (error: any) => {
       toast.error(error.message || "事前オーダーの送信に失敗しました");
@@ -155,7 +156,8 @@ function MenuPageContent() {
 
       toast.success(`注文を受け付けました！呼出番号: ${orderData.orderNumber}`);
       setCart([]);
-      navigate("/mypage");
+      // 注文直後は注文履歴に遷移し、店頭注文の状態(呼出番号・受取状況)を確認できるようにする (2026-07-11)
+      navigate("/orders");
     },
     onError: (error: any) => {
       toast.error(error.message || "注文の送信に失敗しました");
@@ -261,7 +263,7 @@ function MenuPageContent() {
               onClick={() => navigate("/mypage")}
               className="w-full h-12 border-thick border-border bg-background text-foreground font-mono font-bold hover:bg-accent hover:text-accent-foreground"
             >
-              マイページ (マイQR・注文履歴)
+              マイページ (マイQR)
             </Button>
           </div>
         </div>

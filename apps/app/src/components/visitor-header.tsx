@@ -1,6 +1,6 @@
 import { Link, useLocation } from "react-router-dom";
 import { PRODUCT_NAME } from "@fesflow/config";
-import { QrCode, UtensilsCrossed } from "lucide-react";
+import { QrCode, UtensilsCrossed, Receipt } from "lucide-react";
 import { useVisitor } from "@/hooks/useVisitor";
 
 /**
@@ -16,7 +16,8 @@ export default function VisitorHeader() {
   // /events (出店ブラウズ) へ直結させて回遊を1タップ短縮する。
   const links = [
     { to: "/events", label: "メニュー", icon: UtensilsCrossed, match: ["/events", "/menu"] },
-    { to: "/mypage", label: "マイページ", icon: QrCode, match: ["/mypage"] },
+    { to: "/mypage", label: "マイQR", icon: QrCode, match: ["/mypage"] },
+    { to: "/orders", label: "注文履歴", icon: Receipt, match: ["/orders"] },
   ];
 
   // メニューは /events・/menu どちらにいてもアクティブ表示にする
