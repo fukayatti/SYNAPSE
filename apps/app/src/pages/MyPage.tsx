@@ -112,46 +112,50 @@ export default function MyPage() {
 
       {/* リストバンド未登録の案内。
           2026-07-11: 登録/再発行/紛失処理はすべて本部(受付/イベント管理)で行う。
-          物理リストバンドが未紐付けの場合のみ本部での登録を案内する。
-          スマホ画面のQR(下のマイデジタルQR)はそのまま利用できる。 */}
+          未登録のうちは「使えるQR」を出さない (アクセスしただけで使えると誤解させないため)。
+          本部でリストバンドを登録すると、下のマイQRが表示される。 */}
       {!activeWristband && (
         <div className="border-thick border-border bg-muted p-4 flex items-start gap-3">
           <QrCode className="h-5 w-5 shrink-0 mt-0.5" />
           <div className="space-y-1">
             <p className="font-bold text-sm">リストバンドが未登録です</p>
             <p className="text-xs text-muted-foreground leading-relaxed">
-              リストバンドは受付・本部でお渡しします。受付で発行された来場登録QR（またはリストバンドのQR）を読み取ると登録できます。
-              登録すると、なくしても本部で再発行できます。下の「マイデジタルQR」はそのままご利用いただけます。
+              マイQRは、受付・本部でリストバンドを登録すると表示されます。
+              受付で発行された来場登録QR（またはリストバンドのQR）を読み取って登録してください。
+              登録すると、なくしても本部で再発行できます。
             </p>
           </div>
         </div>
       )}
 
-      {/* デジタルQRカード */}
-      <Card className="border-heavy border-border bg-primary text-primary-foreground rounded-none p-4 sm:p-6 text-center shadow-none">
-        <CardHeader className="p-0 mb-4">
-          <div className="inline-block bg-background text-foreground px-3 py-1 text-xs font-black uppercase tracking-widest mx-auto">
-            MEMBER DIGITAL QR
-          </div>
-        </CardHeader>
-        <CardContent className="p-0 space-y-4">
-          <div className="bg-background p-3 sm:p-4 inline-block border-thick border-background mx-auto">
-            <img
-              src={qrImageUrl}
-              alt="My Digital QR"
-              width={180}
-              height={180}
-              className="mx-auto block"
-            />
-          </div>
-          <div className="space-y-1">
-            <p className="text-xs text-primary-foreground/70 uppercase tracking-widest">
-              USER ID (呼出しID: #{userStatus?.user.displayId || "---"})
-            </p>
-            <p className="text-base sm:text-xl font-bold tracking-wider break-all px-2">{userId}</p>
-          </div>
-        </CardContent>
-      </Card>
+      {/* デジタルQRカード
+          2026-07-11: リストバンド未登録の来場者に「使えるQR」を出さないよう、activeWristband がある場合のみ表示する。 */}
+      {activeWristband && (
+        <Card className="border-heavy border-border bg-primary text-primary-foreground rounded-none p-4 sm:p-6 text-center shadow-none">
+          <CardHeader className="p-0 mb-4">
+            <div className="inline-block bg-background text-foreground px-3 py-1 text-xs font-black uppercase tracking-widest mx-auto">
+              MEMBER DIGITAL QR
+            </div>
+          </CardHeader>
+          <CardContent className="p-0 space-y-4">
+            <div className="bg-background p-3 sm:p-4 inline-block border-thick border-background mx-auto">
+              <img
+                src={qrImageUrl}
+                alt="My Digital QR"
+                width={180}
+                height={180}
+                className="mx-auto block"
+              />
+            </div>
+            <div className="space-y-1">
+              <p className="text-xs text-primary-foreground/70 uppercase tracking-widest">
+                USER ID (呼出しID: #{userStatus?.user.displayId || "---"})
+              </p>
+              <p className="text-base sm:text-xl font-bold tracking-wider break-all px-2">{userId}</p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* 注文履歴への導線 (履歴は /orders に分離) */}
       <button
