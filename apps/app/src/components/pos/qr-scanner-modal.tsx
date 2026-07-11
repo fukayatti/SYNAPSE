@@ -37,9 +37,13 @@ export function QrScannerModal({
   const fileInputRef = useRef<HTMLInputElement>(null);
   // jsQR デコード用の作業キャンバス (画面には出さない)
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const rafRef = useRef<number | null>(null);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // 連続検出で同じコードを何度も submit しないためのロック
   const lockedRef = useRef(false);
+  // アンマウント後にも確実にストリームを停止するための参照
+  const streamRef = useRef<MediaStream | null>(null);
+  const [showManualInput, setShowManualInput] = useState(false);
+  const [isStartingCamera, setIsStartingCamera] = useState(false);
 
   // 写真から読み取るフォールバック (WKWebView等向け)
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -111,12 +115,18 @@ export function QrScannerModal({
 
   useEffect(() => {
     if (isOpen) {
-      setTimeout(() => inputRef.current?.focus(), 100);
+      startCamera();
     } else {
       stopCamera();
       setScannedCode("");
       setPreOrders([]);
+      setShowManualInput(false);
     }
+
+    // アンマウント時にも確実にカメラを停止
+    return () => {
+      stopCamera();
+    };
   }, [isOpen]);
 
   // カメラ起動
@@ -129,14 +139,18 @@ export function QrScannerModal({
       return;
     }
 
+    setIsStartingCamera(true);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: "environment" },
       });
+      streamRef.current = stream;
 
       // 権限ダイアログ中にモーダルを閉じた場合の対策
       if (!videoRef.current) {
         stream.getTracks().forEach((track) => track.stop());
+        streamRef.current = null;
+        setIsStartingCamera(false);
         return;
       }
 
@@ -147,16 +161,20 @@ export function QrScannerModal({
 
       lockedRef.current = false;
       setIsCameraActive(true);
+      setIsStartingCamera(false);
       toast.info("カメラを起動しました。QRコードにかざしてください");
       // フレーム走査ループ開始 (jsQR で実際にデコードする)
-      rafRef.current = requestAnimationFrame(scanFrame);
+      timeoutRef.current = setTimeout(scanFrame, 100);
     } catch (err: any) {
       console.error("Camera error:", err);
       setIsCameraActive(false);
-      // videoRef が残っていれば srcObject をクリアしてストリームを解放する
+      setIsStartingCamera(false);
+      // 確実なストリーム解放
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((t) => t.stop());
+        streamRef.current = null;
+      }
       if (videoRef.current?.srcObject) {
-        const s = videoRef.current.srcObject as MediaStream;
-        s.getTracks().forEach((t) => t.stop());
         videoRef.current.srcObject = null;
       }
       if (err.name === "NotAllowedError" || err.name === "NotFoundError") {
@@ -172,23 +190,37 @@ export function QrScannerModal({
   const scanFrame = () => {
     const video = videoRef.current;
     if (!video || video.readyState !== video.HAVE_ENOUGH_DATA) {
-      rafRef.current = requestAnimationFrame(scanFrame);
+      timeoutRef.current = setTimeout(scanFrame, 50);
       return;
     }
     const canvas = canvasRef.current ?? (canvasRef.current = document.createElement("canvas"));
     const w = video.videoWidth;
     const h = video.videoHeight;
     if (w === 0 || h === 0) {
-      rafRef.current = requestAnimationFrame(scanFrame);
+      timeoutRef.current = setTimeout(scanFrame, 50);
       return;
     }
-    canvas.width = w;
-    canvas.height = h;
+
+    // 爆速化1: 画像を大幅に縮小する (最大400px)
+    const MAX_WIDTH = 400;
+    const scale = Math.min(1, MAX_WIDTH / w);
+    const scaledW = Math.floor(w * scale);
+    const scaledH = Math.floor(h * scale);
+
+    canvas.width = scaledW;
+    canvas.height = scaledH;
     const ctx = canvas.getContext("2d", { willReadFrequently: true });
-    if (!ctx) return;
-    ctx.drawImage(video, 0, 0, w, h);
-    const imageData = ctx.getImageData(0, 0, w, h);
-    const result = jsQR(imageData.data, w, h, { inversionAttempts: "dontInvert" });
+    if (!ctx) {
+      timeoutRef.current = setTimeout(scanFrame, 50);
+      return;
+    }
+    
+    ctx.drawImage(video, 0, 0, scaledW, scaledH);
+    const imageData = ctx.getImageData(0, 0, scaledW, scaledH);
+    
+    // 爆速化2: dontInvert で余計な反転処理を省く（既に設定済み）
+    const result = jsQR(imageData.data, scaledW, scaledH, { inversionAttempts: "dontInvert" });
+    
     if (result && result.data && !lockedRef.current) {
       // 一度検出したらロックして重複 submit を防ぎ、カメラを止めてから照会
       lockedRef.current = true;
@@ -202,21 +234,26 @@ export function QrScannerModal({
       }
       return;
     }
-    rafRef.current = requestAnimationFrame(scanFrame);
+    
+    // 爆速化3: フレームを間引く (約20fps = 50ms間隔)
+    timeoutRef.current = setTimeout(scanFrame, 50);
   };
 
   // カメラ停止
   const stopCamera = () => {
-    if (rafRef.current != null) {
-      cancelAnimationFrame(rafRef.current);
-      rafRef.current = null;
+    if (timeoutRef.current != null) {
+      clearTimeout(timeoutRef.current);
+      timeoutRef.current = null;
+    }
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
     }
     if (videoRef.current && videoRef.current.srcObject) {
-      const stream = videoRef.current.srcObject as MediaStream;
-      stream.getTracks().forEach((track) => track.stop());
       videoRef.current.srcObject = null;
     }
     setIsCameraActive(false);
+    setIsStartingCamera(false);
   };
 
   // 顧客情報ルックアップ (2026-07-04)
@@ -329,39 +366,6 @@ export function QrScannerModal({
             className="hidden"
             onChange={handleFileUpload}
           />
-          <form onSubmit={handleSearch} className="flex flex-col sm:flex-row gap-2">
-            <div className="relative flex-1">
-              <Label htmlFor="qrInput" className="sr-only">
-                リストバンドID / ユーザーID
-              </Label>
-              <Input
-                id="qrInput"
-                ref={inputRef}
-                type="text"
-                placeholder="リストバンドQRをスキャン / コード入力..."
-                className="h-14 w-full border-thick border-border bg-input font-mono text-sm sm:text-lg rounded-none focus-visible:border-heavy focus-visible:ring-0"
-                value={scannedCode}
-                onChange={(e) => setScannedCode(e.target.value)}
-              />
-            </div>
-            <div className="flex gap-2">
-              <Button
-                type="submit"
-                disabled={searchMutation.isPending}
-                className="flex-1 sm:flex-none h-14 border-thick border-border bg-primary px-6 font-mono text-base font-bold uppercase text-primary-foreground rounded-none hover:bg-background hover:text-foreground"
-              >
-                <Search className="mr-2 h-5 w-5" />
-                照会
-              </Button>
-              <Button
-                type="button"
-                onClick={handleCameraBtnClick}
-                className="h-14 border-thick border-border bg-background px-4 text-foreground rounded-none hover:bg-primary hover:text-primary-foreground"
-              >
-                <Camera className="h-5 w-5" />
-              </Button>
-            </div>
-          </form>
 
           {/*
             カメラプレビュー: 2026-07-10
@@ -371,7 +375,7 @@ export function QrScannerModal({
             権限ダイアログ表示中は videoRef.current === null になり、
             stream を割り当てられないレースコンディションが発生する。
           */}
-          <div className={`relative h-48 w-full overflow-hidden border-thick border-border bg-primary${isCameraActive ? "" : " hidden"}`}>
+          <div className={`relative w-full aspect-[4/3] sm:aspect-video overflow-hidden border-thick border-border bg-primary${isCameraActive ? "" : " hidden"}`}>
             <video
               ref={videoRef}
               className="h-full w-full object-cover"
@@ -379,10 +383,74 @@ export function QrScannerModal({
               muted
               autoPlay
             />
-            <div className="absolute inset-0 flex items-center justify-center">
-              <div className="h-32 w-32 border-thick border-dashed border-red-500 animate-pulse" />
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+              <div className="h-48 w-48 sm:h-64 sm:w-64 border-4 border-dashed border-red-500 animate-pulse" />
             </div>
           </div>
+
+          {!isCameraActive && (
+            <div className="flex flex-col items-center justify-center p-8 border-thick border-dashed border-border bg-muted space-y-4">
+              {isStartingCamera ? (
+                <p className="text-sm font-mono text-muted-foreground text-center animate-pulse">
+                  カメラを起動中...
+                </p>
+              ) : (
+                <>
+                  <p className="text-sm font-mono text-muted-foreground text-center">
+                    カメラが停止しています。
+                  </p>
+                  <Button onClick={handleCameraBtnClick} className="border-thick border-border bg-primary text-primary-foreground font-bold hover:bg-background hover:text-foreground shadow-none">
+                    <Camera className="mr-2 h-5 w-5" />
+                    カメラを起動する
+                  </Button>
+                </>
+              )}
+            </div>
+          )}
+
+          {/* 手入力エリアのトグル */}
+          {!showManualInput ? (
+            <div className="flex justify-end">
+              <Button
+                type="button"
+                variant="ghost"
+                className="text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground h-auto p-2"
+                onClick={() => {
+                  setShowManualInput(true);
+                  setTimeout(() => inputRef.current?.focus(), 100);
+                }}
+              >
+                手入力 / バーコードリーダーを使う
+              </Button>
+            </div>
+          ) : (
+            <form onSubmit={handleSearch} className="flex flex-col sm:flex-row gap-2 pt-2 border-t-thick border-dashed border-border mt-4">
+              <div className="relative flex-1">
+                <Label htmlFor="qrInput" className="sr-only">
+                  リストバンドID / ユーザーID
+                </Label>
+                <Input
+                  id="qrInput"
+                  ref={inputRef}
+                  type="text"
+                  placeholder="リストバンドQRをスキャン / コード入力..."
+                  className="h-14 w-full border-thick border-border bg-input font-mono text-sm sm:text-lg rounded-none focus-visible:border-heavy focus-visible:ring-0"
+                  value={scannedCode}
+                  onChange={(e) => setScannedCode(e.target.value)}
+                />
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  type="submit"
+                  disabled={searchMutation.isPending}
+                  className="flex-1 sm:flex-none h-14 border-thick border-border bg-primary px-6 font-mono text-base font-bold uppercase text-primary-foreground rounded-none hover:bg-background hover:text-foreground shadow-none"
+                >
+                  <Search className="mr-2 h-5 w-5" />
+                  照会
+                </Button>
+              </div>
+            </form>
+          )}
         </div>
 
         {/* 検索結果リスト */}
