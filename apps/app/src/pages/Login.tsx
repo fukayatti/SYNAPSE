@@ -1,9 +1,9 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import SignInForm from "@/components/sign-in-form";
 import SignUpForm from "@/components/sign-up-form";
 import { authClient } from "@/lib/auth-client";
-import { useMySpaces, getAuthInfo } from "@/hooks/useCircleAuth";
+import { useMySpaces, getAuthInfo, resolveActiveSpaceAfterAuth } from "@/hooks/useCircleAuth";
 import { roleLabel } from "@/lib/roles";
 import { Button } from "@/components/ui/button";
 import Loader from "@/components/loader";
@@ -26,6 +26,28 @@ export default function Login() {
 	const authInfo = getAuthInfo();
 	const hasActiveSpace = !!(authInfo?.circleId || authInfo?.isEventAdmin || authInfo?.role);
 	const { data: spaces, isLoading: spacesLoading } = useMySpaces();
+
+	// Google ログインは OAuth リダイレクト方式のため、フォーム内の onSuccess で
+	// スペース解決ができない。リダイレクト後この画面に着地するので、ここで一度だけ
+	// 所属解決を試み、スタッフスペース(システム/イベント/サークル)が見つかれば
+	// そこへ自動遷移する。見つからなければ下のスペース選択案内にフォールバックする。
+	// (メール/パスキーは各フォームで解決済みなので、この経路に来るのは主に Google 着地時)
+	const autoResolvedRef = useRef(false);
+	useEffect(() => {
+		if (autoResolvedRef.current) return;
+		if (!session?.user?.email || hasActiveSpace) return;
+		autoResolvedRef.current = true;
+		resolveActiveSpaceAfterAuth(session.user.email)
+			.then((resolved) => {
+				// 所属ゼロ (kind: "none") のときは自動遷移せず、案内画面を出す
+				if (resolved.kind !== "none") {
+					navigate(resolved.path);
+				}
+			})
+			.catch(() => {
+				// 解決に失敗しても致命的でない: 下のスペース選択案内にフォールバック
+			});
+	}, [session?.user?.email, hasActiveSpace, navigate]);
 
 	if (showSignUp) {
 		return <SignUpForm onSwitchToSignIn={() => setShowSignUp(false)} />;

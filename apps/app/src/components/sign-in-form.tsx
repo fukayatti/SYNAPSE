@@ -9,6 +9,7 @@ import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { resolveActiveSpaceAfterAuth } from "@/hooks/useCircleAuth";
+import { GoogleSignInButton } from "./social-sign-in";
 
 export default function SignInForm({
 	onSwitchToSignUp,
@@ -183,6 +184,7 @@ export default function SignInForm({
 				>
 					Sign in with Passkey
 				</Button>
+				<GoogleSignInButton deepLink={callbackUrl} />
 			</div>
 
 			<div className="mt-sp-4 text-center">

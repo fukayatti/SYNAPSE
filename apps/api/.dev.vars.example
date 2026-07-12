@@ -7,6 +7,14 @@ BETTER_AUTH_URL="http://localhost:8787"
 CORS_ORIGIN="http://localhost:3000"
 INITIAL_SUPER_ADMIN_EMAIL="you@example.com"
 
+# Google ログイン (better-auth socialProviders.google) 用。
+# Google Cloud Console > APIとサービス > 認証情報 で OAuth 2.0 クライアント ID (種類: ウェブアプリ) を作成し、
+# 「承認済みのリダイレクト URI」に better-auth のコールバック `<BETTER_AUTH_URL>/api/auth/callback/google`
+# (ローカルなら http://localhost:8787/api/auth/callback/google) を登録する。
+# 本番の CLIENT_SECRET は vars ではなく `wrangler secret put GOOGLE_CLIENT_SECRET` で登録する。
+GOOGLE_CLIENT_ID=""
+GOOGLE_CLIENT_SECRET=""
+
 # R2 を使わず MinIO でローカル検証する場合のみ設定 (wrangler の R2 エミュを使うなら不要):
 # S3_ENDPOINT="http://localhost:9000"
 # S3_BUCKET="fesflow-uploads"
