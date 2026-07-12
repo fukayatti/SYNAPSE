@@ -20,12 +20,18 @@ import { Button } from "./ui/button";
  */
 export function GoogleSignInButton({ deepLink }: { deepLink?: string | null }) {
 	const appOrigin = typeof window !== "undefined" ? window.location.origin : "";
-	// deepLink がフルURLならそのまま、パスなら現オリジンに解決。無ければ /login。
-	const callbackURL = deepLink
-		? deepLink.startsWith("http")
-			? deepLink
-			: `${appOrigin}${deepLink}`
-		: `${appOrigin}/login`;
+	// 2026-07-12: OAuth の戻り先は open redirect 防止のため同一オリジンURLか `/` 始まりの相対パスに限定する。
+	const callbackURL = (() => {
+		const fallback = `${appOrigin}/login`;
+		if (!deepLink) return fallback;
+		if (deepLink.startsWith("/")) return `${appOrigin}${deepLink}`;
+		try {
+			const parsed = new URL(deepLink);
+			return parsed.origin === appOrigin ? parsed.toString() : fallback;
+		} catch {
+			return fallback;
+		}
+	})();
 
 	return (
 		<Button

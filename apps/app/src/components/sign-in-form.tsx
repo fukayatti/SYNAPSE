@@ -16,7 +16,7 @@ import { GoogleSignInButton } from "./social-sign-in";
 export default function SignInForm() {
 	const navigate = useNavigate();
 	const [searchParams] = useSearchParams();
-	const callbackUrl = searchParams.get("url");
+	const callbackUrl = searchParams.get("callbackUrl") ?? searchParams.get("url");
 	const { isPending } = authClient.useSession();
 
 	if (isPending) {
