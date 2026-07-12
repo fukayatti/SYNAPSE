@@ -6,8 +6,9 @@ import { Card, CardHeader, CardTitle, CardContent, CardDescription } from "@/com
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Lock, Search, RefreshCw, Users } from "lucide-react";
+import { Lock, Search, RefreshCw, Users, Camera, QrCode } from "lucide-react";
 import { toast } from "sonner";
+import { QrScannerModal } from "@/components/pos/qr-scanner-modal";
 
 interface WristbandsTabProps {
   eventId: string;
@@ -21,6 +22,8 @@ export function WristbandsTab({
   const [profileSearchQuery, setProfileSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [lookupResult, setLookupResult] = useState<any | null>(null);
+  const [isScannerOpen, setIsScannerOpen] = useState(false);
+  const [scannerTarget, setScannerTarget] = useState<"search" | "reissue">("search");
 
   // リストバンド照会 API
   const lookupWristbandMutation = useMutation({
@@ -70,8 +73,23 @@ export function WristbandsTab({
         searchProfileMutation.mutate(profileSearchQuery);
       }
     },
+  });
+
+  // リストバンド更新 (2026-07-12)
+  const updateWbMutation = useMutation({
+    mutationFn: (input: { id: string; status: any; userId?: string }) =>
+      wristbandApi.update(input.id, { status: input.status, userId: input.userId }),
+    onSuccess: () => {
+      toast.success("リストバンド情報を更新しました");
+      if (lostSearchCode) {
+        lookupWristbandMutation.mutate(lostSearchCode);
+      }
+      if (profileSearchQuery) {
+        searchProfileMutation.mutate(profileSearchQuery);
+      }
+    },
     onError: (err: any) => {
-      toast.error(err.message || "紛失ロックに失敗しました");
+      toast.error(err.message || "更新に失敗しました");
     },
   });
 
@@ -120,6 +138,25 @@ export function WristbandsTab({
     registerWristbandMutation.mutate({ userId, wristbandId: parsedWbId });
   };
 
+  const handleScannerScan = (userId: string, wristbandId: string | null) => {
+    const code = wristbandId || userId;
+    if (scannerTarget === "search") {
+      setLostSearchCode(code);
+      lookupWristbandMutation.mutate(code);
+    } else {
+      setNewWristbandId(code);
+    }
+  };
+
+  const handleUpdateWbStatus = (wbId: string, status: any) => {
+    updateWbMutation.mutate({ id: wbId, status });
+  };
+
+  const handleUnlinkWb = (wbId: string) => {
+    if (!window.confirm("このリストバンドの紐付けを解除しますか？")) return;
+    updateWbMutation.mutate({ id: wbId, status: "revoked", userId: "" });
+  };
+
   return (
     <div className="space-y-6 font-mono text-foreground">
       <div className="flex justify-between items-center border-b-thick border-border pb-3">
@@ -150,6 +187,16 @@ export function WristbandsTab({
                 }}
                 className="border-thick border-border rounded-none focus-visible:ring-0 h-10 text-xs bg-background font-mono flex-1"
               />
+              <Button
+                onClick={() => {
+                  setScannerTarget("search");
+                  setIsScannerOpen(true);
+                }}
+                variant="outline"
+                className="border-thick border-border h-10 px-3 rounded-none"
+              >
+                <Camera className="h-4 w-4" />
+              </Button>
               <Button
                 onClick={handleSearchLost}
                 disabled={!lostSearchCode.trim() || lookupWristbandMutation.isPending}
@@ -226,6 +273,8 @@ export function WristbandsTab({
                           <Badge variant="default" className={`rounded-none text-[8px] font-mono border-thick border-border uppercase ${
                             res.wristband.status === "active"
                               ? "bg-success/10 text-success border-success"
+                              : res.wristband.status === "smartphone"
+                              ? "bg-info/10 text-info border-info"
                               : "bg-error/10 text-error border-error"
                           }`}>
                             {res.wristband.status}
@@ -286,17 +335,33 @@ export function WristbandsTab({
                     </p>
                     <p>割当日時: {new Date(lookupResult.wristband.assignedAt).toLocaleString("ja-JP")}</p>
 
-                    {lookupResult.wristband.status === "active" && (
+                    <div className="flex flex-col sm:flex-row sm:items-center gap-4 border-t border-border/20 pt-2 mt-2">
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold">状態変更:</span>
+                        <select
+                          value={lookupResult.wristband.status}
+                          onChange={(e) => handleUpdateWbStatus(lookupResult.wristband.id, e.target.value)}
+                          disabled={updateWbMutation.isPending}
+                          className="border-thick border-border bg-background p-1 text-[10px] font-bold font-mono rounded-none"
+                        >
+                          <option value="active">有効 (Active)</option>
+                          <option value="smartphone">スマホ用 (Smartphone)</option>
+                          <option value="lost">紛失 (Lost)</option>
+                          <option value="replaced">再発行済 (Replaced)</option>
+                          <option value="revoked">無効化 (Revoked)</option>
+                        </select>
+                      </div>
+
                       <Button
-                        variant="destructive"
+                        variant="outline"
                         size="sm"
-                        onClick={() => handleReportLost(lookupResult.wristband.id)}
-                        disabled={reportLostMutation.isPending}
-                        className="rounded-none text-[9px] font-bold h-8 uppercase mt-1.5 shadow-none border border-transparent"
+                        onClick={() => handleUnlinkWb(lookupResult.wristband.id)}
+                        disabled={updateWbMutation.isPending}
+                        className="rounded-none text-[9px] font-bold h-7 uppercase shadow-none border-thick border-border hover:bg-destructive hover:text-white"
                       >
-                        リストバンド紛失報告（即時ロック）
+                        紐付け解除 (Unlink)
                       </Button>
-                    )}
+                    </div>
                   </div>
                 ) : (
                   <p className="text-muted-foreground italic text-[10px]">有効な物理リストバンドは紐付いていません</p>
@@ -321,6 +386,16 @@ export function WristbandsTab({
                     className="border-thick border-border rounded-none focus-visible:ring-0 h-10 text-xs bg-background font-mono flex-1"
                   />
                   <Button
+                    onClick={() => {
+                      setScannerTarget("reissue");
+                      setIsScannerOpen(true);
+                    }}
+                    variant="outline"
+                    className="border-thick border-border h-10 px-3 rounded-none"
+                  >
+                    <Camera className="h-4 w-4" />
+                  </Button>
+                  <Button
                     onClick={() => handleReissueWb(lookupResult.user.id)}
                     disabled={!newWristbandId.trim() || registerWristbandMutation.isPending}
                     className="border-thick border-border bg-background text-foreground hover:bg-primary hover:text-primary-foreground h-10 text-xs font-bold rounded-none shadow-none px-4"
@@ -334,6 +409,50 @@ export function WristbandsTab({
           </CardContent>
         </Card>
       )}
+
+      {/* マイデジタルQRセルフ発行用QRの出力エリア */}
+      <Card className="rounded-none bg-background shadow-none border-thick border-border">
+        <CardHeader className="p-4 pb-2 border-b-thin border-border bg-muted/20">
+          <CardTitle className="text-xs uppercase font-bold flex items-center gap-1.5">
+            <QrCode className="h-4 w-4" />
+            [来場者向け・マイデジタルQR発行QRコード]
+          </CardTitle>
+          <CardDescription className="text-[10px]">来場者が自身のスマートフォンでスキャンし、マイデジタルQRをセルフ発行するための受付用QRです。</CardDescription>
+        </CardHeader>
+        <CardContent className="p-6 flex flex-col md:flex-row items-center gap-6">
+          <div className="border-thick border-border p-3 bg-white">
+            <img
+              src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(
+                `${window.location.origin}/visitor/mypage?eventId=${eventId}&action=issue`
+              )}`}
+              alt="My Digital QR Issuance QR"
+              width={180}
+              height={180}
+              className="block"
+            />
+          </div>
+          <div className="space-y-2 text-xs font-mono">
+            <p className="font-bold underline text-primary">セルフ登録URL:</p>
+            <p className="bg-muted p-2 select-all break-all border border-border">
+              {`${window.location.origin}/visitor/mypage?eventId=${eventId}&action=issue`}
+            </p>
+            <div className="text-[10px] text-muted-foreground leading-normal space-y-1 pt-2">
+              <p>1. 受付にこのQRコードを掲示するか、URLを来場者に共有してください。</p>
+              <p>2. 来場者がスキャンすると、自動的に「スマホデジタルID（リストバンド代替）」が新規発行され、マイページで支払いやスタンプラリーが使えるようになります。</p>
+              <p>※ 物理リストバンドを使わない「スマホ単体イベント」では、このQRだけで受付を完全セルフ化できます。</p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* カメラQRスキャナーモーダル */}
+      <QrScannerModal
+        circleId="dummy"
+        isOpen={isScannerOpen}
+        onClose={() => setIsScannerOpen(false)}
+        mode="customer"
+        onCustomerScanned={handleScannerScan}
+      />
     </div>
   );
 }

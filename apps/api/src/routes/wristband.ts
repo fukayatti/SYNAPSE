@@ -6,6 +6,7 @@ import { nanoid } from "nanoid";
 import { hasPermission } from "../utils/auth";
 import { zBody, zQuery } from "../z-validator";
 import { apiError } from "../http-error";
+import { audit } from "../utils/sudo";
 import type { AppEnv } from "../types";
 
 
@@ -53,7 +54,7 @@ wristbandRoutes.get(
         wristband,
         and(
           eq(wristband.userId, eventUser.id),
-          eq(wristband.status, "active")
+          or(eq(wristband.status, "active"), eq(wristband.status, "smartphone"))
         )
       )
       .where(and(...conditions, or(...orConditions)))
@@ -127,16 +128,56 @@ wristbandRoutes.get("/lookup/:code", async (c) => {
 
   if (users.length > 0) {
     const user = users[0]!;
-    // 最新のアクティブリストバンドを取得
+    // 最新のアクティブ/スマホリストバンドを取得
     const activeWristbands = await db
       .select()
       .from(wristband)
-      .where(and(eq(wristband.userId, user.id), eq(wristband.status, "active")))
+      .where(
+        and(
+          eq(wristband.userId, user.id),
+          or(eq(wristband.status, "active"), eq(wristband.status, "smartphone"))
+        )
+      )
       .orderBy(desc(wristband.assignedAt));
+
+    if (activeWristbands.length > 0) {
+      return c.json({
+        user,
+        wristband: activeWristbands[0],
+      });
+    }
+
+    // 2026-07-12: リストバンドが存在しない場合で、イベントが「物理リストバンドなし(スマホのみ)」に
+    // 設定されている場合、その場で自動的にスマホデジタルID用の疑似バンドレコード(status: "smartphone")を登録する。
+    const events = await db.select().from(event).where(eq(event.id, user.eventId));
+    if (events.length > 0 && !events[0]!.hasPhysicalWristband) {
+      const dummyWbId = `sp_${user.id}`;
+      // 重複チェック
+      const existingWb = await db.select().from(wristband).where(eq(wristband.id, dummyWbId));
+      if (existingWb.length === 0) {
+        await db.insert(wristband).values({
+          id: dummyWbId,
+          userId: user.id,
+          status: "smartphone",
+          assignedAt: new Date(),
+        });
+      } else {
+        await db
+          .update(wristband)
+          .set({ status: "smartphone", deactivatedAt: null })
+          .where(eq(wristband.id, dummyWbId));
+      }
+
+      const newWb = (await db.select().from(wristband).where(eq(wristband.id, dummyWbId)))[0]!;
+      return c.json({
+        user,
+        wristband: newWb,
+      });
+    }
 
     return c.json({
       user,
-      wristband: activeWristbands.length > 0 ? activeWristbands[0] : null,
+      wristband: null,
     });
   }
 
@@ -271,14 +312,11 @@ wristbandRoutes.post(
     const id = c.req.param("id");
 
     // 2026-07-05: 存在確認とアクティブ状態のみロック可能に限定する。
-    // (ベアラーモデルのため所有証明までは行えないが、既に無効化済みのバンドを
-    //  再度 lost 化する無意味な操作・存在しないIDへの操作を弾く。恒久的には
-    //  紛失報告を本人セッション or スタッフ権限で保護する再設計が望ましい。)
     const wbs = await db.select().from(wristband).where(eq(wristband.id, id));
     if (wbs.length === 0) {
       apiError("NOT_FOUND", "リストバンドが見つかりません");
     }
-    if (wbs[0]!.status !== "active") {
+    if (wbs[0]!.status !== "active" && wbs[0]!.status !== "smartphone") {
       apiError("BAD_REQUEST", "このリストバンドは既に無効です");
     }
 
@@ -286,6 +324,59 @@ wristbandRoutes.post(
       .update(wristband)
       .set({ status: "lost", deactivatedAt: new Date() })
       .where(eq(wristband.id, id));
+
+    return c.json({ success: true });
+  }
+);
+
+// リストバンド更新 (状態変更、紐付け先変更等) - 2026-07-12 追加
+wristbandRoutes.patch(
+  "/:id",
+  zBody(
+    z.object({
+      status: z.enum(["active", "lost", "replaced", "revoked", "smartphone"]),
+      userId: z.string().optional(),
+    })
+  ),
+  async (c) => {
+    const db = c.get("db");
+    const id = c.req.param("id");
+    const { status, userId } = c.req.valid("json");
+
+    // 権限チェック (スタッフ member:write 権限が必要)
+    const allowed = await hasPermission(c, null, "member:write", undefined);
+    if (!allowed) {
+      apiError("FORBIDDEN", "この操作にはスタッフ権限が必要です");
+    }
+
+    const wbs = await db.select().from(wristband).where(eq(wristband.id, id));
+    if (wbs.length === 0) {
+      apiError("NOT_FOUND", "リストバンドが見つかりません");
+    }
+
+    const patch: Record<string, any> = { status };
+    if (status === "lost" || status === "replaced" || status === "revoked") {
+      patch.deactivatedAt = new Date();
+    } else {
+      patch.deactivatedAt = null;
+    }
+
+    if (userId !== undefined) {
+      patch.userId = userId;
+    }
+
+    await db.update(wristband).set(patch).where(eq(wristband.id, id));
+
+    // 監査ログ
+    const auth = c.get("auth");
+    const session = await auth.api.getSession({ headers: c.req.raw.headers });
+    if (session && session.user) {
+      await audit(c, {
+        actorEmail: session.user.email,
+        action: "impersonated_write",
+        summary: `Updated wristband ${id} status to ${status} and userId to ${userId || "unchanged"}`,
+      });
+    }
 
     return c.json({ success: true });
   }
@@ -356,16 +447,17 @@ wristbandRoutes.post(
   ),
   async (c) => {
     const db = c.get("db");
-    const auth = c.get("auth");
-    const session = await auth.api.getSession({ headers: c.req.raw.headers });
-    if (!session || !session.user) {
-      apiError("UNAUTHORIZED", "認証されていません");
-    }
     const { eventId, wristbandId } = c.req.valid("json");
-
+ 
     const events = await db.select().from(event).where(eq(event.id, eventId));
     if (events.length === 0) {
       apiError("NOT_FOUND", "イベントが見つかりません");
+    }
+
+    const auth = c.get("auth");
+    const session = await auth.api.getSession({ headers: c.req.raw.headers });
+    if (events[0]!.hasPhysicalWristband && (!session || !session.user)) {
+      apiError("UNAUTHORIZED", "認証されていません");
     }
 
     const userId = `usr_${nanoid(12)}`;
@@ -384,6 +476,15 @@ wristbandRoutes.post(
         status: "active",
         assignedAt: new Date(),
       });
+    } else {
+      if (!events[0]!.hasPhysicalWristband) {
+        await db.insert(wristband).values({
+          id: `sp_${userId}`,
+          userId,
+          status: "smartphone",
+          assignedAt: new Date(),
+        });
+      }
     }
 
     return c.json({ userId, displayId, wristbandId: wristbandId ?? null });
