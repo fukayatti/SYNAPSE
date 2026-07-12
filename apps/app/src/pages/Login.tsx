@@ -38,9 +38,11 @@ export default function Login() {
 		autoResolvedRef.current = true;
 		resolveActiveSpaceAfterAuth(session.user.email)
 			.then((resolved) => {
-				// 所属ゼロ (kind: "none") のときは自動遷移せず、案内画面を出す
 				if (resolved.kind !== "none") {
 					navigate(resolved.path);
+				} else {
+					// 所属ゼロ → 行き止まりにせずオンボーディング(サークル作成)へ送る
+					navigate("/onboarding", { replace: true });
 				}
 			})
 			.catch(() => {
@@ -81,10 +83,9 @@ export default function Login() {
 							</div>
 						</>
 					) : (
-						<p className="font-mono text-[13px] text-center text-muted-foreground">
-							まだどのサークル/イベントにも所属していません。
-							サークルを新規作成するか、管理者から招待リンクを受け取ってください。
-						</p>
+						// 所属ゼロは上の useEffect が /onboarding へリダイレクトするため、
+						// ここは遷移待ちの一瞬だけ表示される。行き止まり文言は出さない。
+						<Loader />
 					)}
 					<div className="flex flex-col gap-2 pt-2">
 						<Button className="w-full" onClick={() => navigate("/")}>

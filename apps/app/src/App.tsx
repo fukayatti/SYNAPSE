@@ -32,6 +32,7 @@ import Branding from "@/pages/Branding";
 import VisitorHome from "@/pages/VisitorHome";
 import Entry from "@/pages/Entry";
 import Onboarding from "@/pages/Onboarding";
+import StaffOnboarding from "@/pages/StaffOnboarding";
 import Menu from "@/pages/Menu";
 import MyPage from "@/pages/MyPage";
 import Orders from "@/pages/Orders";
@@ -112,6 +113,9 @@ export default function App() {
 					
 					{/* 統合ログイン */}
 					<Route path="/login" element={<Login />} />
+
+					{/* スタッフ用オンボーディング (所属ゼロの新規アカウントがサークルをセルフ作成) */}
+					<Route path="/onboarding" element={<StaffOnboarding />} />
 
 					<Route
 						path="/sys/dashboard"

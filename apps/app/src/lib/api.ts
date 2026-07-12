@@ -79,6 +79,9 @@ async function fetchApi<T>(
 // エンドポイントを /api/events から /api/festivals に変更。
 export const eventApi = {
   list: () => fetchApi<Event[]>("/api/festivals"),
+  // オンボーディングでサークルをセルフ作成する新規ユーザー向けに、参加可能な
+  // (論理削除されていない) イベントを最小情報で返す。list は所属イベントしか返さないため別立て。
+  joinable: () => fetchApi<JoinableEvent[]>("/api/festivals/joinable"),
   get: (id: string) => fetchApi<Event>(`/api/festivals/${id}`),
   create: (data: CreateEventInput) =>
     fetchApi<{ id: string }>("/api/festivals", { method: "POST", body: data }),
@@ -372,6 +375,15 @@ export interface Event extends EventTheme {
   description: string | null;
   startDate: Date | null;
   endDate: Date | null;
+}
+
+// オンボーディングのイベント選択で使う最小情報 (GET /api/festivals/joinable)
+export interface JoinableEvent {
+  id: string;
+  eventName: string;
+  description: string | null;
+  startDate: string | null;
+  endDate: string | null;
 }
 
 
