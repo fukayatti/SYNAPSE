@@ -1,9 +1,8 @@
-import { useState } from "react";
+import { useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import SignInForm from "@/components/sign-in-form";
-import SignUpForm from "@/components/sign-up-form";
 import { authClient } from "@/lib/auth-client";
-import { useMySpaces, getAuthInfo } from "@/hooks/useCircleAuth";
+import { useMySpaces, getAuthInfo, resolveActiveSpaceAfterAuth } from "@/hooks/useCircleAuth";
 import { roleLabel } from "@/lib/roles";
 import { Button } from "@/components/ui/button";
 import Loader from "@/components/loader";
@@ -11,10 +10,10 @@ import Loader from "@/components/loader";
 // Next.js app/login/page.tsx から移植 (2026-07-04)。
 // Next の useSearchParams 用 Suspense 境界は不要なので除去。
 // 2026-07-07 (Phase 3b): 独自PIN認証タブ (CircleLoginOnlyForm) を撤去し、
-// better-auth ログイン (メール/パスワード + パスキー + Google) 一本にする。
-// サインイン/サインアップの2択だけになったため Tabs UI 自体も不要。
+// better-auth ログイン一本にした。
+// 2026-07-12: メール/パスワードのログイン・サインアップを廃止し、Google + パスキーのみに。
+// アカウント作成は Google 初回ログインが担うため、サインアップ画面(SignUpForm)も撤去した。
 export default function Login() {
-	const [showSignUp, setShowSignUp] = useState(false);
 	const navigate = useNavigate();
 
 	// better-auth のセッションは有効だが、ローカルのアクティブスペース
@@ -27,9 +26,27 @@ export default function Login() {
 	const hasActiveSpace = !!(authInfo?.circleId || authInfo?.isEventAdmin || authInfo?.role);
 	const { data: spaces, isLoading: spacesLoading } = useMySpaces();
 
-	if (showSignUp) {
-		return <SignUpForm onSwitchToSignIn={() => setShowSignUp(false)} />;
-	}
+	// Google ログインは OAuth リダイレクト方式のため、フォーム内の onSuccess で
+	// スペース解決ができない。リダイレクト後この画面に着地するので、ここで一度だけ
+	// 所属解決を試み、スタッフスペース(システム/イベント/サークル)が見つかれば
+	// そこへ自動遷移する。見つからなければ下のスペース選択案内にフォールバックする。
+	// (メール/パスキーは各フォームで解決済みなので、この経路に来るのは主に Google 着地時)
+	const autoResolvedRef = useRef(false);
+	useEffect(() => {
+		if (autoResolvedRef.current) return;
+		if (!session?.user?.email || hasActiveSpace) return;
+		autoResolvedRef.current = true;
+		resolveActiveSpaceAfterAuth(session.user.email)
+			.then((resolved) => {
+				// 所属ゼロ (kind: "none") のときは自動遷移せず、案内画面を出す
+				if (resolved.kind !== "none") {
+					navigate(resolved.path);
+				}
+			})
+			.catch(() => {
+				// 解決に失敗しても致命的でない: 下のスペース選択案内にフォールバック
+			});
+	}, [session?.user?.email, hasActiveSpace, navigate]);
 
 	if (sessionPending) {
 		return <Loader />;
@@ -95,7 +112,7 @@ export default function Login() {
 	return (
 		<div className="flex min-h-[calc(100vh-4rem)] items-center justify-center p-sp-3 md:p-sp-5 bg-muted">
 			<div className="w-full max-w-lg p-sp-5 bg-background border-heavy border-border text-foreground">
-				<SignInForm onSwitchToSignUp={() => setShowSignUp(true)} />
+				<SignInForm />
 			</div>
 		</div>
 	);
