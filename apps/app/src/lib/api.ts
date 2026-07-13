@@ -85,6 +85,9 @@ export const eventApi = {
   // 日次締め (指定日 JST の売上を支払い方法別/サークル別に集計)。event_manager sales:read。
   dailyClose: (id: string, date?: string) =>
     fetchApi<DailyClose>(`/api/festivals/${id}/daily-close${date ? `?date=${date}` : ""}`),
+  // 抽選機能の有効化トグル (event_manager event:write 権限)。
+  setLotteryEnabled: (id: string, enabled: boolean) =>
+    fetchApi<{ success: boolean }>(`/api/festivals/${id}/lottery-enabled`, { method: "PUT", body: { enabled } }),
   // 支払い方法の設定 (event_manager event:write 権限)。
   setPaymentMethods: (id: string, paymentMethods: string[]) =>
     fetchApi<{ success: boolean; paymentMethods: string[] }>(`/api/festivals/${id}/payment-methods`, {
@@ -399,6 +402,8 @@ export interface Event extends EventTheme {
   hasPhysicalWristband: boolean;
   // 利用可能な支払い方法 (JSON 文字列配列)。parseEventPaymentMethods でパースする。
   paymentMethods?: string;
+  // 抽選機能(イベント単位)の有効化フラグ (2026-07-12)。
+  lotteryEnabled?: boolean;
   startDate: Date | null;
   endDate: Date | null;
 }
@@ -501,8 +506,6 @@ export interface CircleSettings {
   extensions: {
     stock: boolean;
     staff: boolean;
-    // 抽選 (2026-07-12): 拡張機能。ONにしないと抽選機能を使えない。
-    lottery: boolean;
   };
   // このサークルが対応する支払い方法 (2026-07-12)。イベントの paymentMethods の部分集合。
   // 空=イベントの全方法に対応とみなす。1つだけならレジで選択させず自動採用する。
@@ -513,7 +516,7 @@ export interface CircleSettings {
 export function parseCircleSettings(raw?: string | null): CircleSettings {
   const defaults: CircleSettings = {
     orderFlowMode: "pending",
-    extensions: { stock: false, staff: false, lottery: false },
+    extensions: { stock: false, staff: false },
     acceptedPayments: [],
   };
   if (!raw) return defaults;
@@ -528,7 +531,6 @@ export function parseCircleSettings(raw?: string | null): CircleSettings {
       extensions: {
         stock: parsed?.extensions?.stock === true,
         staff: parsed?.extensions?.staff === true,
-        lottery: parsed?.extensions?.lottery === true,
       },
       acceptedPayments: Array.isArray(parsed?.acceptedPayments)
         ? parsed.acceptedPayments.filter((x: unknown) => typeof x === "string")
@@ -1056,6 +1058,45 @@ export const adminApi = {
     fetchApi<ImpersonationStatus>("/api/admin/impersonate", { method: "POST", body: data }),
   impersonateStop: () => fetchApi<{ success: boolean }>("/api/admin/impersonate/stop", { method: "POST" }),
   listAudit: () => fetchApi<AuditEntry[]>("/api/admin/audit"),
+};
+
+// 抽選 (2026-07-12)
+export interface LotteryEntryConfig {
+  base: number;
+  perStamp: number;
+  perReview: number;
+}
+export interface LotteryData {
+  lottery: {
+    id: string;
+    eventId: string;
+    name: string;
+    drawAt: string | null;
+    status: string;
+    entryConfig: LotteryEntryConfig;
+  } | null;
+  prizes?: { id: string; name: string; quantity: number }[];
+  entryCount?: number;
+  winners?: { id: string; prizeId: string; prizeName: string; eventUserId: string; userLabel: string; claimedAt: string | null }[];
+}
+
+export const lotteryApi = {
+  get: (eventId: string) => fetchApi<LotteryData>(`/api/lottery?eventId=${eventId}`),
+  upsert: (data: { eventId: string; name: string; drawAt?: string; entryConfig?: LotteryEntryConfig }) =>
+    fetchApi<{ id: string }>("/api/lottery", { method: "POST", body: data }),
+  addPrize: (id: string, data: { name: string; quantity: number }) =>
+    fetchApi<{ id: string }>(`/api/lottery/${id}/prizes`, { method: "POST", body: data }),
+  deletePrize: (id: string, prizeId: string) =>
+    fetchApi<{ success: boolean }>(`/api/lottery/${id}/prizes/${prizeId}`, { method: "DELETE" }),
+  draw: (id: string) => fetchApi<{ drawn: number }>(`/api/lottery/${id}/draw`, { method: "POST" }),
+  claim: (id: string, winnerId: string) =>
+    fetchApi<{ success: boolean }>(`/api/lottery/${id}/winners/${winnerId}/claim`, { method: "POST" }),
+  enter: (id: string, userId: string) =>
+    fetchApi<{ entered: boolean }>(`/api/lottery/${id}/enter`, { method: "POST", body: { userId } }),
+  result: (id: string, userId: string) =>
+    fetchApi<{ status: string; entered: boolean; wins: { prizeName: string; claimedAt: string | null }[] }>(
+      `/api/lottery/${id}/result?userId=${userId}`
+    ),
 };
 
 export interface ImpersonationStatus {

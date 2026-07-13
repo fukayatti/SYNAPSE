@@ -126,6 +126,9 @@ export const event = sqliteTable("event", {
   // 例: '["現金","PayPay","金券"]'。各サークルはこの中から対応する方法を選ぶ。
   // 2026-07-12: レジで支払い方法を選択して注文するフローの基盤。
   paymentMethods: text("payment_methods").default('["現金"]').notNull(),
+  // lotteryEnabled: 抽選機能(イベント単位)の有効化フラグ。拡張機能=ONにしないと使えない。
+  // 2026-07-12。実際の抽選設定・景品・応募・当選は lottery テーブル群。
+  lotteryEnabled: integer("lottery_enabled", { mode: "boolean" }).default(false).notNull(),
   // ownerEmail: 作成者=主たる event_manager。課金・連絡の主体。
   ownerEmail: text("owner_email"),
   // Stripe 連携用 (将来フェーズ。現状は未使用の予約カラム)。

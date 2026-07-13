@@ -65,6 +65,7 @@ import {
   wristbandRoutes,
   preOrderRoutes,
   accountRoutes,
+  lotteryRoutes,
   systemRoutes,
   adminRoutes,
 } from "./routes";
@@ -214,6 +215,7 @@ app.route("/api/stamps", stampRoutes);
 app.route("/api/wristbands", wristbandRoutes);
 app.route("/api/pre-orders", preOrderRoutes);
 app.route("/api/account", accountRoutes);
+app.route("/api/lottery", lotteryRoutes);
 app.route("/api/system", systemRoutes);
 app.route("/api/admin", adminRoutes);
 

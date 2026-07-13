@@ -5,7 +5,8 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Settings, Save, Upload, Loader2, Palette, CreditCard, Plus, X } from "lucide-react";
+import { Settings, Save, Upload, Loader2, Palette, CreditCard, Plus, X, Ticket } from "lucide-react";
+import { ToggleSwitch } from "@/components/ui/ToggleSwitch";
 import { toast } from "sonner";
 
 interface SettingsTabProps {
@@ -53,6 +54,20 @@ export function SettingsTab({ eventId, event }: SettingsTabProps) {
     setPayments((p) => [...p, v]);
     setNewPayment("");
   };
+
+  // 抽選機能(拡張)の有効化トグル (2026-07-12)。event.lotteryEnabled を更新する。
+  const [lotteryEnabled, setLotteryEnabled] = useState(false);
+  useEffect(() => {
+    if (event) setLotteryEnabled(!!event.lotteryEnabled);
+  }, [event]);
+  const saveLottery = useMutation({
+    mutationFn: (enabled: boolean) => eventApi.setLotteryEnabled(eventId, enabled),
+    onSuccess: () => {
+      toast.success("抽選機能の設定を保存しました");
+      queryClient.invalidateQueries({ queryKey: ["event", eventId] });
+    },
+    onError: (e: any) => toast.error(e?.message || "保存に失敗しました"),
+  });
 
   const [form, setForm] = useState({
     eventName: "",
@@ -194,6 +209,29 @@ export function SettingsTab({ eventId, event }: SettingsTabProps) {
             <Button onClick={() => savePayments.mutate()} disabled={savePayments.isPending}>
               <Save className="h-4 w-4 mr-1.5" /> {savePayments.isPending ? "保存中..." : "支払い方法を保存"}
             </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* 抽選 (拡張機能) */}
+      <Card className="rounded-none bg-background shadow-none">
+        <CardContent className="pt-6">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-start gap-2 min-w-0">
+              <Ticket className="h-4 w-4 mt-0.5 shrink-0" />
+              <div className="min-w-0">
+                <h3 className="text-xs font-bold uppercase tracking-wider">抽選機能</h3>
+                <p className="font-mono text-[11px] text-muted-foreground leading-[1.6] mt-0.5">
+                  ONにすると「抽選」タブが有効になり、景品と口数(当選確率)を設定して抽選できます。
+                </p>
+              </div>
+            </div>
+            <ToggleSwitch
+              checked={lotteryEnabled}
+              onChange={(v) => { setLotteryEnabled(v); saveLottery.mutate(v); }}
+              disabled={saveLottery.isPending}
+              label="抽選機能"
+            />
           </div>
         </CardContent>
       </Card>

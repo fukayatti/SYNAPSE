@@ -27,7 +27,7 @@ import { OptionCard } from "@/components/ui/OptionCard";
 import { ToggleSwitch } from "@/components/ui/ToggleSwitch";
 import { ExtensionsManager } from "@/components/circle/ExtensionsManager";
 import { toast } from "sonner";
-import { Save, Package, UserCheck, Ticket, CreditCard, Crown, Clock, ChefHat, CheckCircle2 } from "lucide-react";
+import { Save, Package, UserCheck, CreditCard, Crown, Clock, ChefHat, CheckCircle2 } from "lucide-react";
 
 // 注文モードの選択肢
 const ORDER_FLOW_OPTIONS: {
@@ -68,7 +68,6 @@ function CircleSettingsContent() {
   const [orderFlowMode, setOrderFlowMode] = useState<OrderFlowMode>("pending");
   const [stockEnabled, setStockEnabled] = useState(false);
   const [staffEnabled, setStaffEnabled] = useState(false);
-  const [lotteryEnabled, setLotteryEnabled] = useState(false);
   // 対応する支払い方法 (2026-07-12)。イベントの paymentMethods の部分集合。
   const [acceptedPayments, setAcceptedPayments] = useState<string[]>([]);
 
@@ -115,7 +114,6 @@ function CircleSettingsContent() {
       setOrderFlowMode(s.orderFlowMode);
       setStockEnabled(s.extensions.stock);
       setStaffEnabled(s.extensions.staff);
-      setLotteryEnabled(s.extensions.lottery);
       setAcceptedPayments(s.acceptedPayments);
     }
   }, [circle]);
@@ -145,7 +143,7 @@ function CircleSettingsContent() {
     mutationFn: async () =>
       circleApi.updateSettings(circleId, {
         orderFlowMode,
-        extensions: { stock: stockEnabled, staff: staffEnabled, lottery: lotteryEnabled },
+        extensions: { stock: stockEnabled, staff: staffEnabled },
         // イベントに存在する方法だけ残す (イベント側で削除された方法を掃除)
         acceptedPayments: acceptedPayments.filter((p) => eventPayments.includes(p)),
       }),
@@ -298,13 +296,6 @@ function CircleSettingsContent() {
               description="シフトとスタッフの管理"
               enabled={staffEnabled}
               onToggle={() => setStaffEnabled((v) => !v)}
-            />
-            <ExtensionToggle
-              icon={Ticket}
-              label="抽選"
-              description="スタンプ/レビューに応じた抽選 (ONで利用可能に)"
-              enabled={lotteryEnabled}
-              onToggle={() => setLotteryEnabled((v) => !v)}
             />
           </CardContent>
         </Card>

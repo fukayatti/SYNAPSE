@@ -15,6 +15,7 @@ import { InventoryTab } from "@/components/event/InventoryTab";
 import { AnnounceTab } from "@/components/event/AnnounceTab";
 import { SettlementTab } from "@/components/event/SettlementTab";
 import { DailyCloseTab } from "@/components/event/DailyCloseTab";
+import { LotteryTab } from "@/components/event/LotteryTab";
 import { SalesTab } from "@/components/event/SalesTab";
 import { StaffTab } from "@/components/event/StaffTab";
 import { SettingsTab } from "@/components/event/SettingsTab";
@@ -122,6 +123,7 @@ export default function EventDashboard() {
         type="event"
         activeTab={activeTab}
         onTabChange={setActiveTab}
+        lotteryEnabled={!!eventData?.lotteryEnabled}
       >
         <div className="space-y-6">
           {/* TAB: 統計・分析 */}
@@ -141,6 +143,9 @@ export default function EventDashboard() {
 
           {/* TAB: 日次締め */}
           {activeTab === "daily-close" && <DailyCloseTab eventId={eventId} eventName={eventName} />}
+
+          {/* TAB: 抽選 (event.lotteryEnabled のとき有効) */}
+          {activeTab === "lottery" && <LotteryTab eventId={eventId} />}
 
           {/* TAB 1: サークル管理 */}
           {activeTab === "circles" && (

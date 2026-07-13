@@ -24,6 +24,10 @@ export const lottery = sqliteTable(
     name: text("name").notNull(),
     drawAt: integer("draw_at", { mode: "timestamp_ms" }), // 当選発表時刻 (例 17:00)
     status: text("status").notNull().default("open"), // open / drawn / closed
+    // 口数(当選確率)の重み設定 (2026-07-12)。JSON: { base, perStamp, perReview }。
+    // 応募者の口数 = base + perStamp*スタンプ数 + perReview*レビュー数。
+    // 「様々なニーズ」に対応するため重みを主催者が調整できる。
+    entryConfig: text("entry_config").default('{"base":1,"perStamp":0,"perReview":0}').notNull(),
     createdAt: integer("created_at", { mode: "timestamp_ms" })
       .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
       .notNull(),

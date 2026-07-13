@@ -10,17 +10,16 @@ import {
 import { Modal } from "@/components/ui/Modal";
 import { ToggleSwitch } from "@/components/ui/ToggleSwitch";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Package, UserCheck, Ticket } from "lucide-react";
+import { Package, UserCheck } from "lucide-react";
 
 // 主催者(event_manager)によるサークル運営管理モーダル (2026-07-12 C-2)
 // - 各サークルの拡張機能(在庫/スタッフ/抽選)の ON/OFF を主催者側からも制御。
 // - サークルメンバーのロール調整(circle_manager / circle_staff)。
 // circle.settings は全体置換で保存されるため、既存値をパースして必要キーだけ差し替える。
 
-const EXTENSIONS: { key: "stock" | "staff" | "lottery"; label: string; desc: string; icon: any }[] = [
+const EXTENSIONS: { key: "stock" | "staff"; label: string; desc: string; icon: any }[] = [
   { key: "stock", label: "在庫管理", desc: "メニューの在庫数・売り切れ管理", icon: Package },
   { key: "staff", label: "スタッフ管理", desc: "シフト/スタッフ名簿", icon: UserCheck },
-  { key: "lottery", label: "抽選", desc: "スタンプ/レビューに応じた抽選", icon: Ticket },
 ];
 
 export function CircleManageModal({
@@ -40,8 +39,6 @@ export function CircleManageModal({
   const [ext, setExt] = useState<Record<string, boolean>>({
     stock: settings.extensions.stock,
     staff: settings.extensions.staff,
-    // lottery は既存 CircleSettings 型に無いキーもあり得るので settings 生値から復元
-    lottery: (settings.extensions as Record<string, boolean>).lottery ?? false,
   });
 
   const saveExt = useMutation({

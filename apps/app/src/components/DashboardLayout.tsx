@@ -25,6 +25,7 @@ import {
   Boxes,
   Calculator,
   CalendarCheck,
+  Ticket,
   ChevronDown,
   ChevronUp
 } from "lucide-react";
@@ -47,6 +48,8 @@ interface DashboardLayoutProps {
   // これを使うことで、各ページが children 内に独自の見出し行+ボタンを重ねて
   // 二重ヘッダーになるのを防ぎ、全ダッシュボード画面でボタン位置を統一する (2026-07-11)
   actions?: ReactNode;
+  // イベントの抽選機能が有効なとき「抽選」タブを出す (2026-07-12)
+  lotteryEnabled?: boolean;
 }
 
 export default function DashboardLayout({
@@ -56,7 +59,8 @@ export default function DashboardLayout({
   type,
   activeTab,
   onTabChange,
-  actions
+  actions,
+  lotteryEnabled,
 }: DashboardLayoutProps) {
   const location = useLocation();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -106,6 +110,7 @@ export default function DashboardLayout({
     { title: "全体売上管理", tab: "sales", icon: TrendingUp },
     { title: "精算", tab: "settlement", icon: Calculator },
     { title: "日次締め", tab: "daily-close", icon: CalendarCheck },
+    ...(lotteryEnabled ? [{ title: "抽選", tab: "lottery", icon: Ticket }] : []),
     { title: "スタッフ管理", tab: "staff", icon: Users },
     { title: "イベント設定", tab: "settings", icon: Settings },
     { title: "リストバンド紛失処理", tab: "wristbands", icon: Lock },
