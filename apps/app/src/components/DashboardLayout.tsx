@@ -23,6 +23,7 @@ import {
   BarChart3,
   MonitorCheck,
   Boxes,
+  Calculator,
   ChevronDown,
   ChevronUp
 } from "lucide-react";
@@ -102,6 +103,7 @@ export default function DashboardLayout({
     { title: "一斉アナウンス", tab: "announce", icon: Megaphone },
     { title: "サークル管理", tab: "circles", icon: Grid },
     { title: "全体売上管理", tab: "sales", icon: TrendingUp },
+    { title: "精算", tab: "settlement", icon: Calculator },
     { title: "スタッフ管理", tab: "staff", icon: Users },
     { title: "イベント設定", tab: "settings", icon: Settings },
     { title: "リストバンド紛失処理", tab: "wristbands", icon: Lock },
