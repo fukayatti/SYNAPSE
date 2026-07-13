@@ -14,7 +14,7 @@ import {
   menu,
   notification,
 } from "@fesflow/db";
-import { eq, and, inArray, isNull } from "drizzle-orm";
+import { eq, and, inArray, isNull, desc } from "drizzle-orm";
 import { ulid } from "ulidx";
 import { getAdminSession, getSession, hasPermission } from "../utils/auth";
 import type { AppEnv } from "../types";
@@ -329,6 +329,25 @@ eventRoutes.get("/:id/inventory", async (c) => {
       .map((m) => ({ ...m, circleName: circleName.get(m.circleId) || "" }))
       .sort((a, b) => a.circleName.localeCompare(b.circleName) || a.name.localeCompare(b.name))
   );
+});
+
+// 来場者一覧取得 (CSVエクスポート等のデータ用。2026-07-13)
+// member:read 権限（イベントスタッフ権限）が必要。
+eventRoutes.get("/:id/visitors", async (c) => {
+  const db = c.get("db");
+  const eventId = c.req.param("id");
+
+  if (!(await hasPermission(c, null, "member:read", eventId))) {
+    apiError("FORBIDDEN", "このイベントの来場者一覧を閲覧する権限がありません");
+  }
+
+  const visitors = await db
+    .select()
+    .from(eventUser)
+    .where(eq(eventUser.eventId, eventId))
+    .orderBy(desc(eventUser.createdAt));
+
+  return c.json(visitors);
 });
 
 // イベント統計・分析 (2026-07-12)

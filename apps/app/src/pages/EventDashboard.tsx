@@ -21,6 +21,7 @@ import { StaffTab } from "@/components/event/StaffTab";
 import { SettingsTab } from "@/components/event/SettingsTab";
 import { WristbandsTab } from "@/components/event/WristbandsTab";
 import { IssueTab } from "@/components/event/IssueTab";
+import { ExportTab } from "@/components/event/ExportTab";
 
 export default function EventDashboard() {
   const { eventId } = useAuth();
@@ -128,6 +129,9 @@ export default function EventDashboard() {
         <div className="space-y-6">
           {/* TAB: 統計・分析 */}
           {activeTab === "analytics" && <AnalyticsTab eventId={eventId} eventName={eventName} />}
+
+          {/* TAB: データエクスポート */}
+          {activeTab === "export" && <ExportTab eventId={eventId} />}
 
           {/* TAB: 注文モニタ */}
           {activeTab === "order-monitor" && <OrderMonitorTab eventId={eventId} />}

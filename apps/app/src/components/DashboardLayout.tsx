@@ -27,7 +27,8 @@ import {
   CalendarCheck,
   Ticket,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  Download
 } from "lucide-react";
 
 interface MenuItem {
@@ -88,6 +89,7 @@ export default function DashboardLayout({
     { title: "メニュー管理", href: "/circle/dashboard/menu", icon: UtensilsCrossed },
     { title: "売上管理", href: "/circle/dashboard/sales", icon: TrendingUp },
     { title: "統計・分析", href: "/circle/dashboard/analytics", icon: BarChart3 },
+    { title: "データエクスポート", href: "/circle/dashboard/export", icon: Download },
     { title: "サークル設定", href: "/circle/dashboard/circle", icon: Settings },
     { title: "メンバー管理", href: "/circle/dashboard/members", icon: Users },
     { title: "モバイルオーダーQR", href: "/circle/dashboard/qr", icon: QrCode },
@@ -104,6 +106,7 @@ export default function DashboardLayout({
   // イベント管理のメニュー項目 (タブ切り替え)
   const eventMenuItems: MenuItem[] = [
     { title: "統計・分析", tab: "analytics", icon: BarChart3 },
+    { title: "データエクスポート", tab: "export", icon: Download },
     { title: "注文モニタ", tab: "order-monitor", icon: MonitorCheck },
     { title: "在庫・売り切れ", tab: "inventory", icon: Boxes },
     { title: "一斉アナウンス", tab: "announce", icon: Megaphone },

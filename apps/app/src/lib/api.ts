@@ -107,6 +107,8 @@ export const eventApi = {
     fetchApi<Event>(`/api/festivals/${id}/theme`, { method: "PUT", body: data }),
   delete: (id: string) =>
     fetchApi<{ success: boolean }>(`/api/festivals/${id}`, { method: "DELETE" }),
+  // 来場者一覧取得 (CSVエクスポート等) - member:read。
+  visitors: (id: string) => fetchApi<EventUser[]>(`/api/festivals/${id}/visitors`),
   // 2026-07-07 (Phase 3a/3b): 独自のイベントパスワードログイン (POST /login) は
   // バックエンドで廃止済み。認証は better-auth に一本化。
 };
@@ -617,6 +619,8 @@ export interface Order {
   estimatedMinutes: number | null;
   createdAt: Date | null;
   completedAt: Date | null;
+  peopleCount: number;
+  paymentMethod: string | null;
 }
 
 export interface OrderItemTopping {
@@ -855,6 +859,18 @@ export interface InviteLookupResult {
   token: string;
   valid: boolean;
   reason: string | null;
+}
+
+// 来場ユーザー情報 (2026-07-13)
+export interface EventUser {
+  id: string;
+  eventId: string;
+  displayId: number;
+  status: string;
+  nickname?: string | null;
+  birthday?: string | null;
+  onboardedAt?: string | null;
+  createdAt: string;
 }
 
 // Wristband API

@@ -26,6 +26,7 @@ import DashboardSales from "@/pages/dashboard/Sales";
 import DashboardStaff from "@/pages/dashboard/Staff";
 import DashboardStock from "@/pages/dashboard/Stock";
 import DashboardAnalytics from "@/pages/dashboard/Analytics";
+import DashboardExport from "@/pages/dashboard/Export";
 import Placeholder from "@/pages/Placeholder";
 import { CircleAuthGuard, SystemAdminGuard, EventAdminGuard } from "@/hooks/useCircleAuth";
 
@@ -212,6 +213,14 @@ export default function App() {
 						element={
 							<CircleAuthGuard>
 								<DashboardAnalytics />
+							</CircleAuthGuard>
+						}
+					/>
+					<Route
+						path="/circle/dashboard/export"
+						element={
+							<CircleAuthGuard>
+								<DashboardExport />
 							</CircleAuthGuard>
 						}
 					/>

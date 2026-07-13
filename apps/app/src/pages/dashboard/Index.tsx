@@ -56,6 +56,12 @@ function DashboardContent() {
       permission: "sales:read" as const,
     },
     {
+      title: "データエクスポート",
+      description: "売上統計、注文履歴、登録商品などのCSVダウンロード",
+      href: "/circle/dashboard/export",
+      permission: "sales:read" as const,
+    },
+    {
       title: "サークル設定",
       description: "注文モード・拡張機能・サークル情報の編集",
       href: "/circle/dashboard/circle",
