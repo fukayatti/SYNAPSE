@@ -123,6 +123,30 @@ eventRoutes.get("/:id/orders/live", async (c) => {
   return c.json(rows);
 });
 
+// イベントの支払い方法設定 (2026-07-12)
+// event_manager が「このイベントで使える支払い方法」の一覧を設定する。
+// 各サークルはこの中から対応する方法を選ぶ (circle.settings.acceptedPayments)。
+eventRoutes.put(
+  "/:id/payment-methods",
+  zBody(z.object({ paymentMethods: z.array(z.string().min(1).max(30)).min(1).max(20) })),
+  async (c) => {
+    const db = c.get("db");
+    const eventId = c.req.param("id");
+    if (!(await hasPermission(c, null, "event:write", eventId))) {
+      apiError("FORBIDDEN", "支払い方法を設定する権限がありません");
+    }
+    const { paymentMethods } = c.req.valid("json");
+    // 重複除去 + トリム
+    const cleaned = Array.from(new Set(paymentMethods.map((m) => m.trim()).filter(Boolean)));
+    if (cleaned.length === 0) apiError("BAD_REQUEST", "支払い方法を1つ以上指定してください");
+    await db
+      .update(event)
+      .set({ paymentMethods: JSON.stringify(cleaned) })
+      .where(eq(event.id, eventId));
+    return c.json({ success: true, paymentMethods: cleaned });
+  }
+);
+
 // イベント内スタッフへの一斉アナウンス (2026-07-12)
 // イベント配下の全メンバー (イベントスタッフ + 全サークルのスタッフ) に通知を作成する。
 // スタッフは既存の通知センター(ヘッダーのベル)で受け取る。event_manager(member:write) 権限。
@@ -362,6 +386,19 @@ eventRoutes.get("/:id/analytics", async (c) => {
   const onboarded = visitors.filter((v) => v.onboardedAt).length;
   const uniqueVisitFrom = new Set(visits.map((v) => v.eventUserId)).size;
 
+  // 支払い方法別の集計 (2026-07-12)。未記録は「未設定」にまとめる。
+  const payAgg = new Map<string, { orders: number; revenue: number }>();
+  for (const o of liveOrders) {
+    const key = o.paymentMethod || "未設定";
+    const a = payAgg.get(key) || { orders: 0, revenue: 0 };
+    a.orders += 1;
+    a.revenue += o.totalPrice;
+    payAgg.set(key, a);
+  }
+  const paymentBreakdown = Array.from(payAgg.entries())
+    .map(([method, a]) => ({ method, ...a }))
+    .sort((a, b) => b.revenue - a.revenue);
+
   return c.json({
     totals: {
       visitors: visitors.length,
@@ -384,6 +421,7 @@ eventRoutes.get("/:id/analytics", async (c) => {
     circleRanking,
     menuRanking,
     ageBuckets,
+    paymentBreakdown,
   });
 });
 

@@ -231,6 +231,22 @@ export function AnalyticsTab({ eventId, eventName }: { eventId: string; eventNam
         </section>
 
         <section className="space-y-2">
+          <h3 className="font-mono text-[11px] uppercase tracking-widest text-muted-foreground">支払い方法別 売上</h3>
+          {a.paymentBreakdown.length === 0 ? (
+            <p className="font-mono text-[11px] text-muted-foreground">売上がありません。</p>
+          ) : (
+            <div className="space-y-1">
+              {a.paymentBreakdown.map((p) => (
+                <div key={p.method} className="flex items-center justify-between font-mono text-[11px] border-b border-border py-1">
+                  <span>{p.method}</span>
+                  <span className="tabular-nums shrink-0">{p.orders}件 / {yen(p.revenue)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+
+        <section className="space-y-2">
           <h3 className="font-mono text-[11px] uppercase tracking-widest text-muted-foreground">来場者の年齢層</h3>
           {a.ageBuckets.length === 0 ? (
             <p className="font-mono text-[11px] text-muted-foreground">誕生日データがまだありません。</p>

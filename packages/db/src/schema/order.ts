@@ -33,6 +33,9 @@ export const order = sqliteTable(
     completedAt: integer("completed_at", { mode: "timestamp_ms" }),
     estimatedTime: integer("estimated_time"), // 完成までの予想時間（分）
     cashierId: text("cashier_id"),
+    // 支払い方法 (2026-07-12): レジで選択された方法。集計・日次締めに使う。
+    // null=未記録 (支払い方法機能を使う前の注文 / 単一方法で省略された場合はサーバが補完)。
+    paymentMethod: text("payment_method"),
     createdAt: integer("created_at", { mode: "timestamp_ms" })
       .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
       .notNull(),

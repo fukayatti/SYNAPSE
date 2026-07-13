@@ -217,6 +217,9 @@ orderRoutes.post(
       cashierId: z.string().optional(),
       userId: z.string(), // ゲストID (2026-07-04: リストバンド/QR必須化のため必須化)
       peopleCount: z.number().min(1).default(1),
+      // 支払い方法 (2026-07-12): レジで選択された方法。省略時はサークルの対応方法が
+      // 1つならサーバが補完する (単一方法はレジで選択させないため)。
+      paymentMethod: z.string().max(30).optional(),
       items: z.array(
         z.object({
           menuId: z.string(),
@@ -430,6 +433,21 @@ orderRoutes.post(
       // 完全な補償(SAGA等)は複雑になるため今回はスコープ外とし、以下では order insert 以降を
       // try/catch で囲み、失敗時に減算済み在庫を戻すベストエフォートの補償のみ行う。
       // (在庫減算そのものの失敗は上のガード付きUPDATEで既に処理済みなのでここでは対象外)
+      // 支払い方法の解決 (2026-07-12): 明示指定を優先し、無ければサークルの対応方法が
+      // ちょうど1つのときだけそれを補完する (単一方法はレジで選択させないため)。
+      let resolvedPayment: string | undefined = input.paymentMethod?.trim() || undefined;
+      if (!resolvedPayment) {
+        try {
+          const parsed = JSON.parse(circles[0]!.settings || "{}");
+          const accepted: unknown = parsed?.acceptedPayments;
+          if (Array.isArray(accepted) && accepted.length === 1 && typeof accepted[0] === "string") {
+            resolvedPayment = accepted[0];
+          }
+        } catch {
+          /* settings が壊れていても注文は通す */
+        }
+      }
+
       try {
         // 注文を作成 (注文モードに応じて初期ステータスを決定)
         const isDirectComplete = orderFlowMode === "completed";
@@ -442,6 +460,7 @@ orderRoutes.post(
           peopleCount: input.peopleCount,
           status: orderFlowMode,
           totalPrice,
+          paymentMethod: resolvedPayment,
           completed: isDirectComplete,
           completedAt: isDirectComplete ? new Date() : undefined,
         });

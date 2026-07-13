@@ -1,11 +1,11 @@
 import { useState, useEffect } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { eventApi, uploadImage } from "@/lib/api";
+import { eventApi, uploadImage, parseEventPaymentMethods } from "@/lib/api";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Settings, Save, Upload, Loader2, Palette } from "lucide-react";
+import { Settings, Save, Upload, Loader2, Palette, CreditCard, Plus, X } from "lucide-react";
 import { toast } from "sonner";
 
 interface SettingsTabProps {
@@ -32,6 +32,27 @@ const FONT_OPTIONS = [
 
 export function SettingsTab({ eventId, event }: SettingsTabProps) {
   const queryClient = useQueryClient();
+
+  // 支払い方法 (2026-07-12): テーマ保存とは独立して管理・保存する。
+  const [payments, setPayments] = useState<string[]>([]);
+  const [newPayment, setNewPayment] = useState("");
+  useEffect(() => {
+    if (event) setPayments(parseEventPaymentMethods(event.paymentMethods));
+  }, [event]);
+  const savePayments = useMutation({
+    mutationFn: () => eventApi.setPaymentMethods(eventId, payments),
+    onSuccess: () => {
+      toast.success("支払い方法を保存しました");
+      queryClient.invalidateQueries({ queryKey: ["event", eventId] });
+    },
+    onError: (e: any) => toast.error(e?.message || "保存に失敗しました"),
+  });
+  const addPayment = () => {
+    const v = newPayment.trim();
+    if (!v || payments.includes(v)) return;
+    setPayments((p) => [...p, v]);
+    setNewPayment("");
+  };
 
   const [form, setForm] = useState({
     eventName: "",
@@ -128,6 +149,54 @@ export function SettingsTab({ eventId, event }: SettingsTabProps) {
           イベント基本設定・テーマ
         </h2>
       </div>
+
+      {/* 支払い方法 (2026-07-12) */}
+      <Card className="rounded-none bg-background shadow-none">
+        <CardContent className="pt-6 space-y-3">
+          <div className="flex items-center gap-2 border-b-thin border-border pb-2">
+            <CreditCard className="h-4 w-4" />
+            <h3 className="text-xs font-bold uppercase tracking-wider">支払い方法</h3>
+          </div>
+          <p className="font-mono text-[11px] text-muted-foreground leading-[1.6]">
+            イベントで使える支払い方法を登録します。各サークルはこの中から対応する方法を選び、
+            レジで選択して注文します(1つだけ対応のサークルは選択を省略)。
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {payments.map((p) => (
+              <span key={p} className="flex items-center gap-1 border-thick border-border px-2 py-1 font-mono text-[12px]">
+                {p}
+                <button
+                  type="button"
+                  onClick={() => setPayments((prev) => prev.filter((x) => x !== p))}
+                  disabled={payments.length <= 1}
+                  className="text-muted-foreground hover:text-error disabled:opacity-30"
+                  title={payments.length <= 1 ? "最低1つ必要です" : "削除"}
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </span>
+            ))}
+          </div>
+          <div className="flex gap-2">
+            <Input
+              value={newPayment}
+              onChange={(e) => setNewPayment(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addPayment())}
+              placeholder="例: PayPay / 金券"
+              maxLength={30}
+              className="max-w-xs"
+            />
+            <Button type="button" variant="outline" onClick={addPayment}>
+              <Plus className="h-4 w-4 mr-1" /> 追加
+            </Button>
+          </div>
+          <div className="flex justify-end">
+            <Button onClick={() => savePayments.mutate()} disabled={savePayments.isPending}>
+              <Save className="h-4 w-4 mr-1.5" /> {savePayments.isPending ? "保存中..." : "支払い方法を保存"}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* 基本情報 + ロゴ */}
       <Card className="rounded-none bg-background shadow-none">

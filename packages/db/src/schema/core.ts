@@ -122,6 +122,10 @@ export const event = sqliteTable("event", {
   // maxCircles: このイベント配下に作成できるサークル数の上限。無料枠=1。
   // プラン変更 (手動 or 将来 Stripe webhook) でここを書き換える。
   maxCircles: integer("max_circles").default(1).notNull(),
+  // paymentMethods: イベントで利用可能な支払い方法の一覧 (JSON 文字列配列)。
+  // 例: '["現金","PayPay","金券"]'。各サークルはこの中から対応する方法を選ぶ。
+  // 2026-07-12: レジで支払い方法を選択して注文するフローの基盤。
+  paymentMethods: text("payment_methods").default('["現金"]').notNull(),
   // ownerEmail: 作成者=主たる event_manager。課金・連絡の主体。
   ownerEmail: text("owner_email"),
   // Stripe 連携用 (将来フェーズ。現状は未使用の予約カラム)。

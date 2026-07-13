@@ -82,6 +82,12 @@ export const eventApi = {
   get: (id: string) => fetchApi<Event>(`/api/festivals/${id}`),
   // イベント統計・分析 (2026-07-12)。event_manager (sales:read) 権限が必要。
   analytics: (id: string) => fetchApi<EventAnalytics>(`/api/festivals/${id}/analytics`),
+  // 支払い方法の設定 (event_manager event:write 権限)。
+  setPaymentMethods: (id: string, paymentMethods: string[]) =>
+    fetchApi<{ success: boolean; paymentMethods: string[] }>(`/api/festivals/${id}/payment-methods`, {
+      method: "PUT",
+      body: { paymentMethods },
+    }),
   // 進行中注文モニタ (全サークル横断)。event_manager (order:read) 権限が必要。
   liveOrders: (id: string) => fetchApi<LiveOrder[]>(`/api/festivals/${id}/orders/live`),
   // 在庫/売り切れ一覧 (全サークル横断)。event_manager (stock:read) 権限が必要。
@@ -388,8 +394,22 @@ export interface Event extends EventTheme {
   eventName: string;
   description: string | null;
   hasPhysicalWristband: boolean;
+  // 利用可能な支払い方法 (JSON 文字列配列)。parseEventPaymentMethods でパースする。
+  paymentMethods?: string;
   startDate: Date | null;
   endDate: Date | null;
+}
+
+// event.paymentMethods (JSON文字列) を配列にパースする。既定は ["現金"]。
+export function parseEventPaymentMethods(raw?: string | null): string[] {
+  if (!raw) return ["現金"];
+  try {
+    const arr = JSON.parse(raw);
+    if (Array.isArray(arr) && arr.every((x) => typeof x === "string") && arr.length > 0) return arr;
+  } catch {
+    /* fall through */
+  }
+  return ["現金"];
 }
 
 // イベント統計 (GET /api/festivals/:id/analytics) のレスポンス
@@ -420,6 +440,7 @@ export interface EventAnalytics {
   }[];
   menuRanking: { menuName: string; quantity: number; revenue: number }[];
   ageBuckets: { label: string; count: number }[];
+  paymentBreakdown: { method: string; orders: number; revenue: number }[];
 }
 
 // 進行中注文モニタの1件 (GET /api/festivals/:id/orders/live)
@@ -472,6 +493,9 @@ export interface CircleSettings {
     // 抽選 (2026-07-12): 拡張機能。ONにしないと抽選機能を使えない。
     lottery: boolean;
   };
+  // このサークルが対応する支払い方法 (2026-07-12)。イベントの paymentMethods の部分集合。
+  // 空=イベントの全方法に対応とみなす。1つだけならレジで選択させず自動採用する。
+  acceptedPayments: string[];
 }
 
 // settings JSON をパースし、未設定キーを既定値で補完する
@@ -479,6 +503,7 @@ export function parseCircleSettings(raw?: string | null): CircleSettings {
   const defaults: CircleSettings = {
     orderFlowMode: "pending",
     extensions: { stock: false, staff: false, lottery: false },
+    acceptedPayments: [],
   };
   if (!raw) return defaults;
   try {
@@ -494,6 +519,9 @@ export function parseCircleSettings(raw?: string | null): CircleSettings {
         staff: parsed?.extensions?.staff === true,
         lottery: parsed?.extensions?.lottery === true,
       },
+      acceptedPayments: Array.isArray(parsed?.acceptedPayments)
+        ? parsed.acceptedPayments.filter((x: unknown) => typeof x === "string")
+        : [],
     };
   } catch {
     return defaults;

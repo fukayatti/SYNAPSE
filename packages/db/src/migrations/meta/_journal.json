@@ -43,6 +43,13 @@
       "when": 1783851737000,
       "tag": "0005_absent_the_watchers",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1783905352763,
+      "tag": "0006_dizzy_the_liberteens",
+      "breakpoints": true
     }
   ]
 }
