@@ -466,12 +466,12 @@ eventRoutes.get("/:id/analytics", async (c) => {
     .sort((a, b) => b.quantity - a.quantity)
     .slice(0, 20);
 
-  // 来場者の年齢層 (birthday がある人のみ)
+  // 来場者の年齢層 (favoriteDate がある人のみ)
   const nowYear = new Date().getUTCFullYear();
   const ageBucketsMap = new Map<string, number>();
   for (const v of visitors) {
-    if (!v.birthday) continue;
-    const y = Number(v.birthday.slice(0, 4));
+    if (!v.favoriteDate) continue;
+    const y = Number(v.favoriteDate.slice(0, 4));
     if (!y || Number.isNaN(y)) continue;
     const age = nowYear - y;
     const label = age < 10 ? "〜9歳" : age < 20 ? "10代" : age < 30 ? "20代" : age < 40 ? "30代" : age < 50 ? "40代" : "50代〜";

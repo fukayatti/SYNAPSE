@@ -39,7 +39,7 @@ wristbandRoutes.get(
 
       const orConditions = [
         like(eventUser.nickname, `%${query}%`),
-        like(eventUser.birthday, `%${query}%`),
+        like(eventUser.favoriteDate, `%${query}%`),
       ];
 
       if (isNum) {
@@ -391,13 +391,13 @@ wristbandRoutes.patch(
   }
 );
 
-// 来場者ユーザー情報更新 (ニックネーム、誕生日、呼出ID、ステータス) - 2026-07-13 追加
+// 来場者ユーザー情報更新 (ニックネーム、お好きな日付、呼出ID、ステータス) - 2026-07-13 追加
 wristbandRoutes.patch(
   "/user/:userId",
   zBody(
     z.object({
       nickname: z.string().trim().min(1).max(30).nullable().optional(),
-      birthday: z.string().nullable().optional(),
+      favoriteDate: z.string().nullable().optional(),
       displayId: z.number().int().positive().optional(),
       status: z.enum(["available", "banned"]).optional(),
     })
@@ -420,11 +420,11 @@ wristbandRoutes.patch(
 
     const patch: Record<string, any> = {};
     if (body.nickname !== undefined) patch.nickname = body.nickname;
-    if (body.birthday !== undefined) {
-      if (body.birthday && !/^\d{4}-\d{2}-\d{2}$/.test(body.birthday)) {
-        apiError("BAD_REQUEST", "生年月日は YYYY-MM-DD 形式で入力してください");
+    if (body.favoriteDate !== undefined) {
+      if (body.favoriteDate && !/^\d{4}-\d{2}-\d{2}$/.test(body.favoriteDate)) {
+        apiError("BAD_REQUEST", "日付は YYYY-MM-DD 形式で入力してください");
       }
-      patch.birthday = body.birthday || null;
+      patch.favoriteDate = body.favoriteDate || null;
     }
     if (body.displayId !== undefined) {
       // 重複チェック
@@ -470,12 +470,12 @@ wristbandRoutes.post(
     z.object({
       userId: z.string().min(1),
       nickname: z.string().trim().min(1).max(30),
-      birthday: z.string().optional(), // YYYY-MM-DD
+      favoriteDate: z.string().optional(), // YYYY-MM-DD
     })
   ),
   async (c) => {
     const db = c.get("db");
-    const { userId, nickname, birthday } = c.req.valid("json");
+    const { userId, nickname, favoriteDate } = c.req.valid("json");
 
     const users = await db.select().from(eventUser).where(eq(eventUser.id, userId));
     if (users.length === 0) {
@@ -494,7 +494,7 @@ wristbandRoutes.post(
       .update(eventUser)
       .set({
         nickname,
-        birthday: birthday || null,
+        favoriteDate: favoriteDate || null,
         // 初回のみ確定させる (再編集で入場日時が動かないように)
         onboardedAt: new Date(),
       })
@@ -506,7 +506,7 @@ wristbandRoutes.post(
       eventId: updated.eventId,
       displayId: updated.displayId,
       nickname: updated.nickname,
-      birthday: updated.birthday,
+      favoriteDate: updated.favoriteDate,
       onboardedAt: updated.onboardedAt,
     });
   }
