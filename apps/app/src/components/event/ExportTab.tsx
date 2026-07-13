@@ -154,13 +154,13 @@ export function ExportTab({ eventId }: { eventId: string }) {
     startDownload(key);
     try {
       const visitors = await eventApi.visitors(eventId);
-      const headers = ["ユーザーID", "呼出ID", "状態", "ニックネーム", "誕生日", "オンボード日時", "登録日時"];
+      const headers = ["ユーザーID", "呼出ID", "状態", "ニックネーム", "お好きな日付", "オンボード日時", "登録日時"];
       const rows = visitors.map((v) => [
         v.id,
         v.displayId,
         v.status,
         v.nickname || "",
-        v.birthday || "",
+        v.favoriteDate || "",
         v.onboardedAt ? new Date(v.onboardedAt).toLocaleString("ja-JP") : "未入力",
         v.createdAt ? new Date(v.createdAt).toLocaleString("ja-JP") : "",
       ]);
@@ -223,7 +223,7 @@ export function ExportTab({ eventId }: { eventId: string }) {
     {
       key: "visitors",
       title: "来場者一覧",
-      description: "リストバンドを登録したすべての来場者の情報（呼出ID、ニックネーム、誕生日、オンボード時刻）です。",
+      description: "リストバンドを登録したすべての来場者の情報（呼出ID、ニックネーム、お好きな日付、オンボード時刻）です。",
       icon: Users,
       action: exportVisitors,
     },

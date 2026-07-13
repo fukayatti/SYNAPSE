@@ -52,7 +52,7 @@ export function WristbandsTab({ eventId }: WristbandsTabProps) {
   // 詳細編集モーダル用の状態
   const [selectedUser, setSelectedUser] = useState<any | null>(null);
   const [editNickname, setEditNickname] = useState("");
-  const [editBirthday, setEditBirthday] = useState("");
+  const [editFavoriteDate, setEditFavoriteDate] = useState("");
   const [editDisplayId, setEditDisplayId] = useState<number | "">("");
   const [editUserStatus, setEditUserStatus] = useState("available");
   const [reissueWristbandId, setReissueWristbandId] = useState("");
@@ -70,12 +70,12 @@ export function WristbandsTab({ eventId }: WristbandsTabProps) {
   useEffect(() => {
     if (selectedUser?.user) {
       setEditNickname(selectedUser.user.nickname || "");
-      setEditBirthday(selectedUser.user.birthday || "");
+      setEditFavoriteDate(selectedUser.user.favoriteDate || "");
       setEditDisplayId(selectedUser.user.displayId || "");
       setEditUserStatus(selectedUser.user.status || "available");
     } else {
       setEditNickname("");
-      setEditBirthday("");
+      setEditFavoriteDate("");
       setEditDisplayId("");
       setEditUserStatus("available");
     }
@@ -105,10 +105,10 @@ export function WristbandsTab({ eventId }: WristbandsTabProps) {
 
   // プロフィール更新 API
   const updateProfileMutation = useMutation({
-    mutationFn: (input: { userId: string; nickname: string | null; birthday: string | null; displayId: number; status: string }) =>
+    mutationFn: (input: { userId: string; nickname: string | null; favoriteDate: string | null; displayId: number; status: string }) =>
       wristbandApi.updateUser(input.userId, {
         nickname: input.nickname,
-        birthday: input.birthday,
+        favoriteDate: input.favoriteDate,
         displayId: input.displayId,
         status: input.status,
       }),
@@ -259,7 +259,7 @@ export function WristbandsTab({ eventId }: WristbandsTabProps) {
             <div className="relative flex-1">
               <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
               <Input
-                placeholder="ニックネーム、呼出ID（数字のみ）、または誕生日（YYYY-MM-DD）で検索..."
+                placeholder="ニックネーム、呼出ID（数字のみ）、またはお好きな日付（YYYY-MM-DD）で検索..."
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
                 className="pl-9 border-thick border-border rounded-none focus-visible:ring-0 h-10 text-xs bg-background font-mono w-full"
@@ -325,7 +325,7 @@ export function WristbandsTab({ eventId }: WristbandsTabProps) {
                   <tr className="border-b-thin border-border bg-muted/10 font-bold font-mono">
                     <th className="p-3">呼出ID</th>
                     <th className="p-3">ニックネーム</th>
-                    <th className="p-3">誕生日</th>
+                    <th className="p-3">お好きな日付</th>
                     <th className="p-3">アカウント状態</th>
                     <th className="p-3">紐付くバンドID</th>
                     <th className="p-3">バンド状態</th>
@@ -337,7 +337,7 @@ export function WristbandsTab({ eventId }: WristbandsTabProps) {
                     <tr key={res.user.id} className="border-b-thin border-border hover:bg-muted/5 font-mono">
                       <td className="p-3 font-bold">#{res.user.displayId}</td>
                       <td className="p-3">{res.user.nickname || <span className="text-muted-foreground text-[10px]">未登録</span>}</td>
-                      <td className="p-3">{res.user.birthday || <span className="text-muted-foreground text-[10px]">未登録</span>}</td>
+                      <td className="p-3">{res.user.favoriteDate || <span className="text-muted-foreground text-[10px]">未登録</span>}</td>
                       <td className="p-3">
                         <Badge
                           variant="default"
@@ -642,10 +642,10 @@ export function WristbandsTab({ eventId }: WristbandsTabProps) {
                   </div>
 
                   <div>
-                    <label className="block text-[10px] uppercase font-bold text-muted-foreground mb-1">誕生日 (YYYY-MM-DD)</label>
+                    <label className="block text-[10px] uppercase font-bold text-muted-foreground mb-1">お好きな日付 (YYYY-MM-DD)</label>
                     <Input
-                      value={editBirthday}
-                      onChange={(e) => setEditBirthday(e.target.value)}
+                      value={editFavoriteDate}
+                      onChange={(e) => setEditFavoriteDate(e.target.value)}
                       placeholder="例: 2000-01-01"
                       className="border-thick border-border rounded-none h-8 text-xs font-mono"
                     />
@@ -673,7 +673,7 @@ export function WristbandsTab({ eventId }: WristbandsTabProps) {
                     updateProfileMutation.mutate({
                       userId: selectedUser.user.id,
                       nickname: editNickname.trim() || null,
-                      birthday: editBirthday.trim() || null,
+                      favoriteDate: editFavoriteDate.trim() || null,
                       displayId: Number(editDisplayId),
                       status: editUserStatus,
                     });

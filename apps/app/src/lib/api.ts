@@ -868,7 +868,7 @@ export interface EventUser {
   displayId: number;
   status: string;
   nickname?: string | null;
-  birthday?: string | null;
+  favoriteDate?: string | null;
   onboardedAt?: string | null;
   createdAt: string;
 }
@@ -881,7 +881,7 @@ export interface WristbandLookupResult {
     displayId: number;
     status: string;
     nickname?: string | null;
-    birthday?: string | null;
+    favoriteDate?: string | null;
     onboardedAt?: string | null;
   };
   wristband: {
@@ -923,7 +923,7 @@ export const wristbandApi = {
       method: "PATCH",
       body: data,
     }),
-  updateUser: (userId: string, data: { nickname?: string | null; birthday?: string | null; displayId?: number; status?: string }) =>
+  updateUser: (userId: string, data: { nickname?: string | null; favoriteDate?: string | null; displayId?: number; status?: string }) =>
     fetchApi<{ success: boolean }>(`/api/wristbands/user/${encodeURIComponent(userId)}`, {
       method: "PATCH",
       body: data,
@@ -936,12 +936,12 @@ export interface VisitorProfile {
   eventId: string;
   displayId: number;
   nickname: string | null;
-  birthday: string | null;
+  favoriteDate: string | null;
   onboardedAt: string | null;
 }
 
 export const visitorApi = {
-  onboard: (data: { userId: string; nickname: string; birthday?: string }) =>
+  onboard: (data: { userId: string; nickname: string; favoriteDate?: string }) =>
     fetchApi<VisitorProfile>("/api/wristbands/onboard", {
       method: "POST",
       body: data,

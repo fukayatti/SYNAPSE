@@ -247,9 +247,9 @@ export function AnalyticsTab({ eventId, eventName }: { eventId: string; eventNam
         </section>
 
         <section className="space-y-2">
-          <h3 className="font-mono text-[11px] uppercase tracking-widest text-muted-foreground">来場者の年齢層</h3>
+          <h3 className="font-mono text-[11px] uppercase tracking-widest text-muted-foreground">登録日付の分布 (年齢層換算)</h3>
           {a.ageBuckets.length === 0 ? (
-            <p className="font-mono text-[11px] text-muted-foreground">誕生日データがまだありません。</p>
+            <p className="font-mono text-[11px] text-muted-foreground">日付データがまだありません。</p>
           ) : (
             <Bars
               rows={a.ageBuckets.map((b) => ({ label: b.label, value: b.count }))}
