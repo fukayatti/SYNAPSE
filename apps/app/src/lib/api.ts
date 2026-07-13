@@ -765,6 +765,8 @@ export interface CreateOrderInput {
     toppingIds?: string[];
   }[];
   notes?: string;
+  // 支払い方法 (2026-07-12)。省略時はサーバがサークルの単一対応方法を補完する。
+  paymentMethod?: string;
 }
 
 export interface CheckPermissionInput {
