@@ -123,6 +123,71 @@ eventRoutes.get("/:id/orders/live", async (c) => {
   return c.json(rows);
 });
 
+// 日次締め (2026-07-12)
+// 指定日(JST)の売上を、支払い方法別・サークル別に集計して返す。日々の精算・引き継ぎ用。
+// date 省略時は本日(JST)。event_manager(sales:read) 権限。
+eventRoutes.get("/:id/daily-close", async (c) => {
+  const db = c.get("db");
+  const eventId = c.req.param("id");
+  if (!(await hasPermission(c, null, "sales:read", eventId))) {
+    apiError("FORBIDDEN", "このイベントの売上を閲覧する権限がありません");
+  }
+
+  // 対象日の JST 0:00〜翌0:00 を UTC ミリ秒レンジに変換する。
+  const dateStr = c.req.query("date"); // YYYY-MM-DD
+  const base = dateStr ? new Date(`${dateStr}T00:00:00+09:00`) : new Date();
+  const jstMidnight = dateStr
+    ? base.getTime()
+    : // 本日: 現在時刻を JST 日付の 0:00 に丸める
+      new Date(new Date(base.getTime() + 9 * 3600 * 1000).toISOString().slice(0, 10) + "T00:00:00+09:00").getTime();
+  const dayStart = jstMidnight;
+  const dayEnd = dayStart + 24 * 3600 * 1000;
+  const resolvedDate = new Date(dayStart + 9 * 3600 * 1000).toISOString().slice(0, 10);
+
+  const circles = await db
+    .select({ id: circle.id, name: circle.name })
+    .from(circle)
+    .where(and(eq(circle.eventId, eventId), isNull(circle.deletedAt)));
+  const circleIds = circles.map((c2) => c2.id);
+  const circleName = new Map(circles.map((c2) => [c2.id, c2.name]));
+
+  const orders = circleIds.length
+    ? await db.select().from(order).where(inArray(order.circleId, circleIds))
+    : [];
+  const dayOrders = orders.filter(
+    (o) => o.status !== "cancelled" && o.createdAt.getTime() >= dayStart && o.createdAt.getTime() < dayEnd
+  );
+
+  const payAgg = new Map<string, { orders: number; revenue: number }>();
+  const circleAgg = new Map<string, { orders: number; revenue: number }>();
+  for (const o of dayOrders) {
+    const pk = o.paymentMethod || "未設定";
+    const pa = payAgg.get(pk) || { orders: 0, revenue: 0 };
+    pa.orders += 1;
+    pa.revenue += o.totalPrice;
+    payAgg.set(pk, pa);
+    const ca = circleAgg.get(o.circleId) || { orders: 0, revenue: 0 };
+    ca.orders += 1;
+    ca.revenue += o.totalPrice;
+    circleAgg.set(o.circleId, ca);
+  }
+
+  return c.json({
+    date: resolvedDate,
+    totals: {
+      orders: dayOrders.length,
+      revenue: dayOrders.reduce((s, o) => s + o.totalPrice, 0),
+      customers: dayOrders.reduce((s, o) => s + o.peopleCount, 0),
+    },
+    paymentBreakdown: Array.from(payAgg.entries())
+      .map(([method, a]) => ({ method, ...a }))
+      .sort((a, b) => b.revenue - a.revenue),
+    circleBreakdown: Array.from(circleAgg.entries())
+      .map(([id, a]) => ({ circleId: id, name: circleName.get(id) || "", ...a }))
+      .sort((a, b) => b.revenue - a.revenue),
+  });
+});
+
 // イベントの支払い方法設定 (2026-07-12)
 // event_manager が「このイベントで使える支払い方法」の一覧を設定する。
 // 各サークルはこの中から対応する方法を選ぶ (circle.settings.acceptedPayments)。

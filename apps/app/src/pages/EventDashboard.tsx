@@ -14,6 +14,7 @@ import { OrderMonitorTab } from "@/components/event/OrderMonitorTab";
 import { InventoryTab } from "@/components/event/InventoryTab";
 import { AnnounceTab } from "@/components/event/AnnounceTab";
 import { SettlementTab } from "@/components/event/SettlementTab";
+import { DailyCloseTab } from "@/components/event/DailyCloseTab";
 import { SalesTab } from "@/components/event/SalesTab";
 import { StaffTab } from "@/components/event/StaffTab";
 import { SettingsTab } from "@/components/event/SettingsTab";
@@ -137,6 +138,9 @@ export default function EventDashboard() {
 
           {/* TAB: 精算 */}
           {activeTab === "settlement" && <SettlementTab eventId={eventId} eventName={eventName} />}
+
+          {/* TAB: 日次締め */}
+          {activeTab === "daily-close" && <DailyCloseTab eventId={eventId} eventName={eventName} />}
 
           {/* TAB 1: サークル管理 */}
           {activeTab === "circles" && (

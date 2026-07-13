@@ -24,6 +24,7 @@ import {
   MonitorCheck,
   Boxes,
   Calculator,
+  CalendarCheck,
   ChevronDown,
   ChevronUp
 } from "lucide-react";
@@ -104,6 +105,7 @@ export default function DashboardLayout({
     { title: "サークル管理", tab: "circles", icon: Grid },
     { title: "全体売上管理", tab: "sales", icon: TrendingUp },
     { title: "精算", tab: "settlement", icon: Calculator },
+    { title: "日次締め", tab: "daily-close", icon: CalendarCheck },
     { title: "スタッフ管理", tab: "staff", icon: Users },
     { title: "イベント設定", tab: "settings", icon: Settings },
     { title: "リストバンド紛失処理", tab: "wristbands", icon: Lock },

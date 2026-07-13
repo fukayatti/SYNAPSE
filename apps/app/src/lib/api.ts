@@ -82,6 +82,9 @@ export const eventApi = {
   get: (id: string) => fetchApi<Event>(`/api/festivals/${id}`),
   // イベント統計・分析 (2026-07-12)。event_manager (sales:read) 権限が必要。
   analytics: (id: string) => fetchApi<EventAnalytics>(`/api/festivals/${id}/analytics`),
+  // 日次締め (指定日 JST の売上を支払い方法別/サークル別に集計)。event_manager sales:read。
+  dailyClose: (id: string, date?: string) =>
+    fetchApi<DailyClose>(`/api/festivals/${id}/daily-close${date ? `?date=${date}` : ""}`),
   // 支払い方法の設定 (event_manager event:write 権限)。
   setPaymentMethods: (id: string, paymentMethods: string[]) =>
     fetchApi<{ success: boolean; paymentMethods: string[] }>(`/api/festivals/${id}/payment-methods`, {
@@ -441,6 +444,14 @@ export interface EventAnalytics {
   menuRanking: { menuName: string; quantity: number; revenue: number }[];
   ageBuckets: { label: string; count: number }[];
   paymentBreakdown: { method: string; orders: number; revenue: number }[];
+}
+
+// 日次締め (GET /api/festivals/:id/daily-close)
+export interface DailyClose {
+  date: string;
+  totals: { orders: number; revenue: number; customers: number };
+  paymentBreakdown: { method: string; orders: number; revenue: number }[];
+  circleBreakdown: { circleId: string; name: string; orders: number; revenue: number }[];
 }
 
 // 進行中注文モニタの1件 (GET /api/festivals/:id/orders/live)
