@@ -109,10 +109,27 @@ orderRoutes.get("/", async (c) => {
     .from(orderItem)
     .where(inArray(orderItem.orderId, orderIds));
 
+  const itemIds = items.map((i) => i.id);
+  const allItemToppings = itemIds.length > 0
+    ? await db
+        .select()
+        .from(orderItemTopping)
+        .where(inArray(orderItemTopping.orderItemId, itemIds))
+    : [];
+
   // 注文にアイテムを追加
   const ordersWithItems = filteredOrders.map((o) => ({
     ...o,
-    items: items.filter((i) => i.orderId === o.id),
+    items: items.filter((i) => i.orderId === o.id).map((item) => ({
+      ...item,
+      toppings: allItemToppings
+        .filter((t) => t.orderItemId === item.id)
+        .map((t) => ({
+          ...t,
+          name: t.toppingName,
+          price: t.toppingPrice,
+        })),
+    })),
   }));
 
   return c.json(ordersWithItems);
