@@ -9,6 +9,7 @@ import { Building2 } from "lucide-react";
 
 // 切り出したタブコンポーネント
 import { CirclesTab } from "@/components/event/CirclesTab";
+import { AnalyticsTab } from "@/components/event/AnalyticsTab";
 import { SalesTab } from "@/components/event/SalesTab";
 import { StaffTab } from "@/components/event/StaffTab";
 import { SettingsTab } from "@/components/event/SettingsTab";
@@ -118,6 +119,9 @@ export default function EventDashboard() {
         onTabChange={setActiveTab}
       >
         <div className="space-y-6">
+          {/* TAB: 統計・分析 */}
+          {activeTab === "analytics" && <AnalyticsTab eventId={eventId} />}
+
           {/* TAB 1: サークル管理 */}
           {activeTab === "circles" && (
             <CirclesTab

@@ -2,10 +2,19 @@ import { Hono } from "hono";
 import { zBody } from "../z-validator";
 import { apiError } from "../http-error";
 import { z } from "zod";
-import { event, membership } from "@fesflow/db";
+import {
+  event,
+  membership,
+  circle,
+  order,
+  orderItem,
+  eventUser,
+  review,
+  circleVisit,
+} from "@fesflow/db";
 import { eq, and, inArray, isNull } from "drizzle-orm";
 import { ulid } from "ulidx";
-import { getAdminSession, getSession } from "../utils/auth";
+import { getAdminSession, getSession, hasPermission } from "../utils/auth";
 import type { AppEnv } from "../types";
 
 const eventRoutes = new Hono<AppEnv>();
@@ -69,6 +78,166 @@ eventRoutes.get("/:id", async (c) => {
   }
 
   return c.json(events[0]);
+});
+
+// イベント統計・分析 (2026-07-12)
+// イベント配下の全サークルを横断集計して来場者/売上/注文/評価/回遊の指標を返す。
+// event_manager (sales:read) 権限が必要。super_admin は素では不可、なりすまし経由のみ
+// (hasPermission がなりすまし対応済み)。サーバ側集計にすることで、フロントが
+// サークル数だけ注文 API を叩く N+1 を避け、来場者/レビュー/訪問データも一括で返す。
+eventRoutes.get("/:id/analytics", async (c) => {
+  const db = c.get("db");
+  const eventId = c.req.param("id");
+
+  if (!(await hasPermission(c, null, "sales:read", eventId))) {
+    apiError("FORBIDDEN", "このイベントの統計を閲覧する権限がありません");
+  }
+
+  // 配下サークル (非削除)
+  const circles = await db
+    .select({ id: circle.id, name: circle.name })
+    .from(circle)
+    .where(and(eq(circle.eventId, eventId), isNull(circle.deletedAt)));
+  const circleIds = circles.map((c2) => c2.id);
+  const circleName = new Map(circles.map((c2) => [c2.id, c2.name]));
+
+  // 注文 (キャンセルは売上/客数から除外)
+  const orders = circleIds.length
+    ? await db.select().from(order).where(inArray(order.circleId, circleIds))
+    : [];
+  const liveOrders = orders.filter((o) => o.status !== "cancelled");
+  const orderIds = liveOrders.map((o) => o.id);
+
+  // 注文明細 (人気メニュー集計用)
+  const items = orderIds.length
+    ? await db.select().from(orderItem).where(inArray(orderItem.orderId, orderIds))
+    : [];
+
+  // 来場者
+  const visitors = await db
+    .select()
+    .from(eventUser)
+    .where(eq(eventUser.eventId, eventId));
+
+  // レビュー / 回遊
+  const reviews = circleIds.length
+    ? await db.select().from(review).where(inArray(review.circleId, circleIds))
+    : [];
+  const visits = circleIds.length
+    ? await db.select().from(circleVisit).where(inArray(circleVisit.circleId, circleIds))
+    : [];
+
+  // JST の時刻に補正してから時間帯バケットを取る (文化祭は JST 前提)。
+  const jstHour = (ms: number) => new Date(ms + 9 * 3600 * 1000).getUTCHours();
+
+  const revenue = liveOrders.reduce((s, o) => s + o.totalPrice, 0);
+  const customers = liveOrders.reduce((s, o) => s + o.peopleCount, 0);
+  const completed = liveOrders.filter((o) => o.status === "completed" || o.completed).length;
+
+  // 時間帯別 (0-23)
+  const byHour = Array.from({ length: 24 }, (_, h) => ({
+    hour: h,
+    orders: 0,
+    revenue: 0,
+    visitors: 0,
+  }));
+  for (const o of liveOrders) {
+    const h = jstHour(o.createdAt.getTime());
+    byHour[h]!.orders += 1;
+    byHour[h]!.revenue += o.totalPrice;
+  }
+  for (const v of visitors) {
+    const h = jstHour(v.createdAt.getTime());
+    byHour[h]!.visitors += 1;
+  }
+
+  // サークル別ランキング
+  const circleAgg = new Map<string, { revenue: number; orders: number; ratingSum: number; reviews: number }>();
+  for (const id of circleIds) circleAgg.set(id, { revenue: 0, orders: 0, ratingSum: 0, reviews: 0 });
+  for (const o of liveOrders) {
+    const a = circleAgg.get(o.circleId);
+    if (a) {
+      a.revenue += o.totalPrice;
+      a.orders += 1;
+    }
+  }
+  for (const r of reviews) {
+    const a = circleAgg.get(r.circleId);
+    if (a) {
+      a.ratingSum += r.rating;
+      a.reviews += 1;
+    }
+  }
+  const circleRanking = circleIds
+    .map((id) => {
+      const a = circleAgg.get(id)!;
+      return {
+        circleId: id,
+        name: circleName.get(id) || "",
+        revenue: a.revenue,
+        orders: a.orders,
+        reviews: a.reviews,
+        avgRating: a.reviews ? Math.round((a.ratingSum / a.reviews) * 10) / 10 : null,
+      };
+    })
+    .sort((a, b) => b.revenue - a.revenue);
+
+  // 人気メニュー (販売個数 top 20)
+  const menuAgg = new Map<string, { quantity: number; revenue: number }>();
+  for (const it of items) {
+    const key = it.menuName;
+    const a = menuAgg.get(key) || { quantity: 0, revenue: 0 };
+    a.quantity += it.quantity;
+    a.revenue += it.menuPrice * it.quantity;
+    menuAgg.set(key, a);
+  }
+  const menuRanking = Array.from(menuAgg.entries())
+    .map(([menuName, a]) => ({ menuName, ...a }))
+    .sort((a, b) => b.quantity - a.quantity)
+    .slice(0, 20);
+
+  // 来場者の年齢層 (birthday がある人のみ)
+  const nowYear = new Date().getUTCFullYear();
+  const ageBucketsMap = new Map<string, number>();
+  for (const v of visitors) {
+    if (!v.birthday) continue;
+    const y = Number(v.birthday.slice(0, 4));
+    if (!y || Number.isNaN(y)) continue;
+    const age = nowYear - y;
+    const label = age < 10 ? "〜9歳" : age < 20 ? "10代" : age < 30 ? "20代" : age < 40 ? "30代" : age < 50 ? "40代" : "50代〜";
+    ageBucketsMap.set(label, (ageBucketsMap.get(label) || 0) + 1);
+  }
+  const ageOrder = ["〜9歳", "10代", "20代", "30代", "40代", "50代〜"];
+  const ageBuckets = ageOrder
+    .filter((l) => ageBucketsMap.has(l))
+    .map((label) => ({ label, count: ageBucketsMap.get(label)! }));
+
+  const onboarded = visitors.filter((v) => v.onboardedAt).length;
+  const uniqueVisitFrom = new Set(visits.map((v) => v.eventUserId)).size;
+
+  return c.json({
+    totals: {
+      visitors: visitors.length,
+      onboarded,
+      onboardedRate: visitors.length ? Math.round((onboarded / visitors.length) * 100) : 0,
+      orders: liveOrders.length,
+      revenue,
+      customers,
+      avgSpend: customers ? Math.round(revenue / customers) : 0,
+      circles: circles.length,
+      reviews: reviews.length,
+      avgRating: reviews.length
+        ? Math.round((reviews.reduce((s, r) => s + r.rating, 0) / reviews.length) * 10) / 10
+        : null,
+      completedRate: liveOrders.length ? Math.round((completed / liveOrders.length) * 100) : 0,
+      circleVisits: visits.length,
+      visitingUsers: uniqueVisitFrom,
+    },
+    byHour,
+    circleRanking,
+    menuRanking,
+    ageBuckets,
+  });
 });
 
 // イベント作成 (2026-07-12 SaaS: セルフサービス化)

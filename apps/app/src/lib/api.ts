@@ -80,6 +80,8 @@ async function fetchApi<T>(
 export const eventApi = {
   list: () => fetchApi<Event[]>("/api/festivals"),
   get: (id: string) => fetchApi<Event>(`/api/festivals/${id}`),
+  // イベント統計・分析 (2026-07-12)。event_manager (sales:read) 権限が必要。
+  analytics: (id: string) => fetchApi<EventAnalytics>(`/api/festivals/${id}/analytics`),
   create: (data: CreateEventInput) =>
     fetchApi<{ id: string }>("/api/festivals", { method: "POST", body: data }),
   updateTheme: (id: string, data: EventTheme) =>
@@ -381,6 +383,36 @@ export interface Event extends EventTheme {
   hasPhysicalWristband: boolean;
   startDate: Date | null;
   endDate: Date | null;
+}
+
+// イベント統計 (GET /api/festivals/:id/analytics) のレスポンス
+export interface EventAnalytics {
+  totals: {
+    visitors: number;
+    onboarded: number;
+    onboardedRate: number;
+    orders: number;
+    revenue: number;
+    customers: number;
+    avgSpend: number;
+    circles: number;
+    reviews: number;
+    avgRating: number | null;
+    completedRate: number;
+    circleVisits: number;
+    visitingUsers: number;
+  };
+  byHour: { hour: number; orders: number; revenue: number; visitors: number }[];
+  circleRanking: {
+    circleId: string;
+    name: string;
+    revenue: number;
+    orders: number;
+    reviews: number;
+    avgRating: number | null;
+  }[];
+  menuRanking: { menuName: string; quantity: number; revenue: number }[];
+  ageBuckets: { label: string; count: number }[];
 }
 
 

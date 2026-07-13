@@ -20,6 +20,7 @@ import {
   Megaphone,
   Wrench,
   ScrollText,
+  BarChart3,
   ChevronDown,
   ChevronUp
 } from "lucide-react";
@@ -93,6 +94,7 @@ export default function DashboardLayout({
 
   // イベント管理のメニュー項目 (タブ切り替え)
   const eventMenuItems: MenuItem[] = [
+    { title: "統計・分析", tab: "analytics", icon: BarChart3 },
     { title: "サークル管理", tab: "circles", icon: Grid },
     { title: "全体売上管理", tab: "sales", icon: TrendingUp },
     { title: "スタッフ管理", tab: "staff", icon: Users },
