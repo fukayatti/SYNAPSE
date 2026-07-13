@@ -25,7 +25,7 @@ export const eventUser = sqliteTable(
     // 来場者マイページの最小プロフィール (2026-07-04 追加)。
     // リストバンド紛失時の本人確認/再紐付け用にニックネーム+誕生日のみ収集。
     nickname: text("nickname"),
-    birthday: text("birthday"), // YYYY-MM-DD
+    favoriteDate: text("favorite_date"), // YYYY-MM-DD (旧 birthday)
     onboardedAt: integer("onboarded_at", { mode: "timestamp_ms" }), // 初回入力完了時刻
     createdAt: integer("created_at", { mode: "timestamp_ms" })
       .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
