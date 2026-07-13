@@ -469,6 +469,8 @@ export interface CircleSettings {
   extensions: {
     stock: boolean;
     staff: boolean;
+    // 抽選 (2026-07-12): 拡張機能。ONにしないと抽選機能を使えない。
+    lottery: boolean;
   };
 }
 
@@ -476,7 +478,7 @@ export interface CircleSettings {
 export function parseCircleSettings(raw?: string | null): CircleSettings {
   const defaults: CircleSettings = {
     orderFlowMode: "pending",
-    extensions: { stock: false, staff: false },
+    extensions: { stock: false, staff: false, lottery: false },
   };
   if (!raw) return defaults;
   try {
@@ -490,6 +492,7 @@ export function parseCircleSettings(raw?: string | null): CircleSettings {
       extensions: {
         stock: parsed?.extensions?.stock === true,
         staff: parsed?.extensions?.staff === true,
+        lottery: parsed?.extensions?.lottery === true,
       },
     };
   } catch {
