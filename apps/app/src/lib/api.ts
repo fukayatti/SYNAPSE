@@ -907,6 +907,11 @@ export const wristbandApi = {
       method: "PATCH",
       body: data,
     }),
+  updateUser: (userId: string, data: { nickname?: string | null; birthday?: string | null; displayId?: number; status?: string }) =>
+    fetchApi<{ success: boolean }>(`/api/wristbands/user/${encodeURIComponent(userId)}`, {
+      method: "PATCH",
+      body: data,
+    }),
 };
 
 // 来場者オンボーディング API (2026-07-04)

@@ -382,6 +382,76 @@ wristbandRoutes.patch(
   }
 );
 
+// 来場者ユーザー情報更新 (ニックネーム、誕生日、呼出ID、ステータス) - 2026-07-13 追加
+wristbandRoutes.patch(
+  "/user/:userId",
+  zBody(
+    z.object({
+      nickname: z.string().trim().min(1).max(30).nullable().optional(),
+      birthday: z.string().nullable().optional(),
+      displayId: z.number().int().positive().optional(),
+      status: z.enum(["available", "banned"]).optional(),
+    })
+  ),
+  async (c) => {
+    const db = c.get("db");
+    const userId = c.req.param("userId");
+    const body = c.req.valid("json");
+
+    // 権限チェック (スタッフ member:write 権限が必要)
+    const allowed = await hasPermission(c, null, "member:write", undefined);
+    if (!allowed) {
+      apiError("FORBIDDEN", "この操作にはスタッフ権限が必要です");
+    }
+
+    const users = await db.select().from(eventUser).where(eq(eventUser.id, userId));
+    if (users.length === 0) {
+      apiError("NOT_FOUND", "ユーザーが見つかりません");
+    }
+
+    const patch: Record<string, any> = {};
+    if (body.nickname !== undefined) patch.nickname = body.nickname;
+    if (body.birthday !== undefined) {
+      if (body.birthday && !/^\d{4}-\d{2}-\d{2}$/.test(body.birthday)) {
+        apiError("BAD_REQUEST", "生年月日は YYYY-MM-DD 形式で入力してください");
+      }
+      patch.birthday = body.birthday || null;
+    }
+    if (body.displayId !== undefined) {
+      // 重複チェック
+      const existing = await db
+        .select()
+        .from(eventUser)
+        .where(
+          and(
+            eq(eventUser.eventId, users[0]!.eventId),
+            eq(eventUser.displayId, body.displayId)
+          )
+        );
+      if (existing.length > 0 && existing[0]!.id !== userId) {
+        apiError("CONFLICT", "この呼出IDは既に使用されています");
+      }
+      patch.displayId = body.displayId;
+    }
+    if (body.status !== undefined) patch.status = body.status;
+
+    await db.update(eventUser).set(patch).where(eq(eventUser.id, userId));
+
+    // 監査ログ
+    const auth = c.get("auth");
+    const session = await auth.api.getSession({ headers: c.req.raw.headers });
+    if (session && session.user) {
+      await audit(c, {
+        actorEmail: session.user.email,
+        action: "impersonated_write",
+        summary: `Updated visitor user profile for user ID ${userId}`,
+      });
+    }
+
+    return c.json({ success: true });
+  }
+);
+
 // 来場者オンボーディング: ニックネーム+誕生日を登録 (2026-07-04)
 // 認証は不要。userId(eventUser.id) を持っている人=リストバンド保持者本人とみなす
 // (ベアラーモデル)。初回のみ onboardedAt を刻む。
@@ -456,7 +526,9 @@ wristbandRoutes.post(
 
     const auth = c.get("auth");
     const session = await auth.api.getSession({ headers: c.req.raw.headers });
-    if (events[0]!.hasPhysicalWristband && (!session || !session.user)) {
+    // 物理リストバンドの紐付け(wristbandId指定)がある場合のみスタッフ権限(セッション)を必須とする。
+    // wristbandIdがない場合はデジタルQRコードのセルフ発行であるため、セッションなしでも許可する。
+    if (wristbandId && (!session || !session.user)) {
       apiError("UNAUTHORIZED", "認証されていません");
     }
 
@@ -477,14 +549,14 @@ wristbandRoutes.post(
         assignedAt: new Date(),
       });
     } else {
-      if (!events[0]!.hasPhysicalWristband) {
-        await db.insert(wristband).values({
-          id: `sp_${userId}`,
-          userId,
-          status: "smartphone",
-          assignedAt: new Date(),
-        });
-      }
+      // 物理リストバンドIDが指定されない場合は、イベントの設定に関わらず
+      // 来場者自身のスマホで使えるようにスマホ用疑似リストバンド(smartphone)を常に登録する
+      await db.insert(wristband).values({
+        id: `sp_${userId}`,
+        userId,
+        status: "smartphone",
+        assignedAt: new Date(),
+      });
     }
 
     return c.json({ userId, displayId, wristbandId: wristbandId ?? null });

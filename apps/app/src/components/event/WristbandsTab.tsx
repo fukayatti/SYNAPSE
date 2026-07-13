@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { wristbandApi } from "@/lib/api";
 import { extractIdFromCode } from "@/lib/utils";
@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Lock, Search, RefreshCw, Users, Camera, QrCode } from "lucide-react";
 import { toast } from "sonner";
 import { QrScannerModal } from "@/components/pos/qr-scanner-modal";
+import { Modal } from "@/components/ui/Modal";
 
 interface WristbandsTabProps {
   eventId: string;
@@ -25,6 +26,28 @@ export function WristbandsTab({
   const [isScannerOpen, setIsScannerOpen] = useState(false);
   const [scannerTarget, setScannerTarget] = useState<"search" | "reissue">("search");
 
+  // Modal & profile form states (2026-07-13)
+  const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
+  const [editNickname, setEditNickname] = useState("");
+  const [editBirthday, setEditBirthday] = useState("");
+  const [editDisplayId, setEditDisplayId] = useState<number | "">("");
+  const [editUserStatus, setEditUserStatus] = useState("available");
+
+  // Sync profile edit state when lookupResult changes
+  useEffect(() => {
+    if (lookupResult?.user) {
+      setEditNickname(lookupResult.user.nickname || "");
+      setEditBirthday(lookupResult.user.birthday || "");
+      setEditDisplayId(lookupResult.user.displayId || "");
+      setEditUserStatus(lookupResult.user.status || "available");
+    } else {
+      setEditNickname("");
+      setEditBirthday("");
+      setEditDisplayId("");
+      setEditUserStatus("available");
+    }
+  }, [lookupResult]);
+
   // リストバンド照会 API
   const lookupWristbandMutation = useMutation({
     mutationFn: (code: string) => {
@@ -38,6 +61,7 @@ export function WristbandsTab({
       } else {
         toast.success("ユーザー情報を取得しました");
       }
+      setIsDetailsModalOpen(true);
     },
     onError: () => {
       toast.error("照会に失敗しました。正しいコードを入力してください。");
@@ -67,6 +91,8 @@ export function WristbandsTab({
       toast.success("紛失ロック（無効化）が完了しました");
       if (lostSearchCode) {
         lookupWristbandMutation.mutate(lostSearchCode);
+      } else if (lookupResult?.user?.id) {
+        lookupWristbandMutation.mutate(lookupResult.user.id);
       }
       // 検索結果も更新する
       if (profileSearchQuery) {
@@ -83,6 +109,8 @@ export function WristbandsTab({
       toast.success("リストバンド情報を更新しました");
       if (lostSearchCode) {
         lookupWristbandMutation.mutate(lostSearchCode);
+      } else if (lookupResult?.user?.id) {
+        lookupWristbandMutation.mutate(lookupResult.user.id);
       }
       if (profileSearchQuery) {
         searchProfileMutation.mutate(profileSearchQuery);
@@ -90,6 +118,28 @@ export function WristbandsTab({
     },
     onError: (err: any) => {
       toast.error(err.message || "更新に失敗しました");
+    },
+  });
+
+  // 来場者プロフィール更新 API (2026-07-13)
+  const updateProfileMutation = useMutation({
+    mutationFn: (input: { userId: string; nickname: string | null; birthday: string | null; displayId: number; status: string }) =>
+      wristbandApi.updateUser(input.userId, {
+        nickname: input.nickname,
+        birthday: input.birthday,
+        displayId: input.displayId,
+        status: input.status,
+      }),
+    onSuccess: (_, variables) => {
+      toast.success("ユーザー情報を更新しました");
+      // 更新後の情報で詳細を再読み込みする
+      lookupWristbandMutation.mutate(variables.userId);
+      if (profileSearchQuery) {
+        searchProfileMutation.mutate(profileSearchQuery);
+      }
+    },
+    onError: (err: any) => {
+      toast.error(err.message || "プロフィール更新に失敗しました");
     },
   });
 
@@ -102,6 +152,8 @@ export function WristbandsTab({
       setNewWristbandId("");
       if (lostSearchCode) {
         lookupWristbandMutation.mutate(lostSearchCode);
+      } else if (lookupResult?.user?.id) {
+        lookupWristbandMutation.mutate(lookupResult.user.id);
       }
       // 検索結果も更新する
       if (profileSearchQuery) {
@@ -126,6 +178,7 @@ export function WristbandsTab({
   const handleSelectUser = (result: any) => {
     setLookupResult(result);
     setLostSearchCode(result.user.id);
+    setIsDetailsModalOpen(true);
   };
 
   const handleReportLost = (wbId: string) => {
@@ -302,47 +355,136 @@ export function WristbandsTab({
         </Card>
       )}
 
-      {/* 選択中の詳細表示 */}
-      {lookupResult && (
-        <Card className="rounded-none bg-background shadow-none border-thick border-border">
-          <CardHeader className="p-4 pb-2 border-b-thin border-border bg-muted/20">
-            <CardTitle className="text-xs uppercase font-bold">[選択中の来場者・リストバンド詳細]</CardTitle>
-          </CardHeader>
-          <CardContent className="p-4 pt-4 space-y-4">
-            <div className="p-4 bg-muted/10 space-y-4 text-xs font-mono">
-              <div className="border-b-thick border-border pb-2">
-                <h4 className="font-bold uppercase text-[10px] text-muted-foreground mb-1">[来場者アカウント情報]</h4>
-                <p>ユーザーID: {lookupResult.user.id}</p>
-                <p>表示用呼び出しID: #{lookupResult.user.displayId}</p>
-                <p>状態: {lookupResult.user.status}</p>
-                <p>ニックネーム: {lookupResult.user.nickname || "未登録"}</p>
+      {/* 来場者詳細・編集ポップアップモーダル */}
+      <Modal
+        isOpen={isDetailsModalOpen}
+        title="[来場者・リストバンド詳細編集]"
+        subtitle="来場者のプロフィール情報とリストバンドのステータス変更・再発行を行います。"
+        onClose={() => {
+          setIsDetailsModalOpen(false);
+          setLookupResult(null);
+        }}
+        maxWidth="xl"
+      >
+        {lookupResult && (
+          <div className="space-y-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              
+              {/* 左カラム: 来場者アカウント情報 */}
+              <div className="space-y-4 border-b md:border-b-0 md:border-r border-border pb-6 md:pb-0 md:pr-6">
+                <h3 className="font-black text-xs uppercase tracking-wider text-primary border-b border-border pb-1">
+                  [アカウント情報変更]
+                </h3>
+                
+                <div className="space-y-3 text-xs">
+                  <div>
+                    <label className="block text-[10px] uppercase font-bold text-muted-foreground mb-1">ユーザーID (固定)</label>
+                    <Input
+                      value={lookupResult.user.id}
+                      disabled
+                      className="bg-muted border-thick border-border rounded-none h-8 text-xs font-mono select-all"
+                    />
+                  </div>
+                  
+                  <div>
+                    <label className="block text-[10px] uppercase font-bold text-muted-foreground mb-1">表示用呼出ID (#)</label>
+                    <Input
+                      type="number"
+                      value={editDisplayId}
+                      onChange={(e) => setEditDisplayId(e.target.value === "" ? "" : Number(e.target.value))}
+                      className="border-thick border-border rounded-none h-8 text-xs font-mono"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] uppercase font-bold text-muted-foreground mb-1">ニックネーム</label>
+                    <Input
+                      value={editNickname}
+                      onChange={(e) => setEditNickname(e.target.value)}
+                      placeholder="未登録"
+                      className="border-thick border-border rounded-none h-8 text-xs font-mono"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] uppercase font-bold text-muted-foreground mb-1">誕生日 (YYYY-MM-DD)</label>
+                    <Input
+                      value={editBirthday}
+                      onChange={(e) => setEditBirthday(e.target.value)}
+                      placeholder="例: 2000-01-01"
+                      className="border-thick border-border rounded-none h-8 text-xs font-mono"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] uppercase font-bold text-muted-foreground mb-1">アカウント状態</label>
+                    <select
+                      value={editUserStatus}
+                      onChange={(e) => setEditUserStatus(e.target.value)}
+                      className="w-full border-thick border-border bg-background p-1.5 text-xs font-bold font-mono rounded-none"
+                    >
+                      <option value="available">利用可能 (Available)</option>
+                      <option value="banned">BAN中 (Banned)</option>
+                    </select>
+                  </div>
+                </div>
+
+                <Button
+                  onClick={() => {
+                    if (editDisplayId === "") {
+                      toast.error("呼出IDを入力してください");
+                      return;
+                    }
+                    updateProfileMutation.mutate({
+                      userId: lookupResult.user.id,
+                      nickname: editNickname.trim() || null,
+                      birthday: editBirthday.trim() || null,
+                      displayId: Number(editDisplayId),
+                      status: editUserStatus,
+                    });
+                  }}
+                  disabled={updateProfileMutation.isPending}
+                  className="w-full border-thick border-primary bg-primary text-primary-foreground hover:bg-background hover:text-foreground h-9 text-xs font-bold rounded-none shadow-none mt-4"
+                >
+                  プロフィール保存
+                </Button>
               </div>
 
-              <div className="border-b-thick border-border pb-2">
-                <h4 className="font-bold uppercase text-[10px] text-muted-foreground mb-1">[紐付く物理リストバンド]</h4>
-                {lookupResult.wristband ? (
-                  <div className="space-y-2">
-                    <p>リストバンドコード: {lookupResult.wristband.id}</p>
-                    <p className="flex items-center gap-2">
-                      状態:
-                      <Badge variant="default" className={`rounded-none text-[8px] font-mono border-thick border-border uppercase ${
-                        lookupResult.wristband.status === "active"
-                          ? "bg-success/10 text-success border-success"
-                          : "bg-error/10 text-error border-error"
-                      }`}>
-                        {lookupResult.wristband.status}
-                      </Badge>
-                    </p>
-                    <p>割当日時: {new Date(lookupResult.wristband.assignedAt).toLocaleString("ja-JP")}</p>
+              {/* 右カラム: リストバンド情報＆操作 */}
+              <div className="space-y-4">
+                <h3 className="font-black text-xs uppercase tracking-wider text-primary border-b border-border pb-1">
+                  [紐付くリストバンド情報]
+                </h3>
 
-                    <div className="flex flex-col sm:flex-row sm:items-center gap-4 border-t border-border/20 pt-2 mt-2">
-                      <div className="flex items-center gap-2">
-                        <span className="font-bold">状態変更:</span>
+                {lookupResult.wristband ? (
+                  <div className="space-y-4 text-xs">
+                    <div className="bg-muted/20 p-3 border border-border space-y-2 font-mono">
+                      <p>バンドID: <span className="font-bold select-all">{lookupResult.wristband.id}</span></p>
+                      <p className="flex items-center gap-2">
+                        ステータス:
+                        <Badge variant="default" className={`rounded-none text-[8px] font-mono border-thick border-border uppercase ${
+                          lookupResult.wristband.status === "active"
+                            ? "bg-success/10 text-success border-success"
+                            : lookupResult.wristband.status === "smartphone"
+                            ? "bg-info/10 text-info border-info"
+                            : "bg-error/10 text-error border-error"
+                        }`}>
+                          {lookupResult.wristband.status}
+                        </Badge>
+                      </p>
+                      <p className="text-[10px] text-muted-foreground">
+                        登録日時: {new Date(lookupResult.wristband.assignedAt).toLocaleString("ja-JP")}
+                      </p>
+                    </div>
+
+                    <div className="flex flex-col gap-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-bold text-[10px] uppercase text-muted-foreground">状態変更:</span>
                         <select
                           value={lookupResult.wristband.status}
                           onChange={(e) => handleUpdateWbStatus(lookupResult.wristband.id, e.target.value)}
                           disabled={updateWbMutation.isPending}
-                          className="border-thick border-border bg-background p-1 text-[10px] font-bold font-mono rounded-none"
+                          className="border-thick border-border bg-background p-1.5 text-xs font-bold font-mono rounded-none"
                         >
                           <option value="active">有効 (Active)</option>
                           <option value="smartphone">スマホ用 (Smartphone)</option>
@@ -357,58 +499,65 @@ export function WristbandsTab({
                         size="sm"
                         onClick={() => handleUnlinkWb(lookupResult.wristband.id)}
                         disabled={updateWbMutation.isPending}
-                        className="rounded-none text-[9px] font-bold h-7 uppercase shadow-none border-thick border-border hover:bg-destructive hover:text-white"
+                        className="w-full rounded-none text-[10px] font-bold h-8 uppercase shadow-none border-thick border-border hover:bg-destructive hover:text-white"
                       >
                         紐付け解除 (Unlink)
                       </Button>
                     </div>
                   </div>
                 ) : (
-                  <p className="text-muted-foreground italic text-[10px]">有効な物理リストバンドは紐付いていません</p>
+                  <div className="bg-muted/10 p-4 text-center border border-dashed border-border text-muted-foreground text-xs">
+                    現在、有効なリストバンドは紐付いていません
+                  </div>
                 )}
-              </div>
 
-              {/* 再発行（新規リストバンドの紐付け） */}
-              <div className="space-y-2">
-                <h4 className="font-bold uppercase text-[10px] text-muted-foreground">[新しいリストバンドの紐付け・再発行]</h4>
-                <p className="text-[10px] text-muted-foreground">新しい物理リストバンドのQR/コード値を入力して登録します（古いリストバンドは自動的に無効化されます）。</p>
-                <div className="flex gap-2">
-                  <Input
-                    placeholder="新しいリストバンドIDを入力"
-                    value={newWristbandId}
-                    onChange={(e) => setNewWristbandId(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        e.preventDefault();
-                        handleReissueWb(lookupResult.user.id);
-                      }
-                    }}
-                    className="border-thick border-border rounded-none focus-visible:ring-0 h-10 text-xs bg-background font-mono flex-1"
-                  />
-                  <Button
-                    onClick={() => {
-                      setScannerTarget("reissue");
-                      setIsScannerOpen(true);
-                    }}
-                    variant="outline"
-                    className="border-thick border-border h-10 px-3 rounded-none"
-                  >
-                    <Camera className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    onClick={() => handleReissueWb(lookupResult.user.id)}
-                    disabled={!newWristbandId.trim() || registerWristbandMutation.isPending}
-                    className="border-thick border-border bg-background text-foreground hover:bg-primary hover:text-primary-foreground h-10 text-xs font-bold rounded-none shadow-none px-4"
-                  >
-                    <RefreshCw className="h-3.5 w-3.5 mr-1 animate-spin-hover" />
-                    再発行登録
-                  </Button>
+                {/* 新しいリストバンドの登録・再発行 */}
+                <div className="border-t border-border pt-4 mt-2 space-y-2">
+                  <h4 className="font-bold uppercase text-[10px] text-muted-foreground">
+                    [物理リストバンドの新規紐付け・再発行]
+                  </h4>
+                  <p className="text-[10px] text-muted-foreground leading-normal">
+                    新しい物理リストバンドのQR/コード値を入力して登録します（古いリストバンドは自動的に無効化されます）。
+                  </p>
+                  <div className="flex gap-2">
+                    <Input
+                      placeholder="新しいリストバンドIDを入力"
+                      value={newWristbandId}
+                      onChange={(e) => setNewWristbandId(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          handleReissueWb(lookupResult.user.id);
+                        }
+                      }}
+                      className="border-thick border-border rounded-none focus-visible:ring-0 h-9 text-xs bg-background font-mono flex-1"
+                    />
+                    <Button
+                      onClick={() => {
+                        setScannerTarget("reissue");
+                        setIsScannerOpen(true);
+                      }}
+                      variant="outline"
+                      className="border-thick border-border h-9 px-3 rounded-none"
+                    >
+                      <Camera className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      onClick={() => handleReissueWb(lookupResult.user.id)}
+                      disabled={!newWristbandId.trim() || registerWristbandMutation.isPending}
+                      className="border-thick border-border bg-background text-foreground hover:bg-primary hover:text-primary-foreground h-9 text-xs font-bold rounded-none shadow-none px-3"
+                    >
+                      <RefreshCw className="h-3.5 w-3.5 mr-1 animate-spin-hover" />
+                      登録
+                    </Button>
+                  </div>
                 </div>
               </div>
+
             </div>
-          </CardContent>
-        </Card>
-      )}
+          </div>
+        )}
+      </Modal>
 
       {/* マイデジタルQRセルフ発行用QRの出力エリア */}
       <Card className="rounded-none bg-background shadow-none border-thick border-border">
