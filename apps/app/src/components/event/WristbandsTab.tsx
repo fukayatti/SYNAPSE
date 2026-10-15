@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { wristbandApi, type WristbandBatch } from "@/lib/api";
+import { wristbandApi, type WristbandBatch, type WristbandLookupResult } from "@/lib/api";
 import { extractIdFromCode } from "@/lib/utils";
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -92,7 +92,7 @@ export function WristbandsTab({ eventId }: WristbandsTabProps) {
   const [lookupCode, setLookupCode] = useState("");
 
   // 詳細編集モーダル用の状態
-  const [selectedUser, setSelectedUser] = useState<any | null>(null);
+  const [selectedUser, setSelectedUser] = useState<WristbandLookupResult | null>(null);
   const [editNickname, setEditNickname] = useState("");
   const [editFavoriteDate, setEditFavoriteDate] = useState("");
   const [editDisplayId, setEditDisplayId] = useState<number | "">("");
@@ -423,7 +423,7 @@ export function WristbandsTab({ eventId }: WristbandsTabProps) {
   };
 
   // 2026-10-01: 登録来場者一覧の先頭列からプロフィール編集を開けるようにする。
-  const handleOpenVisitorDetails = (visitor: any) => {
+  const handleOpenVisitorDetails = (visitor: WristbandLookupResult) => {
     setIsVisitorTableOpen(false);
     setSelectedUser(visitor);
     setIsDetailsModalOpen(true);
