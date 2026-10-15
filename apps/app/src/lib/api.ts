@@ -1214,7 +1214,7 @@ export interface CreateInviteInput {
   eventId?: string;
   role: Role;
   expiresInHours?: number;
-  maxUses?: number;
+  maxUses?: number | null;
   // 2026-07-15: バックエンドでセッションから自動設定されるようになったためオプショナルに変更
   createdBy?: string;
   targetEmail?: string;

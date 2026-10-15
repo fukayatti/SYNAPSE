@@ -35,8 +35,8 @@ export function CircleCreateLinkModal({ eventId, isOpen, onClose }: CircleCreate
 			membershipApi.createInvite({
 				eventId,
 				role: "circle_manager",
-				// 2026-10-15 Issue #122: 0回は無制限を表すため、使用回数制限を送らない。
-				maxUses: maxUses === 0 ? undefined : Math.min(100, Math.max(1, maxUses)),
+				// 2026-10-15 Issue #122: 0回は無制限を表すため、APIへ null を明示して保存する。
+				maxUses: maxUses === 0 ? null : Math.min(100, Math.max(1, maxUses)),
 				expiresInHours: Math.min(168, Math.max(1, expiresInHours)),
 			}),
 		onSuccess: (invite) => {

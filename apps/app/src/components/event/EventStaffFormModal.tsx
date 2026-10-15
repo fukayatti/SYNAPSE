@@ -44,7 +44,7 @@ export function EventStaffFormModal({ eventId, isOpen, onClose }: EventStaffForm
         // 2026-07-15: 共同管理者でも直接リンク共有可能にするためメールアドレスは任意。
         targetEmail: data.email.trim() ? data.email.toLowerCase() : undefined,
         // 2026-10-15 Issue #122: 0回は1回制限ではなく無制限として保存する。
-        maxUses: data.maxUses === 0 ? undefined : Math.min(100, Math.max(1, data.maxUses)),
+        maxUses: data.maxUses === 0 ? null : Math.min(100, Math.max(1, data.maxUses)),
         // 2026-07-15: サークルと同様に時間(1〜168時間)でクランプして送信。
         expiresInHours: Math.min(168, Math.max(1, data.expiresInHours)),
       }),
