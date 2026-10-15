@@ -10,9 +10,10 @@ import { useVisitor } from "@/hooks/useVisitor";
  */
 export default function VisitorHeader() {
   const pathname = useLocation().pathname;
+  const normalizedPathname = pathname.replace(/\/+$/, "") || "/";
   const { isEntered, session } = useVisitor();
   // 2026-10-15 (#129): 来場者トップからは出店一覧へ誘導せず、共有URLからの閲覧は維持する。
-  const isVisitorHome = pathname === "/visitor";
+  const isVisitorHome = normalizedPathname === "/visitor";
 
   // 2026-07-11: 来場者パスは /visitor 配下に集約。「メニュー」は出店未選択の案内が出る
   // /visitor/menu ではなく、実際に出店を選べる /visitor/events (出店ブラウズ) へ直結。
