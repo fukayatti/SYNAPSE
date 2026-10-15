@@ -102,7 +102,7 @@ export function EventCreateWizard({ onBack, onComplete }: { onBack: () => void; 
   const createStaffInvite = async (eventId: string) => {
     setCreatingInvite(true);
     try {
-      const result = await membershipApi.createInvite({ eventId, role: "event_manager", maxUses: 10, expiresInHours: 24 * 30 });
+      const result = await membershipApi.createInvite({ eventId, role: "event_manager", maxUses: 10, expiresInHours: 168 });
       setInvite({ token: result.token, code: result.code });
     } catch (error: any) {
       toast.error(error?.message || "スタッフ招待リンクを発行できませんでした。スタッフ管理から再発行できます");
@@ -128,7 +128,7 @@ export function EventCreateWizard({ onBack, onComplete }: { onBack: () => void; 
           <h2 className="font-headline text-lg">イベント管理スタッフを招待</h2>
           {invite ? (
             <>
-              <p className="text-xs text-muted-foreground">招待リンクまたはコードを共有してください（30日間有効・最大10人）。</p>
+              <p className="text-xs text-muted-foreground">招待リンクまたはコードを共有してください（7日間有効・最大10人）。</p>
               <Input aria-label="スタッフ招待リンク" readOnly value={invitationUrl} />
               <div className="flex flex-wrap items-center gap-3">
                 <Button type="button" variant="outline" onClick={copyInvite}>リンクをコピー</Button>
