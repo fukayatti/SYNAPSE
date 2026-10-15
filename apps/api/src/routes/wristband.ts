@@ -314,6 +314,9 @@ wristbandRoutes.post(
     if (band.status !== "active" && band.status !== "smartphone") {
       apiError("CONFLICT", "有効なリストバンドのみ追加できます");
     }
+    if (band.onboardedAt) {
+      apiError("CONFLICT", "入場登録済みのリストバンドは家族に追加できません");
+    }
 
     const [source] = await db.select().from(eventUser).where(eq(eventUser.id, band.userId));
     if (!source || source.eventId !== account.eventId) {
@@ -349,7 +352,7 @@ wristbandRoutes.post(
     const update = c.env.DB.prepare(`
       UPDATE wristband
       SET user_id = ?, nickname = ?, birthday_month_day = ?, age = ?, onboarded_at = ?
-      WHERE id = ? AND user_id = ? AND status IN ('active', 'smartphone')
+      WHERE id = ? AND user_id = ? AND status IN ('active', 'smartphone') AND onboarded_at IS NULL
         AND EXISTS (SELECT 1 FROM event_user WHERE id = ? AND event_id = ? AND onboarded_at IS NULL AND status = 'available')
         AND (SELECT COUNT(*) FROM wristband WHERE user_id = ?) = 1
         ${historyFree}
