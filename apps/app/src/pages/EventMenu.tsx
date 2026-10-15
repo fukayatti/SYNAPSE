@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { eventApi, circleApi, activeWaitTimeReport } from "@/lib/api";
+import { eventApi, circleApi, activeWaitTimeReport, parseCircleSettings, parseStoreAreas } from "@/lib/api";
 import { useVisitor } from "@/hooks/useVisitor";
 import { EventTheme } from "@/components/EventTheme";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -121,6 +121,15 @@ function EventMenuContent({
   });
 
   const theme = useMemo(() => event ?? null, [event]);
+  const storeAreas = useMemo(() => parseStoreAreas(event?.storeAreas), [event?.storeAreas]);
+  const safeOfficialWebsiteUrl = useMemo(() => {
+    try {
+      const url = new URL(event?.officialWebsiteUrl || "");
+      return url.protocol === "https:" || url.protocol === "http:" ? url.href : null;
+    } catch {
+      return null;
+    }
+  }, [event?.officialWebsiteUrl]);
 
   const uniqueCircles = circles
     ? Array.from(new Map(circles.map(c => [c.id, c])).values())
@@ -153,6 +162,11 @@ function EventMenuContent({
             </h1>
             {event?.description && (
               <p className="text-xs opacity-80 truncate">{event.description}</p>
+            )}
+            {safeOfficialWebsiteUrl && (
+              <a href={safeOfficialWebsiteUrl} target="_blank" rel="noopener noreferrer" className="mt-2 inline-flex text-xs font-bold underline underline-offset-2">
+                イベント公式サイト
+              </a>
             )}
           </div>
         </div>
@@ -225,6 +239,11 @@ function EventMenuContent({
                       {circle.description}
                     </div>
                   )}
+                  {(() => {
+                    const areaId = parseCircleSettings(circle.settings).storeAreaId;
+                    const areaName = storeAreas.find((area) => area.id === areaId)?.name;
+                    return areaName ? <div className="mt-1 text-[10px] font-bold">出店場所: {areaName}</div> : null;
+                  })()}
                   {(() => {
                     const report = activeWaitTimeReport(circle.settings);
                     return <div className="mt-1 text-[10px] font-bold">待ち時間: {report ? `約${report.minutes}分（${report.minutesAgo}分前）` : "未報告"}</div>;

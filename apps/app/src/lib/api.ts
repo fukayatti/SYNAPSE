@@ -127,6 +127,11 @@ export const eventApi = {
       method: "PUT",
       body: { paymentMethods },
     }),
+  setStoreAreas: (id: string, storeAreas: EventStoreArea[]) =>
+    fetchApi<{ success: boolean; storeAreas: EventStoreArea[] }>(`/api/festivals/${id}/store-areas`, {
+      method: "PUT",
+      body: { storeAreas },
+    }),
   // 進行中注文モニタ (全サークル横断)。event_manager (order:read) 権限が必要。
   liveOrders: (id: string) => fetchApi<LiveOrder[]>(`/api/festivals/${id}/orders/live`),
   // 在庫/売り切れ一覧 (全サークル横断)。event_manager (stock:read) 権限が必要。
@@ -486,6 +491,7 @@ export const uploadImage = async (
 // Types
 export interface EventTheme {
   logoUrl?: string | null;
+  officialWebsiteUrl?: string | null;
   fontFamily?: string;
   customFontUrl?: string | null;
   primaryColor?: string;
@@ -510,6 +516,8 @@ export interface Event extends EventTheme {
   hasPhysicalWristband: boolean;
   // 利用可能な支払い方法 (JSON 文字列配列)。parseEventPaymentMethods でパースする。
   paymentMethods?: string;
+  // 店舗の位置カテゴリはイベント共通のID付きJSON一覧。
+  storeAreas?: string;
   // 抽選機能(イベント単位)の有効化フラグ (2026-07-12)。
   lotteryEnabled?: boolean;
   // イベント別スタンプラリー設定 (JSON文字列)。
@@ -526,7 +534,30 @@ export interface PublicEventSummary {
   id: string;
   eventName: string;
   description: string | null;
+  officialWebsiteUrl: string | null;
   logoUrl: string | null;
+}
+
+export interface EventStoreArea {
+  id: string;
+  name: string;
+}
+
+export function parseStoreAreas(raw?: string | null): EventStoreArea[] {
+  if (!raw) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.flatMap((value): EventStoreArea[] => {
+      if (!value || typeof value !== "object") return [];
+      const area = value as Partial<EventStoreArea>;
+      return typeof area.id === "string" && typeof area.name === "string" && area.id.trim() && area.name.trim()
+        ? [{ id: area.id.trim(), name: area.name.trim() }]
+        : [];
+    });
+  } catch {
+    return [];
+  }
 }
 
 export interface StampRallyArea {
@@ -781,6 +812,8 @@ export interface CircleSettings {
   // このサークルが対応する支払い方法 (2026-07-12)。イベントの paymentMethods の部分集合。
   // 空=イベントの全方法に対応とみなす。1つだけならレジで選択させず自動採用する。
   acceptedPayments: string[];
+  // 2026-10-16 (#126): event.storeAreas のどの位置に出店するかを参照するID。
+  storeAreaId: string | null;
 }
 
 // settings JSON をパースし、未設定キーを既定値で補完する
@@ -789,6 +822,7 @@ export function parseCircleSettings(raw?: string | null): CircleSettings {
     orderFlowMode: "pending",
     extensions: { stock: false, staff: false },
     acceptedPayments: [],
+    storeAreaId: null,
   };
   if (!raw) return defaults;
   try {
@@ -806,6 +840,7 @@ export function parseCircleSettings(raw?: string | null): CircleSettings {
       acceptedPayments: Array.isArray(parsed?.acceptedPayments)
         ? parsed.acceptedPayments.filter((x: unknown) => typeof x === "string")
         : [],
+      storeAreaId: typeof parsed?.storeAreaId === "string" ? parsed.storeAreaId : null,
     };
   } catch {
     return defaults;
@@ -982,8 +1017,20 @@ export interface InviteToken {
 export interface CreateEventInput {
   eventName: string;
   description?: string;
+  officialWebsiteUrl?: string | null;
+  logoUrl?: string | null;
   startDate?: string;
   endDate?: string;
+  hasPhysicalWristband?: boolean;
+  fontFamily?: "mono" | "sans" | "serif";
+  primaryColor?: string;
+  primaryTextColor?: string;
+  accentColor?: string;
+  accentTextColor?: string;
+  backgroundColor?: string;
+  textColor?: string;
+  paymentMethods?: string[];
+  storeAreas?: EventStoreArea[];
 }
 
 // 2026-07-07 (Phase 3a/3b): サークル作成はセルフサービス化。better-auth ログイン
@@ -993,6 +1040,9 @@ export interface CreateCircleInput {
   eventId: string;
   name: string;
   description?: string;
+  iconImagePath?: string | null;
+  backgroundImagePath?: string | null;
+  settings?: CircleSettings;
   // 2026-07-12 (SaaS): 非主催者が circle_host 招待でサークルを作る場合に渡す。
   inviteToken?: string;
 }

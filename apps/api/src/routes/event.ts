@@ -24,6 +24,26 @@ import type { AppEnv } from "../types";
 
 const eventRoutes = new Hono<AppEnv>();
 
+// 2026-10-16 (#126): 店舗エリアはイベント共有の安定IDで管理し、サークル設定から参照する。
+const storeAreasSchema = z.array(z.object({
+  id: z.string().trim().min(1).max(64),
+  name: z.string().trim().min(1).max(60),
+})).max(50).superRefine((areas, ctx) => {
+  const ids = new Set<string>();
+  const names = new Set<string>();
+  areas.forEach((area, index) => {
+    const normalizedName = area.name.toLowerCase();
+    if (ids.has(area.id)) {
+      ctx.addIssue({ code: "custom", path: [index, "id"], message: "店舗エリアIDが重複しています" });
+    }
+    if (names.has(normalizedName)) {
+      ctx.addIssue({ code: "custom", path: [index, "name"], message: "店舗エリア名が重複しています" });
+    }
+    ids.add(area.id);
+    names.add(normalizedName);
+  });
+});
+
 // イベント一覧取得 (2026-07-04 SaaSマルチテナント制限)
 eventRoutes.get("/", async (c) => {
   const db = c.get("db");
@@ -78,6 +98,7 @@ eventRoutes.get("/public", async (c) => {
       id: event.id,
       eventName: event.eventName,
       description: event.description,
+      officialWebsiteUrl: event.officialWebsiteUrl,
       logoUrl: event.logoUrl,
     })
     .from(event)
@@ -98,8 +119,10 @@ eventRoutes.get("/:id", async (c) => {
       id: event.id,
       eventName: event.eventName,
       description: event.description,
+      officialWebsiteUrl: event.officialWebsiteUrl,
       startDate: event.startDate,
       endDate: event.endDate,
+      storeAreas: event.storeAreas,
       lifecycleStatus: event.lifecycleStatus,
       paymentMethods: event.paymentMethods,
       stampRallySettings: event.stampRallySettings,
@@ -421,6 +444,24 @@ eventRoutes.put(
       .set({ paymentMethods: JSON.stringify(cleaned) })
       .where(eq(event.id, eventId));
     return c.json({ success: true, paymentMethods: cleaned });
+  }
+);
+
+// 2026-10-16 (#126): イベント共通の店舗エリア名を保存し、各サークルの位置選択肢に使う。
+eventRoutes.put(
+  "/:id/store-areas",
+  zBody(z.object({ storeAreas: storeAreasSchema })),
+  async (c) => {
+    const db = c.get("db");
+    const eventId = c.req.param("id");
+    if (!(await hasPermission(c, null, "event:write", eventId))) {
+      apiError("FORBIDDEN", "店舗エリアを設定する権限がありません");
+    }
+    const { storeAreas } = c.req.valid("json");
+    await db.update(event)
+      .set({ storeAreas: JSON.stringify(storeAreas) })
+      .where(and(eq(event.id, eventId), isNull(event.deletedAt)));
+    return c.json({ success: true, storeAreas });
   }
 );
 
@@ -1048,9 +1089,20 @@ eventRoutes.post(
     z.object({
       eventName: z.string().min(1, "イベント名は必須です"),
       description: z.string().optional(),
+      officialWebsiteUrl: z.string().url().refine((value) => /^https?:\/\//i.test(value), "公式サイトURLはhttpまたはhttpsで入力してください").nullable().optional(),
+      logoUrl: z.string().nullable().optional(),
       startDate: z.string().optional(),
       endDate: z.string().optional(),
       hasPhysicalWristband: z.boolean().optional(),
+      fontFamily: z.enum(["mono", "sans", "serif"]).optional(),
+      primaryColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
+      primaryTextColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
+      accentColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
+      accentTextColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
+      backgroundColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
+      textColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
+      paymentMethods: z.array(z.string().trim().min(1).max(30)).min(1).max(20).default(["現金"]),
+      storeAreas: storeAreasSchema.default([]),
     })
   ),
   async (c) => {
@@ -1067,10 +1119,21 @@ eventRoutes.post(
     await db.insert(event).values({
       id,
       eventName: input.eventName,
-      description: input.description,
+      description: input.description?.trim() || null,
+      officialWebsiteUrl: input.officialWebsiteUrl?.trim() || null,
+      logoUrl: input.logoUrl || null,
       startDate: input.startDate ? new Date(input.startDate) : undefined,
       endDate: input.endDate ? new Date(input.endDate) : undefined,
       hasPhysicalWristband: input.hasPhysicalWristband ?? true,
+      fontFamily: input.fontFamily ?? "mono",
+      primaryColor: input.primaryColor ?? "#000000",
+      primaryTextColor: input.primaryTextColor ?? "#FFFFFF",
+      accentColor: input.accentColor ?? "#0000FF",
+      accentTextColor: input.accentTextColor ?? "#FFFFFF",
+      backgroundColor: input.backgroundColor ?? "#FFFFFF",
+      textColor: input.textColor ?? "#000000",
+      paymentMethods: JSON.stringify(Array.from(new Set(input.paymentMethods.map((method) => method.trim())))),
+      storeAreas: JSON.stringify(input.storeAreas),
       // 無料枠の既定値。plan/billingStatus/maxCircles はスキーマ default と同値だが、
       // 意図 (無料枠で有効化) を明示するため作成時に書き込む。
       plan: "free",
@@ -1135,6 +1198,7 @@ eventRoutes.put(
       textColor: z.string().optional(),
       eventName: z.string().optional(),
       description: z.string().nullable().optional(),
+      officialWebsiteUrl: z.string().url().refine((value) => /^https?:\/\//i.test(value), "公式サイトURLはhttpまたはhttpsで入力してください").nullable().optional(),
       startDate: z.string().nullable().optional(),
       endDate: z.string().nullable().optional(),
       hasPhysicalWristband: z.boolean().optional(),
@@ -1142,12 +1206,11 @@ eventRoutes.put(
   ),
   async (c) => {
     const db = c.get("db");
-    const session = await getAdminSession(c);
-    if (!session) {
-      apiError("FORBIDDEN", "管理者権限が必要です");
-    }
-
     const id = c.req.param("id");
+    // 2026-10-16 (#126): 作成者の event_manager が設定画面から更新できるよう、イベント権限で認可する。
+    if (!(await hasPermission(c, null, "event:write", id))) {
+      apiError("FORBIDDEN", "このイベントの設定を変更する権限がありません");
+    }
     const input = c.req.valid("json");
 
     const updateData: any = { ...input };

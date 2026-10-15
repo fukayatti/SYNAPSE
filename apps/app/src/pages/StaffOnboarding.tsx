@@ -8,6 +8,7 @@ import { resolveActiveSpaceAfterAuth, useMySpaces } from "@/hooks/useCircleAuth"
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { EventCreateWizard } from "@/components/event/EventCreateWizard";
 import Loader from "@/components/loader";
 
 // スタッフ用オンボーディング (2026-07-12 SaaS 分岐版)
@@ -50,15 +51,6 @@ export default function StaffOnboarding() {
 	const [mode, setMode] = useState<Mode>(presetToken || presetCode ? "join" : "choose");
 
 	// ── イベント主催 ───────────────────────────────────────────────
-	const [eventName, setEventName] = useState("");
-	const createEvent = useMutation({
-		mutationFn: () => eventApi.create({ eventName: eventName.trim() }),
-		onSuccess: async () => {
-			toast.success("イベントを作成しました");
-			await goToResolvedSpace();
-		},
-		onError: (e: any) => toast.error(e?.message || "イベントの作成に失敗しました"),
-	});
 
 	// ── 招待経由 ───────────────────────────────────────────────────
 	const [codeInput, setCodeInput] = useState(presetCode || "");
@@ -211,31 +203,38 @@ export default function StaffOnboarding() {
 				{/* ── イベント主催 ── */}
 				{mode === "host" && (
 					<div className="space-y-4">
-						<div className="space-y-1">
-							<Label htmlFor="eventName">イベント名</Label>
-							<Input
-								id="eventName"
-								value={eventName}
-								onChange={(e) => setEventName(e.target.value)}
-								placeholder="例: 第50回 志功祭"
-							/>
-						</div>
 						<div className="border-thin border-border bg-muted/30 p-3 font-mono text-[12px] text-muted-foreground leading-[1.6]">
 							無料プランで作成されます(サークル1つまで)。作成後、イベント管理画面から
 							サークルの招待や設定ができます。プランのアップグレードは運営にお問い合わせください。
 						</div>
-						<div className="flex gap-2">
-							<Button variant="outline" onClick={() => setMode("choose")}>
-								戻る
-							</Button>
-							<Button
-								className="flex-1"
-								disabled={!eventName.trim() || createEvent.isPending}
-								onClick={() => createEvent.mutate()}
-							>
-								{createEvent.isPending ? "作成中..." : "イベントを作成する"}
-							</Button>
-						</div>
+						<EventCreateWizard
+							onBack={() => setMode("choose")}
+							onComplete={async (createdEventId, hasPhysicalWristband) => {
+								try {
+									const email = session.user.email;
+									const newEventMembership = email
+										? (await membershipApi.listMy(email)).find((item: any) => item.eventId === createdEventId && item.role === "event_manager")
+										: null;
+									if (newEventMembership) {
+										saveAuthInfo({
+											circleId: null,
+											eventId: newEventMembership.eventId,
+											userEmail: newEventMembership.userEmail,
+											userName: newEventMembership.userName,
+											role: newEventMembership.role,
+											membershipId: newEventMembership.id,
+											circleName: null,
+											isEventAdmin: true,
+										});
+									}
+									const resolved = newEventMembership ? null : email ? await resolveActiveSpaceAfterAuth(email) : null;
+									const path = newEventMembership ? "/event/dashboard" : resolved?.path || "/event/dashboard";
+									navigate(hasPhysicalWristband && path === "/event/dashboard" ? `${path}?tab=wristbands` : path, { replace: true });
+								} catch {
+									navigate(hasPhysicalWristband ? "/event/dashboard?tab=wristbands" : "/event/dashboard", { replace: true });
+								}
+							}}
+						/>
 					</div>
 				)}
 
