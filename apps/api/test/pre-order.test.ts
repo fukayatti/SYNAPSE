@@ -329,7 +329,7 @@ describe("事前オーダー機能", () => {
 		expect(toppingAfter[0]!.soldOut).toBe(false);
 	});
 
-	it("在庫管理中の商品が残数0なら受取確定を拒否し、在庫・事前オーダー状態を保つ", async () => {
+	it("保存時に在庫不足を返し、保存後に在庫が尽きた場合も受取確定を拒否する", async () => {
 		const db = testDb();
 		const eventId = uid("ev");
 		const circleId = uid("ci");
@@ -339,7 +339,7 @@ describe("事前オーダー機能", () => {
 
 		await db.insert(event).values({ id: eventId, eventName: "テスト学園祭" });
 		await db.insert(circle).values({ id: circleId, eventId, name: "テスト模擬店" });
-		// 1品目の減算後に2品目の在庫ガードが失敗しても、先の減算を補償する。
+		// 保存時の在庫は予約せず、レジ確定時の在庫ガードを別に検証する。
 		await db.insert(menu).values({
 			id: menuId,
 			circleId,
@@ -373,13 +373,23 @@ describe("事前オーダー機能", () => {
 			isActive: true,
 		});
 
+		const orderItems = [{ menuId, quantity: 1 }, { menuId: laterMenuId, quantity: 1 }];
+		const shortageRes = await createPreOrderDraft({ userId, circleId, items: orderItems });
+		expect(shortageRes.status).toBe(400);
+		await db.update(menu).set({ stockQuantity: 1 }).where(eq(menu.id, laterMenuId));
+
 		const createRes = await createPreOrderDraft({
 			userId,
 			circleId,
-			items: [{ menuId, quantity: 1 }, { menuId: laterMenuId, quantity: 1 }],
+			items: orderItems,
 		});
 		expect(createRes.status).toBe(201);
 		const createData = (await createRes.json()) as { id: string };
+		const menuBeforeClaim = await db.select().from(menu).where(eq(menu.id, menuId));
+		expect(menuBeforeClaim[0]!.stockQuantity).toBe(5);
+		const laterMenuBeforeClaim = await db.select().from(menu).where(eq(menu.id, laterMenuId));
+		expect(laterMenuBeforeClaim[0]!.stockQuantity).toBe(1);
+		await db.update(menu).set({ stockQuantity: 0, soldOut: true }).where(eq(menu.id, laterMenuId));
 
 		const claimRes = await request(`/api/pre-orders/${createData.id}/claim`, {
 			method: "POST",
