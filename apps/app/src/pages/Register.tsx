@@ -219,7 +219,7 @@ function CartBody({
   cart: CartLine[];
   menuMap: Map<string, MenuWithToppings>;
   peopleCount: number;
-  activeCustomer: { userId: string; wristbandId: string | null } | null;
+  activeCustomer: { userId: string; wristbandId: string | null; familyBandCount: number } | null;
   submitting: boolean;
   onToggleTopping: (lineId: string, topping: Topping) => void;
   onUpdateQuantity: (lineId: string, delta: number) => void;
@@ -346,6 +346,7 @@ function CartBody({
             onBlur={() => { if (peopleCount < 1) onSetPeople(1); }}
           />
         </div>
+        <p className="-mt-2 text-[10px] text-muted-foreground">家族の登録人数とは別項目です。注文の来店人数は必要に応じて入力してください。</p>
         <div className="flex justify-between items-center border-thick border-border px-4 py-3 bg-muted">
           <span className="font-mono text-sm uppercase tracking-wider">合計金額</span>
           <span className="font-headline text-2xl sm:text-3xl font-black">¥{total.toLocaleString()}</span>
@@ -381,6 +382,7 @@ function CartBody({
           <div className="border-thick border-border bg-muted/20 p-2 text-xs font-mono">
             選択中の顧客: [{activeCustomer.userId}]
             {activeCustomer.wristbandId && ` (リストバンド: ${activeCustomer.wristbandId})`}
+            <div className="mt-1 font-bold">家族登録リストバンド: {activeCustomer.familyBandCount}人</div>
           </div>
         )}
         {(!activeCustomer || cart.length === 0) && (
@@ -425,7 +427,7 @@ function RegisterPageContent() {
   const [isCustomerQrModalOpen, setIsCustomerQrModalOpen] = useState(false);
   const [isCartPanelOpen, setIsCartPanelOpen] = useState(false);
   const [scannedCode, setScannedCode] = useState("");
-  const [activeCustomer, setActiveCustomer] = useState<{ userId: string; wristbandId: string | null } | null>(null);
+  const [activeCustomer, setActiveCustomer] = useState<{ userId: string; wristbandId: string | null; familyBandCount: number } | null>(null);
   const [activePreOrderId, setActivePreOrderId] = useState<string | null>(null);
   const [activePreOrderTotalPrice, setActivePreOrderTotalPrice] = useState<number | null>(null);
   const [activePreOrderCouponApplied, setActivePreOrderCouponApplied] = useState(false);
@@ -503,6 +505,7 @@ function RegisterPageContent() {
         setActiveCustomer({
           userId: data.user.id,
           wristbandId: data.wristband?.id || null,
+          familyBandCount: data.familyBandCount ?? 0,
         });
         toast.success(`顧客を特定しました: ${data.wristband?.id || data.user.id}`);
         setScannedCode("");
@@ -749,7 +752,7 @@ function RegisterPageContent() {
         isOpen={isCustomerQrModalOpen}
         onClose={() => setIsCustomerQrModalOpen(false)}
         mode="customer"
-        onCustomerScanned={(userId, wristbandId) => setActiveCustomer({ userId, wristbandId })}
+        onCustomerScanned={(userId, wristbandId, familyBandCount) => setActiveCustomer({ userId, wristbandId, familyBandCount })}
       />
 
       {/* 横幅に余裕がある画面 (xl+) はカートを右サイドバー固定、狭い画面は下部バー+スライドアップ */}
@@ -884,6 +887,7 @@ function RegisterPageContent() {
                   <span className="w-2.5 h-2.5 bg-success rounded-full animate-pulse" />
                   スキャン完了: ゲストID [{activeCustomer.userId}]
                   {activeCustomer.wristbandId && ` (リストバンド: ${activeCustomer.wristbandId})`}
+                  <span className="ml-2 font-bold">家族 {activeCustomer.familyBandCount}人</span>
                 </div>
                 <Button
                   variant="destructive"

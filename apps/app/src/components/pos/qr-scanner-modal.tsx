@@ -17,7 +17,7 @@ interface QrScannerModalProps {
   onClose: () => void;
   onOrderClaimed?: (orderNumber: string) => void;
   mode?: "pre_order" | "customer";
-  onCustomerScanned?: (userId: string, wristbandId: string | null) => void;
+  onCustomerScanned?: (userId: string, wristbandId: string | null, familyBandCount: number) => void;
 }
 
 export function QrScannerModal({
@@ -266,7 +266,7 @@ export function QrScannerModal({
       if (data.user) {
         toast.success(`顧客を特定しました: ${data.wristband?.id || data.user.id}`);
         if (onCustomerScanned) {
-          onCustomerScanned(data.user.id, data.wristband?.id || null);
+          onCustomerScanned(data.user.id, data.wristband?.id || null, data.familyBandCount ?? 0);
         }
         onClose();
       } else {

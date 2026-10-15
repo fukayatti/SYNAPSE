@@ -982,7 +982,10 @@ export function WristbandsTab({ eventId }: WristbandsTabProps) {
                           {res.user.status === "available" ? "利用可能" : "BAN"}
                         </Badge>
                       </td>
-                      <td className="p-3 font-mono text-[11px] select-all">{res.wristband?.id || <span className="text-muted-foreground text-[10px]">なし</span>}</td>
+                      <td className="p-3 font-mono text-[11px] select-all">
+                        {res.wristband?.id || <span className="text-muted-foreground text-[10px]">なし</span>}
+                        {(res.familyBandCount ?? 0) > 1 && <span className="ml-2 text-[9px] text-muted-foreground">家族 {res.familyBandCount}人</span>}
+                      </td>
                       <td className="p-3">
                         {res.wristband ? (
                           <Badge
@@ -1285,6 +1288,18 @@ export function WristbandsTab({ eventId }: WristbandsTabProps) {
                 <h3 className="font-black text-xs uppercase tracking-wider text-primary border-b border-border pb-1">
                   [紐付く物理リストバンド管理]
                 </h3>
+
+                {(selectedUser.familyWristbands?.length ?? 0) > 1 && (
+                  <div className="space-y-1 border border-border bg-muted/10 p-2 text-[10px]">
+                    <p className="font-bold">家族の登録人数: {selectedUser.familyBandCount}人</p>
+                    {selectedUser.familyWristbands.map((band) => (
+                      <p key={band.id} className="flex justify-between gap-2">
+                        <span className="truncate">{band.nickname || "ニックネーム未設定"} · {band.age == null ? "年齢未設定" : `${band.age}歳`}</span>
+                        <span className="shrink-0 text-muted-foreground">{band.birthdayMonthDay || "誕生日未設定"}</span>
+                      </p>
+                    ))}
+                  </div>
+                )}
 
                 {selectedUser.wristband ? (
                   <div className="space-y-4 text-xs">

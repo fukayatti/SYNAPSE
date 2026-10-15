@@ -57,6 +57,12 @@ export const wristband = sqliteTable(
       .notNull()
       .references(() => eventUser.id, { onDelete: "cascade" }),
     status: text("status").notNull().default("active"), // active / lost / replaced / revoked
+    // 2026-10-15 (#125): 家族の来場記録は eventUser を共有しつつ、受付表示に必要な
+    // ニックネーム・誕生日・年齢は物理/デジタルバンド単位で保持する。
+    nickname: text("nickname"),
+    birthdayMonthDay: text("birthday_month_day"), // MM-DD
+    age: integer("age"),
+    onboardedAt: integer("onboarded_at", { mode: "timestamp_ms" }),
     assignedAt: integer("assigned_at", { mode: "timestamp_ms" })
       .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
       .notNull(),

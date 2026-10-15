@@ -1161,7 +1161,22 @@ export interface WristbandLookupResult {
     userId: string;
     status: string;
     assignedAt: string;
+    nickname?: string | null;
+    birthdayMonthDay?: string | null;
+    age?: number | null;
+    onboardedAt?: string | null;
   } | null;
+  familyWristbands: Array<{
+    id: string;
+    userId: string;
+    status: string;
+    assignedAt: string;
+    nickname: string | null;
+    birthdayMonthDay: string | null;
+    age: number | null;
+    onboardedAt: string | null;
+  }>;
+  familyBandCount: number;
 }
 
 export type WristbandBatchSource = "generated" | "csv";
@@ -1219,6 +1234,16 @@ export const wristbandApi = {
       method: "POST",
       body: { userId, wristbandId },
     }),
+  addFamilyMember: (data: {
+    userId: string;
+    wristbandId: string;
+    nickname: string;
+    birthdayMonthDay: string;
+    age: number;
+  }) => fetchApi<{ success: boolean; familyBandCount: number }>("/api/wristbands/family-member", {
+    method: "POST",
+    body: data,
+  }),
   // 既存の未紐付けユーザーにスマホ用デジタルID(sp_)を発行する (2026-07-14)
   issueSmartphone: (userId: string) =>
     fetchApi<{ success: boolean; wristbandId: string }>("/api/wristbands/issue-smartphone", {
@@ -1282,6 +1307,7 @@ export interface VisitorProfile {
 export const visitorApi = {
   onboard: (data: {
     userId: string;
+    wristbandId?: string | null;
     nickname: string;
     favoriteDate?: string;
     birthdayMonthDay?: string;

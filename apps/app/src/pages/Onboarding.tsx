@@ -76,6 +76,7 @@ export default function Onboarding() {
       if (!v?.userId) throw new Error("セッションが見つかりません");
       return visitorApi.onboard({
         userId: v.userId,
+        wristbandId: v.wristbandId,
         nickname: nickname.trim(),
         favoriteDate: favoriteDate || undefined,
         birthdayMonthDay: hasBirthday ? birthdayMonthDay : undefined,

@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { wristbandApi, eventApi } from "@/lib/api";
 import { useVisitor, saveVisitor } from "@/hooks/useVisitor";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -10,6 +10,8 @@ import { ArrowLeft, QrCode, Receipt, ChevronRight, UserCog, Pencil, Ticket } fro
 import { toast } from "sonner";
 import { QRCodeSVG } from "qrcode.react";
 import { resolveAssetUrl } from "@/lib/asset-url";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 
 /**
  * 来場者マイページ (2026-07-11 注文履歴を /orders に分離しマイQR/身分表示に専念)。
@@ -29,6 +31,12 @@ export default function MyPage() {
 
   const [origin, setOrigin] = useState("");
   const [isIssuing, setIsIssuing] = useState(false);
+  const [familyCode, setFamilyCode] = useState("");
+  const [familyNickname, setFamilyNickname] = useState("");
+  const [familyMonth, setFamilyMonth] = useState("");
+  const [familyDay, setFamilyDay] = useState("");
+  const [familyAge, setFamilyAge] = useState("");
+  const queryClient = useQueryClient();
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -92,6 +100,31 @@ export default function MyPage() {
     enabled: !!userId && !isIssuing,
   });
 
+  const familyMutation = useMutation({
+    mutationFn: () => {
+      const monthDay = familyMonth && familyDay
+        ? `${familyMonth.padStart(2, "0")}-${familyDay.padStart(2, "0")}`
+        : "";
+      return wristbandApi.addFamilyMember({
+        userId,
+        wristbandId: familyCode.trim(),
+        nickname: familyNickname.trim(),
+        birthdayMonthDay: monthDay,
+        age: Number(familyAge),
+      });
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["userWristbandStatus", userId] });
+      setFamilyCode("");
+      setFamilyNickname("");
+      setFamilyMonth("");
+      setFamilyDay("");
+      setFamilyAge("");
+      toast.success("家族のリストバンドを追加しました");
+    },
+    onError: (e: any) => toast.error(e?.message || "家族の追加に失敗しました"),
+  });
+
   if (!isLoaded || statusLoading || isIssuing) {
     return (
       <div className="max-w-3xl mx-auto p-4 space-y-4 font-mono">
@@ -114,7 +147,7 @@ export default function MyPage() {
     );
   }
 
-  const activeWristband = userStatus?.wristband;
+  const activeWristband = userStatus?.familyWristbands?.find((band) => band.id === session?.wristbandId) ?? userStatus?.wristband;
   const targetWbId = activeWristband?.id || userId;
   // 2026-07-13: 来場者の表示QRのURLを物理リストバンドのQRと同じ形式 (/w/:id) に統一する。
   // 店頭レジ側はすでに入力文字列から /w/:id や ?wb=... を解析してIDを抽出できるように修正済みのため、これで動作する。
@@ -222,6 +255,65 @@ export default function MyPage() {
           </div>
         </dl>
       </div>
+
+      {/* 2026-10-15 (#125): 受付前の発行済みバンドだけを家族に追加する。
+          登録済みアカウントや過去履歴は統合せず、追加後の注文・スタンプは代表アカウントに集約する。 */}
+      <section className="border-thick border-border bg-background p-4 space-y-4">
+        <div className="flex items-baseline justify-between gap-3">
+          <h2 className="text-sm font-black uppercase tracking-wider">家族のリストバンド</h2>
+          <span className="text-xs font-bold">{userStatus?.familyBandCount ?? 0}人登録</span>
+        </div>
+        <ul className="space-y-2">
+          {(userStatus?.familyWristbands ?? []).map((band) => (
+            <li key={band.id} className="flex items-center justify-between gap-3 border-thin border-border bg-muted/20 px-3 py-2 text-xs">
+              <span className="min-w-0">
+                <span className="block font-bold">{band.nickname || "ニックネーム未設定"} · {band.age == null ? "年齢未設定" : `${band.age}歳`}</span>
+                <span className="block truncate text-muted-foreground">{band.id}</span>
+              </span>
+              <span className="shrink-0 text-muted-foreground">{band.birthdayMonthDay || "誕生日未設定"}</span>
+            </li>
+          ))}
+        </ul>
+        <div className="space-y-2 border-t-thin border-border pt-3">
+          <p className="text-[11px] leading-relaxed text-muted-foreground">
+            受付前で、まだ入場登録していない家族のリストバンドを追加できます。別のアカウントや利用履歴は統合されません。
+          </p>
+          <Input
+            aria-label="追加する家族のリストバンドコード"
+            value={familyCode}
+            onChange={(e) => setFamilyCode(e.target.value)}
+            placeholder="リストバンドのQRコード値"
+            className="rounded-none border-[2px]"
+          />
+          <Input
+            aria-label="家族のニックネーム"
+            value={familyNickname}
+            onChange={(e) => setFamilyNickname(e.target.value)}
+            placeholder="ニックネーム"
+            maxLength={30}
+            className="rounded-none border-[2px]"
+          />
+          <div className="grid grid-cols-3 gap-2">
+            <select aria-label="家族の誕生月" value={familyMonth} onChange={(e) => { setFamilyMonth(e.target.value); setFamilyDay(""); }} className="h-10 border-[2px] bg-input px-2 font-mono text-xs">
+              <option value="">誕生月</option>
+              {Array.from({ length: 12 }, (_, index) => String(index + 1)).map((month) => <option key={month} value={month}>{month}月</option>)}
+            </select>
+            <select aria-label="家族の誕生日" value={familyDay} onChange={(e) => setFamilyDay(e.target.value)} disabled={!familyMonth} className="h-10 border-[2px] bg-input px-2 font-mono text-xs disabled:opacity-50">
+              <option value="">誕生日</option>
+              {Array.from({ length: familyMonth ? new Date(Date.UTC(2000, Number(familyMonth), 0)).getUTCDate() : 0 }, (_, index) => String(index + 1)).map((day) => <option key={day} value={day}>{day}日</option>)}
+            </select>
+            <Input aria-label="家族の年齢" type="number" min={0} max={120} step={1} value={familyAge} onChange={(e) => setFamilyAge(e.target.value)} placeholder="年齢" className="h-10 rounded-none border-[2px] px-2" />
+          </div>
+          <Button
+            type="button"
+            className="w-full rounded-none"
+            disabled={!familyCode.trim() || !familyNickname.trim() || !familyMonth || !familyDay || familyAge === "" || !Number.isInteger(Number(familyAge)) || Number(familyAge) < 0 || Number(familyAge) > 120 || familyMutation.isPending}
+            onClick={() => familyMutation.mutate()}
+          >
+            {familyMutation.isPending ? "追加しています…" : "家族を追加"}
+          </Button>
+        </div>
+      </section>
 
       {/* 2026-10-07: 店舗利用実績と景品条件をマイQR画面からすぐ確認できるようにする。 */}
       <button

@@ -12,6 +12,17 @@ import type { AppEnv } from "../types";
 
 const wristbandRoutes = new Hono<AppEnv>();
 
+async function getFamilyWristbands(db: DB, userId: string) {
+  return db
+    .select()
+    .from(wristband)
+    .where(and(
+      eq(wristband.userId, userId),
+      or(eq(wristband.status, "active"), eq(wristband.status, "smartphone"))
+    ))
+    .orderBy(asc(wristband.assignedAt), asc(wristband.id));
+}
+
 // 来場者の検索 (ニックネーム、呼出ID、誕生日) - スタッフ権限必須
 wristbandRoutes.get(
   "/search",
@@ -110,13 +121,30 @@ wristbandRoutes.get(
       )
       .where(and(...conditions))
       .orderBy(primaryOrder, desc(eventUser.createdAt), desc(eventUser.id))
+      // 2026-10-15 (#125): ページング単位をリストバンドではなく共有アカウントにし、
+      // 家族が複数バンドを持っていても同じ来場者を複数ページに重複表示しない。
+      .groupBy(eventUser.id)
       .limit(limit)
       .offset(offset);
+
+    const userIds = rows.map((r) => r.user.id);
+    const familyWristbands = userIds.length > 0
+      ? await db
+          .select()
+          .from(wristband)
+          .where(and(
+            inArray(wristband.userId, userIds),
+            or(eq(wristband.status, "active"), eq(wristband.status, "smartphone"))
+          ))
+          .orderBy(asc(wristband.assignedAt), asc(wristband.id))
+      : [];
 
     return c.json({
       items: rows.map((r) => ({
         user: r.user,
         wristband: r.wristband,
+        familyWristbands: familyWristbands.filter((band) => band.userId === r.user.id),
+        familyBandCount: familyWristbands.filter((band) => band.userId === r.user.id).length,
       })),
       total: totalRows[0]?.total ?? 0,
       offset,
@@ -173,9 +201,12 @@ wristbandRoutes.get("/lookup/:code{.+}", async (c) => {
       .where(eq(eventUser.id, wb.userId));
 
     if (users.length > 0) {
+      const familyWristbands = await getFamilyWristbands(db, users[0]!.id);
       return c.json({
         user: users[0],
         wristband: wb,
+        familyWristbands,
+        familyBandCount: familyWristbands.length,
       });
     }
   }
@@ -192,21 +223,14 @@ wristbandRoutes.get("/lookup/:code{.+}", async (c) => {
   if (users.length > 0) {
     const user = users[0]!;
     // 最新のアクティブ/スマホリストバンドを取得
-    const activeWristbands = await db
-      .select()
-      .from(wristband)
-      .where(
-        and(
-          eq(wristband.userId, user.id),
-          or(eq(wristband.status, "active"), eq(wristband.status, "smartphone"))
-        )
-      )
-      .orderBy(desc(wristband.assignedAt));
+    const activeWristbands = await getFamilyWristbands(db, user.id);
 
     if (activeWristbands.length > 0) {
       return c.json({
         user,
-        wristband: activeWristbands[0],
+        wristband: activeWristbands[activeWristbands.length - 1],
+        familyWristbands: activeWristbands,
+        familyBandCount: activeWristbands.length,
       });
     }
 
@@ -235,12 +259,16 @@ wristbandRoutes.get("/lookup/:code{.+}", async (c) => {
       return c.json({
         user,
         wristband: newWb,
+        familyWristbands: [newWb],
+        familyBandCount: 1,
       });
     }
 
     return c.json({
       user,
       wristband: null,
+      familyWristbands: [],
+      familyBandCount: 0,
     });
   }
 
@@ -255,6 +283,96 @@ wristbandRoutes.get("/lookup/:code{.+}", async (c) => {
 
 
 
+
+// 未オンボードの発行済みバンドだけを家族アカウントへ追加する。
+// 2026-10-15 (#125): 既存アカウントを統合せず、履歴のない受付前アカウントのみを
+// 同一トランザクション内で移し替えることで、注文・抽選等の所有者を変えない。
+wristbandRoutes.post(
+  "/family-member",
+  zBody(z.object({
+    userId: z.string().min(1),
+    wristbandId: z.string().trim().min(1),
+    nickname: z.string().trim().min(1).max(30),
+    birthdayMonthDay: z.string().regex(/^\d{2}-\d{2}$/),
+    age: z.number().int().min(0).max(120),
+  })),
+  async (c) => {
+    const db = c.get("db");
+    const { userId, wristbandId, nickname, birthdayMonthDay, age } = c.req.valid("json");
+    const [account] = await db.select().from(eventUser).where(eq(eventUser.id, userId));
+    if (!account) apiError("NOT_FOUND", "家族を追加するアカウントが見つかりません");
+    if (!account.onboardedAt || account.status !== "available") {
+      apiError("CONFLICT", "代表者の入場登録完了後に家族を追加できます");
+    }
+
+    const [band] = await db.select().from(wristband).where(eq(wristband.id, wristbandId));
+    if (!band) apiError("NOT_FOUND", "リストバンドが見つかりません");
+    if (band.userId === userId) apiError("CONFLICT", "このアカウントのリストバンドは追加できません");
+    if (band.status !== "active" && band.status !== "smartphone") {
+      apiError("CONFLICT", "有効なリストバンドのみ追加できます");
+    }
+
+    const [source] = await db.select().from(eventUser).where(eq(eventUser.id, band.userId));
+    if (!source || source.eventId !== account.eventId) {
+      apiError("CONFLICT", "同じイベントで発行されたリストバンドを入力してください");
+    }
+    if (source.onboardedAt || source.status !== "available") {
+      apiError("CONFLICT", "入場登録済みのアカウントは家族に追加できません");
+    }
+
+    const parsedMonth = Number(birthdayMonthDay.slice(0, 2));
+    const parsedDay = Number(birthdayMonthDay.slice(3, 5));
+    const parsedDate = new Date(Date.UTC(2000, parsedMonth - 1, parsedDay));
+    if (parsedDate.getUTCMonth() !== parsedMonth - 1 || parsedDate.getUTCDate() !== parsedDay) {
+      apiError("BAD_REQUEST", "誕生日（月日）を正しく入力してください");
+    }
+
+    // batch 内でも未登録/履歴なしを条件にし、確認後の状態変化による巻き込みを防止する。
+    // いずれかの履歴があれば代表者へ移さず拒否する。
+    const historyFree = `
+      AND NOT EXISTS (SELECT 1 FROM pre_order WHERE user_id = ?)
+      AND NOT EXISTS (SELECT 1 FROM coupon_redemption WHERE event_user_id = ?)
+      AND NOT EXISTS (SELECT 1 FROM circle_visit WHERE event_user_id = ?)
+      AND NOT EXISTS (SELECT 1 FROM numbered_ticket WHERE event_user_id = ?)
+      AND NOT EXISTS (SELECT 1 FROM review WHERE event_user_id = ?)
+      AND NOT EXISTS (SELECT 1 FROM lottery_entry WHERE event_user_id = ?)
+      AND NOT EXISTS (SELECT 1 FROM lottery_winner WHERE event_user_id = ?)
+      AND NOT EXISTS (SELECT 1 FROM orders WHERE user_id = ?)
+      AND NOT EXISTS (SELECT 1 FROM user_stamp WHERE user_id = ?)
+      AND NOT EXISTS (SELECT 1 FROM reward_redemption WHERE user_id = ?)
+    `;
+    const historyBindings = Array.from({ length: 10 }, () => source.id);
+    const update = c.env.DB.prepare(`
+      UPDATE wristband
+      SET user_id = ?, nickname = ?, birthday_month_day = ?, age = ?, onboarded_at = ?
+      WHERE id = ? AND user_id = ? AND status IN ('active', 'smartphone')
+        AND EXISTS (SELECT 1 FROM event_user WHERE id = ? AND event_id = ? AND onboarded_at IS NULL AND status = 'available')
+        AND (SELECT COUNT(*) FROM wristband WHERE user_id = ?) = 1
+        ${historyFree}
+    `).bind(
+      account.id, nickname, birthdayMonthDay, age, Date.now(),
+      wristbandId, source.id, source.id, account.eventId, source.id,
+      ...historyBindings,
+    );
+    const removeEmptySource = c.env.DB.prepare(`
+      DELETE FROM event_user
+      WHERE id = ? AND onboarded_at IS NULL
+        AND NOT EXISTS (SELECT 1 FROM wristband WHERE user_id = ?)
+        ${historyFree}
+    `).bind(source.id, source.id, ...historyBindings);
+    const result = await c.env.DB.batch([update, removeEmptySource]);
+    if (result[0]?.meta.changes !== 1 || result[1]?.meta.changes !== 1) {
+      apiError("CONFLICT", "このリストバンドは登録済み、または利用履歴があるため家族に追加できません");
+    }
+
+    const familyWristbands = await getFamilyWristbands(db, account.id);
+    return c.json({
+      success: true,
+      familyWristbands,
+      familyBandCount: familyWristbands.length,
+    }, 201);
+  }
+);
 
 // リストバンドの新規登録・再発行 (紐付け)
 wristbandRoutes.post(
@@ -540,6 +658,7 @@ wristbandRoutes.post(
   zBody(
     z.object({
       userId: z.string().min(1),
+      wristbandId: z.string().optional(),
       nickname: z.string().trim().min(1).max(30),
       favoriteDate: z.string().optional(), // YYYY-MM-DD
       birthdayMonthDay: z.string().regex(/^\d{2}-\d{2}$/).optional(),
@@ -548,7 +667,7 @@ wristbandRoutes.post(
   ),
   async (c) => {
     const db = c.get("db");
-    const { userId, nickname, favoriteDate, birthdayMonthDay, age } = c.req.valid("json");
+    const { userId, wristbandId, nickname, favoriteDate, birthdayMonthDay, age } = c.req.valid("json");
 
     const users = await db.select().from(eventUser).where(eq(eventUser.id, userId));
     if (users.length === 0) {
@@ -581,6 +700,14 @@ wristbandRoutes.post(
     // — userId は QR/localStorage に入る実質トークンであり、所持=本人とみなすのは lookup 等と同じ。
     // ただし onboardedAt(入場確定時刻)は初回のみ設定し以降は動かさない。これにより
     //   (a) オンボーディングゲートが再編集で再発火しない、(b) 入場日時がぶれない、を保つ。
+    const activeBands = await getFamilyWristbands(db, userId);
+    const profileBand = wristbandId
+      ? activeBands.find((band) => band.id === wristbandId)
+      : activeBands.length === 1 ? activeBands[0] : undefined;
+    if (wristbandId && !profileBand) {
+      apiError("BAD_REQUEST", "このアカウントの有効なリストバンドを指定してください");
+    }
+
     await db
       .update(eventUser)
       .set({
@@ -591,6 +718,15 @@ wristbandRoutes.post(
         onboardedAt: u.onboardedAt ?? new Date(),
       })
       .where(eq(eventUser.id, userId));
+
+    if (profileBand) {
+      await db.update(wristband).set({
+        nickname,
+        ...(birthdayMonthDay !== undefined ? { birthdayMonthDay } : {}),
+        ...(age !== undefined ? { age } : {}),
+        onboardedAt: new Date(),
+      }).where(eq(wristband.id, profileBand.id));
+    }
 
     const updated = (await db.select().from(eventUser).where(eq(eventUser.id, userId)))[0]!;
     return c.json({
