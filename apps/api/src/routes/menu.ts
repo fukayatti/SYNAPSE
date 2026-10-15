@@ -1,14 +1,25 @@
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { zBody } from "../z-validator";
 import { apiError } from "../http-error";
 import { z } from "zod";
-import { menu, menuTopping, topping } from "@fesflow/db";
-import { eq, inArray } from "drizzle-orm";
+import { menu, menuTopping, topping, circle, event } from "@fesflow/db";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { ulid } from "ulidx";
 import { hasPermission } from "../utils/auth";
 import type { AppEnv } from "../types";
 
 const menuRoutes = new Hono<AppEnv>();
+
+async function requireActiveCircle(c: Context<AppEnv>, circleId: string) {
+  const db = c.get("db");
+  const rows = await db
+    .select({ id: circle.id })
+    .from(circle)
+    .innerJoin(event, eq(event.id, circle.eventId))
+    .where(and(eq(circle.id, circleId), isNull(circle.deletedAt), isNull(event.deletedAt)))
+    .limit(1);
+  if (!rows[0]) apiError("NOT_FOUND", "サークルが見つかりません");
+}
 
 // メニュー一覧取得（toppingも含む）
 menuRoutes.get("/", async (c) => {
@@ -18,6 +29,9 @@ menuRoutes.get("/", async (c) => {
   if (!circleId) {
     apiError("BAD_REQUEST", "circleIdが必要です");
   }
+
+  // 2026-10-15 (#128): 既知のサークルIDを使った直接APIアクセスでも削除済みイベントを表示しない。
+  await requireActiveCircle(c, circleId);
 
   // メニューを取得
   const menus = await db.select().from(menu).where(eq(menu.circleId, circleId));
@@ -70,6 +84,9 @@ menuRoutes.get("/:id", async (c) => {
   }
 
   const foundMenu = menus[0]!;
+
+  // 2026-10-15 (#128): 個別メニューURLも親サークル/イベント削除後は無効にする。
+  await requireActiveCircle(c, foundMenu.circleId);
 
   // トッピングを取得
   const menuToppings = await db
