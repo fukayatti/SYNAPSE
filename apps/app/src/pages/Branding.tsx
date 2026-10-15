@@ -33,7 +33,7 @@ export default function Branding() {
 
           {/* 特徴 3点 */}
           <div className="mt-8 grid gap-3 sm:grid-cols-3">
-            <Feature icon={UtensilsCrossed} title="メニュー閲覧" desc="出店とメニューを自由に下見。" />
+            <Feature icon={UtensilsCrossed} title="メニュー閲覧" desc="店舗から共有されたモバイルオーダーURLで閲覧できます。" />
             <Feature icon={ShoppingBag} title="事前注文" desc="並ばずに注文、店頭で受け取り。" />
             <Feature icon={QrCode} title="マイQR" desc="スマホの画面がそのまま受け取り証。" />
           </div>

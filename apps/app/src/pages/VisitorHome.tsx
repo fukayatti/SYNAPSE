@@ -35,7 +35,7 @@ export default function Home() {
           初めての方へ / HOW IT WORKS
         </div>
         <ol className="grid gap-3 sm:grid-cols-3">
-          <GuideStep n={1} icon={UtensilsCrossed} title="メニューを見る" desc="出店とメニューはどなたでも自由に閲覧できます。" />
+          <GuideStep n={1} icon={UtensilsCrossed} title="メニューを見る" desc="スタッフから案内されたモバイルオーダーURLで閲覧できます。" />
           <GuideStep n={2} icon={QrCode} title="入場する" desc="受付でリストバンドを受け取るか、お持ちのQRを読み取って入場。" />
           <GuideStep n={3} icon={ShoppingBag} title="事前注文・マイQR" desc="入場すると事前注文やマイQRの提示が使えます。" />
         </ol>
@@ -43,15 +43,6 @@ export default function Home() {
 
       {/* 来場者の主導線 */}
       <div className="grid gap-4">
-        <PortalCard
-          icon={UtensilsCrossed}
-          title="メニュー・出店を見る"
-          desc="開催中のイベントと模擬店のメニューを見る。事前注文もこちらから。"
-          cta="出店一覧を見る"
-          onClick={() => navigate("/visitor/events")}
-          primary
-        />
-
         <PortalCard
           icon={QrCode}
           title="マイページ / マイQR"
