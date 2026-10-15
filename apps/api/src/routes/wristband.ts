@@ -340,11 +340,12 @@ wristbandRoutes.post(
       AND NOT EXISTS (SELECT 1 FROM review WHERE event_user_id = ?)
       AND NOT EXISTS (SELECT 1 FROM lottery_entry WHERE event_user_id = ?)
       AND NOT EXISTS (SELECT 1 FROM lottery_winner WHERE event_user_id = ?)
+      AND NOT EXISTS (SELECT 1 FROM stamp_rally_redemption WHERE event_user_id = ?)
       AND NOT EXISTS (SELECT 1 FROM orders WHERE user_id = ?)
       AND NOT EXISTS (SELECT 1 FROM user_stamp WHERE user_id = ?)
       AND NOT EXISTS (SELECT 1 FROM reward_redemption WHERE user_id = ?)
     `;
-    const historyBindings = Array.from({ length: 10 }, () => source.id);
+    const historyBindings = Array.from({ length: 11 }, () => source.id);
     const update = c.env.DB.prepare(`
       UPDATE wristband
       SET user_id = ?, nickname = ?, birthday_month_day = ?, age = ?, onboarded_at = ?
