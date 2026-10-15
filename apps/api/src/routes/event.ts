@@ -1108,13 +1108,14 @@ eventRoutes.delete("/:id", async (c) => {
     .from(event)
     .where(eq(event.id, id));
   if (!existing[0]) apiError("NOT_FOUND", "イベントが見つかりません");
-  // 2026-10-16: 子サークルにも同じ時刻を記録し、後からイベントごと復元できるようにする。
-  const deletedAt = existing[0].deletedAt ?? new Date();
-  await db.update(event).set({ deletedAt }).where(eq(event.id, id));
-  await db
-    .update(circle)
-    .set({ deletedAt })
-    .where(and(eq(circle.eventId, id), isNull(circle.deletedAt)));
+  // 2026-10-15 (#128): 子サークルにもイベントIDを記録し、後からイベントごと復元できるようにする。
+  await c.env.DB.batch([
+    c.env.DB.prepare("UPDATE event SET deleted_at=COALESCE(deleted_at, ?) WHERE id=?")
+      .bind(Date.now(), id),
+    c.env.DB.prepare(`UPDATE circle SET deleted_at=(SELECT deleted_at FROM event WHERE id=?), deleted_with_event_id=?
+      WHERE event_id=? AND deleted_at IS NULL`)
+      .bind(id, id, id),
+  ]);
   return c.json({ success: true });
 });
 

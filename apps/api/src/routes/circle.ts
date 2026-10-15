@@ -55,7 +55,7 @@ circleRoutes.get("/", async (c) => {
       )
     );
 
-  // 2026-10-16: 親イベント削除後に全件一覧や既知ID経由でサークルを選べないようにする。
+  // 2026-10-15 (#128): 親イベント削除後に全件一覧や既知ID経由でサークルを選べないようにする。
   const where = and(
     isNull(event.deletedAt),
     isNull(circle.deletedAt),
@@ -448,7 +448,7 @@ circleRoutes.delete("/:id", async (c) => {
   }
 
   // 物理削除せず deletedAt に時刻を書き込む (論理削除)
-  await db.update(circle).set({ deletedAt: new Date() }).where(eq(circle.id, id));
+  await db.update(circle).set({ deletedAt: new Date(), deletedWithEventId: null }).where(eq(circle.id, id));
   return c.json({ success: true });
 });
 

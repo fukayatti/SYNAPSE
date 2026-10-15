@@ -152,6 +152,8 @@ export const circle = sqliteTable(
     createdFromInviteId: text("created_from_invite_id"),
     // 論理削除 (2026-07-04): 物理削除せず deletedAt に時刻を入れて非表示化する
     deletedAt: integer("deleted_at", { mode: "timestamp_ms" }),
+    // 2026-10-15 (#128): イベント削除で隠したサークルだけを安全に復元するための親ID。
+    deletedWithEventId: text("deleted_with_event_id"),
     createdAt: integer("created_at", { mode: "timestamp_ms" })
       .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
       .notNull(),

@@ -184,7 +184,7 @@ export function SaasEventsTab() {
 
   // 検索/状態フィルタ
   const shown = (events ?? []).filter((e) => {
-    // 2026-10-16: 削除済みイベントは専用フィルタから復元できる。
+    // 2026-10-15 (#128): 削除済みイベントは専用フィルタから復元できる。
     if (deletionFilter === "deleted" ? !e.deletedAt : !!e.deletedAt) return false;
     if (statusFilter !== "all" && e.billingStatus !== statusFilter) return false;
     if (search.trim()) {

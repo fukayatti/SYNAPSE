@@ -437,7 +437,7 @@ adminRoutes.get("/overview", async (c) => {
 // 全イベント一覧 (契約状態・サークル数・オーナー付き)。テナント横断の運営ビュー。
 adminRoutes.get("/events", async (c) => {
   const db = c.get("db");
-  // 2026-10-16: 削除済みイベントも運営画面に出し、期間制限なしの復元を可能にする。
+  // 2026-10-15 (#128): 削除済みイベントも運営画面に出し、期間制限なしの復元を可能にする。
   const events = await db.select().from(event).orderBy(desc(event.createdAt));
   const circles = await db.select({ id: circle.id, eventId: circle.eventId }).from(circle).where(isNull(circle.deletedAt));
   const circleCount = new Map<string, number>();
@@ -530,17 +530,18 @@ adminRoutes.delete("/events/:id", async (c) => {
     .from(event)
     .where(eq(event.id, id));
   if (!existing[0]) apiError("NOT_FOUND", "イベントが見つかりません");
-  // 2026-10-16: 同じ削除時刻を使い、単独削除済みサークルとイベント削除時の子を区別する。
-  const deletedAt = existing[0].deletedAt ?? new Date();
-  await db.update(event).set({ deletedAt }).where(eq(event.id, id));
-  await db
-    .update(circle)
-    .set({ deletedAt })
-    .where(and(eq(circle.eventId, id), isNull(circle.deletedAt)));
+  // 2026-10-15 (#128): 子サークルにイベントIDを記録し、復元対象を明示する。
+  await c.env.DB.batch([
+    c.env.DB.prepare("UPDATE event SET deleted_at=COALESCE(deleted_at, ?) WHERE id=?")
+      .bind(Date.now(), id),
+    c.env.DB.prepare(`UPDATE circle SET deleted_at=(SELECT deleted_at FROM event WHERE id=?), deleted_with_event_id=?
+      WHERE event_id=? AND deleted_at IS NULL`)
+      .bind(id, id, id),
+  ]);
   return c.json({ success: true });
 });
 
-// 2026-10-16: 論理削除したイベントは運営が期間制限なく復元できる。
+// 2026-10-15 (#128): 論理削除したイベントは運営が期間制限なく復元できる。
 adminRoutes.post("/events/:id/restore", async (c) => {
   const db = c.get("db");
   const id = c.req.param("id");
@@ -552,12 +553,14 @@ adminRoutes.post("/events/:id/restore", async (c) => {
   const deletedAt = rows[0].deletedAt;
   if (!deletedAt) return c.json({ success: true });
 
-  // 2026-10-16: イベント削除と同時に隠したサークルだけを戻し、個別削除を維持する。
-  await db
-    .update(circle)
-    .set({ deletedAt: null })
-    .where(and(eq(circle.eventId, id), eq(circle.deletedAt, deletedAt)));
-  await db.update(event).set({ deletedAt: null }).where(eq(event.id, id));
+  // 2026-10-15 (#128): イベント削除と同時に隠したサークルだけを戻し、個別削除を維持する。
+  await c.env.DB.batch([
+    c.env.DB.prepare(`UPDATE circle SET deleted_at=NULL, deleted_with_event_id=NULL
+      WHERE event_id=? AND deleted_with_event_id=?`)
+      .bind(id, id),
+    c.env.DB.prepare("UPDATE event SET deleted_at=NULL WHERE id=?")
+      .bind(id),
+  ]);
   return c.json({ success: true });
 });
 
