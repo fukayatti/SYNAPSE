@@ -1,14 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { authClient } from "@/lib/auth-client";
-import { eventApi, circleApi, membershipApi, type InviteLookupResult } from "@/lib/api";
-import { resolveActiveSpaceAfterAuth, useMySpaces } from "@/hooks/useCircleAuth";
+import { eventApi, membershipApi, type InviteLookupResult } from "@/lib/api";
+import { resolveActiveSpaceAfterAuth, saveAuthInfo, useMySpaces } from "@/hooks/useCircleAuth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { EventCreateWizard } from "@/components/event/EventCreateWizard";
+import { CircleCreateWizard } from "@/components/circle/CircleCreateWizard";
 import Loader from "@/components/loader";
 
 // スタッフ用オンボーディング (2026-07-12 SaaS 分岐版)
@@ -55,7 +56,11 @@ export default function StaffOnboarding() {
 	// ── 招待経由 ───────────────────────────────────────────────────
 	const [codeInput, setCodeInput] = useState(presetCode || "");
 	const [lookup, setLookup] = useState<InviteLookupResult | null>(null);
-	const [circleName, setCircleName] = useState("");
+	const inviteEventQuery = useQuery({
+		queryKey: ["event", lookup?.eventId],
+		queryFn: () => eventApi.get(lookup!.eventId!),
+		enabled: lookup?.kind === "circle_host" && !!lookup.eventId,
+	});
 	const autoLookupStartedFor = useRef<string | null>(null);
 	const lookupRequestId = useRef(0);
 	const [lookupPending, setLookupPending] = useState(false);
@@ -88,7 +93,6 @@ export default function StaffOnboarding() {
 			lookupRequestId.current += 1;
 			setLookupPending(false);
 			setLookup(null);
-			setCircleName("");
 			setCodeInput("");
 			return;
 		}
@@ -96,7 +100,6 @@ export default function StaffOnboarding() {
 		// 2026-10-08: StrictMode の重複実行を抑えつつ、URL変更時は新しい招待を照会する。
 		autoLookupStartedFor.current = lookupKey;
 		setLookup(null);
-		setCircleName("");
 		setCodeInput(presetCode || "");
 		if (presetToken) {
 			runLookup({ token: presetToken });
@@ -120,20 +123,31 @@ export default function StaffOnboarding() {
 		onError: (e: any) => toast.error(e?.message || "参加に失敗しました"),
 	});
 
-	// circle_host 招待でサークルを新規作成
-	const createCircle = useMutation({
-		mutationFn: () =>
-			circleApi.create({
-				eventId: lookup!.eventId!,
-				name: circleName.trim(),
-				inviteToken: lookup!.token,
-			}),
-		onSuccess: async () => {
-			toast.success("サークルを作成しました");
-			await goToResolvedSpace();
-		},
-		onError: (e: any) => toast.error(e?.message || "サークルの作成に失敗しました"),
-	});
+	async function goToCreatedCircle(circleId: string) {
+		const email = session?.user?.email;
+		if (!email) {
+			navigate("/login", { replace: true });
+			return;
+		}
+		try {
+			const memberships = await membershipApi.listMy(email);
+			const createdMembership = memberships.find((item: any) => item.circleId === circleId);
+			if (!createdMembership) throw new Error("作成したサークルの所属情報を取得できませんでした");
+			saveAuthInfo({
+				circleId: createdMembership.circleId,
+				eventId: createdMembership.eventId,
+				userEmail: createdMembership.userEmail,
+				userName: createdMembership.userName,
+				role: createdMembership.effectiveRole ?? createdMembership.role,
+				membershipId: createdMembership.id,
+				circleName: createdMembership.circle?.name ?? null,
+			});
+			if (createdMembership.circle?.name) window.sessionStorage.setItem("circleName", createdMembership.circle.name);
+			navigate("/circle/dashboard/menu", { replace: true });
+		} catch (error: any) {
+			toast.error(error?.message || "作成後のサークル切り替えに失敗しました");
+		}
+	}
 
 	async function goToResolvedSpace() {
 		try {
@@ -276,27 +290,16 @@ export default function StaffOnboarding() {
 									<strong className="text-foreground">{lookup.eventName || "イベント"}</strong>{" "}
 									への出店招待です。サークルを作成するとあなたがサークル管理者になります。
 								</div>
-								<div className="space-y-1">
-									<Label htmlFor="circleName">サークル名</Label>
-									<Input
-										id="circleName"
-										value={circleName}
-										onChange={(e) => setCircleName(e.target.value)}
-										placeholder="例: たこ焼き 茨香庵"
+								{inviteEventQuery.data ? (
+									<CircleCreateWizard
+										event={inviteEventQuery.data}
+										inviteToken={lookup.token}
+										onCancel={() => setLookup(null)}
+										onCreated={(id) => { void goToCreatedCircle(id); }}
 									/>
-								</div>
-								<div className="flex gap-2">
-									<Button variant="outline" onClick={() => setLookup(null)}>
-										戻る
-									</Button>
-									<Button
-										className="flex-1"
-										disabled={!circleName.trim() || createCircle.isPending}
-										onClick={() => createCircle.mutate()}
-									>
-										{createCircle.isPending ? "作成中..." : "サークルを作成して始める"}
-									</Button>
-								</div>
+								) : inviteEventQuery.isError ? (
+									<div className="space-y-2 text-xs text-destructive">イベント情報を読み込めませんでした。<button type="button" className="underline" onClick={() => void inviteEventQuery.refetch()}>再読み込み</button></div>
+								) : <div className="font-mono text-xs text-muted-foreground">イベント設定を読み込み中…</div>}
 							</div>
 						) : (
 							// circle_member / event_manager: その場で受諾
