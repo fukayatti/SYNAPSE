@@ -537,6 +537,54 @@ eventRoutes.put(
       apiError("FORBIDDEN", "店舗エリアを設定する権限がありません");
     }
     const { storeAreas } = c.req.valid("json");
+    const [currentEvent] = await db.select({
+      storeAreas: event.storeAreas,
+      stampRallySettings: event.stampRallySettings,
+    }).from(event).where(and(eq(event.id, eventId), isNull(event.deletedAt))).limit(1);
+    if (!currentEvent) apiError("NOT_FOUND", "イベントが見つかりません");
+
+    const nextAreaIds = new Set(storeAreas.map((area) => area.id));
+    let removedAreaIds: string[] = [];
+    try {
+      const parsed: unknown = JSON.parse(currentEvent.storeAreas || "[]");
+      if (Array.isArray(parsed)) {
+        removedAreaIds = parsed
+          .filter((area): area is { id: string } => !!area && typeof area === "object" && typeof area.id === "string")
+          .map((area) => area.id)
+          .filter((id) => !nextAreaIds.has(id));
+      }
+    } catch {
+      removedAreaIds = [];
+    }
+
+    if (removedAreaIds.length > 0) {
+      let activeTargetAreaIds: string[] = [];
+      try {
+        const settings = JSON.parse(currentEvent.stampRallySettings || "{}") as { enabled?: unknown; targetAreaIds?: unknown };
+        if (settings.enabled === true && Array.isArray(settings.targetAreaIds)) {
+          activeTargetAreaIds = settings.targetAreaIds.filter((id): id is string => typeof id === "string");
+        }
+      } catch {
+        activeTargetAreaIds = [];
+      }
+      const removesActiveTarget = removedAreaIds.some((id) => activeTargetAreaIds.includes(id));
+      const activeCircles = await db.select({ settings: circle.settings }).from(circle).where(and(
+        eq(circle.eventId, eventId),
+        isNull(circle.deletedAt),
+      ));
+      const removesCircleLocation = activeCircles.some((row) => {
+        try {
+          const settings = JSON.parse(row.settings || "{}") as { storeAreaId?: unknown };
+          return typeof settings.storeAreaId === "string" && removedAreaIds.includes(settings.storeAreaId);
+        } catch {
+          return false;
+        }
+      });
+      if (removesActiveTarget || removesCircleLocation) {
+        apiError("CONFLICT", "スタンプラリー対象または出店場所で使用中のエリアです。先に設定を変更してください");
+      }
+    }
+
     await db.update(event)
       .set({ storeAreas: JSON.stringify(storeAreas) })
       .where(and(eq(event.id, eventId), isNull(event.deletedAt)));

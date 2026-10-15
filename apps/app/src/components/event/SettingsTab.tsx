@@ -328,7 +328,7 @@ export function SettingsTab({ eventId, event }: SettingsTabProps) {
             <h3 className="text-xs font-bold uppercase tracking-wider">店舗エリア</h3>
           </div>
           <p className="font-mono text-[11px] text-muted-foreground leading-[1.6]">
-            校舎名・フロアなどを登録すると、サークル作成時に出店場所を割り当てられ、来場者の出店一覧にも表示されます。
+            校舎名・フロアなどを登録すると、サークル作成時に出店場所を割り当てられ、来場者の出店一覧にも表示されます。使用中のエリアは、出店場所とスタンプラリー対象を変更してから削除してください。
           </p>
           <div className="flex flex-wrap gap-2">
             {storeAreas.map((area) => (
