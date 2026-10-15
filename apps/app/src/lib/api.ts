@@ -1542,6 +1542,8 @@ export const adminApi = {
     fetchApi<{ success: boolean }>(`/api/admin/events/${id}`, { method: "PATCH", body: data }),
   deleteEvent: (id: string) =>
     fetchApi<{ success: boolean }>(`/api/admin/events/${id}`, { method: "DELETE" }),
+  restoreEvent: (id: string) =>
+    fetchApi<{ success: boolean }>(`/api/admin/events/${id}/restore`, { method: "POST" }),
   // 契約入金履歴 (2026-07-15)
   listPayments: (eventId: string) =>
     fetchApi<ContractPayment[]>(`/api/admin/events/${eventId}/payments`),
@@ -1636,6 +1638,7 @@ export type BillingStatus = "active" | "trial" | "suspended" | "unpaid";
 export interface AdminEvent {
   id: string;
   eventName: string;
+  deletedAt: string | null;
   ownerEmail: string | null;
   plan: string;
   billingStatus: BillingStatus;

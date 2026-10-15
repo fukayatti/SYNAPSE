@@ -46,6 +46,7 @@ circleRoutes.get("/", async (c) => {
       managerEmail: membership.userEmail,
     })
     .from(circle)
+    .innerJoin(event, eq(event.id, circle.eventId))
     .leftJoin(
       membership,
       and(
@@ -54,10 +55,12 @@ circleRoutes.get("/", async (c) => {
       )
     );
 
-  // 論理削除済み(deletedAt != null)は常に除外する
-  const where = eventId
-    ? and(eq(circle.eventId, eventId), isNull(circle.deletedAt))
-    : isNull(circle.deletedAt);
+  // 2026-10-16: 親イベント削除後に全件一覧や既知ID経由でサークルを選べないようにする。
+  const where = and(
+    isNull(event.deletedAt),
+    isNull(circle.deletedAt),
+    eventId ? eq(circle.eventId, eventId) : undefined
+  );
 
   const circles = await query.where(where);
 
@@ -95,6 +98,7 @@ circleRoutes.get("/:id", async (c) => {
       managerEmail: membership.userEmail,
     })
     .from(circle)
+    .innerJoin(event, eq(event.id, circle.eventId))
     .leftJoin(
       membership,
       and(
@@ -102,7 +106,7 @@ circleRoutes.get("/:id", async (c) => {
         eq(membership.role, "circle_manager")
       )
     )
-    .where(and(eq(circle.id, id), isNull(circle.deletedAt)));
+    .where(and(eq(circle.id, id), isNull(circle.deletedAt), isNull(event.deletedAt)));
 
   if (circles.length === 0) {
     apiError("NOT_FOUND", "サークルが見つかりません");

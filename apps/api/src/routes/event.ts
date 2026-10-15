@@ -1103,8 +1103,18 @@ eventRoutes.delete("/:id", async (c) => {
   }
 
   const id = c.req.param("id");
-  // 物理削除せず deletedAt に時刻を書き込む (論理削除)
-  await db.update(event).set({ deletedAt: new Date() }).where(eq(event.id, id));
+  const existing = await db
+    .select({ deletedAt: event.deletedAt })
+    .from(event)
+    .where(eq(event.id, id));
+  if (!existing[0]) apiError("NOT_FOUND", "イベントが見つかりません");
+  // 2026-10-16: 子サークルにも同じ時刻を記録し、後からイベントごと復元できるようにする。
+  const deletedAt = existing[0].deletedAt ?? new Date();
+  await db.update(event).set({ deletedAt }).where(eq(event.id, id));
+  await db
+    .update(circle)
+    .set({ deletedAt })
+    .where(and(eq(circle.eventId, id), isNull(circle.deletedAt)));
   return c.json({ success: true });
 });
 

@@ -14,7 +14,7 @@ import { FormField, FormSelect, FormSubmitButton } from "@/components/ui/FormFie
 import { Label } from "@/components/ui/label";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { toast } from "sonner";
-import { Calendar, Trash2, Settings2, Save, Eye, Search, Coins, Plus } from "lucide-react";
+import { Calendar, Trash2, Settings2, Save, Eye, Search, Coins, Plus, RotateCcw } from "lucide-react";
 
 // SaaS 運営: イベント/契約管理 (2026-07-12 Phase C / 2026-07-15 契約金額・入金履歴で拡充)。
 // 全テナント(イベント)の契約状態・サークル上限・契約金額・入金履歴を手動で管理する
@@ -46,6 +46,7 @@ export function SaasEventsTab() {
   const [impersonatingId, setImpersonatingId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | BillingStatus>("all");
+  const [deletionFilter, setDeletionFilter] = useState<"active" | "deleted">("active");
 
   // 入金の追加フォーム (編集中テナント向け)
   const [pay, setPay] = useState({ amount: 0, method: "銀行振込", date: "", note: "" });
@@ -107,13 +108,23 @@ export function SaasEventsTab() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["adminEvents"] });
       queryClient.invalidateQueries({ queryKey: ["adminOverview"] });
-      toast.success("イベントを削除しました");
+      toast.success("イベントを削除しました。削除済みイベントから復元できます。");
       setPendingDelete(null);
     },
     onError: (e: any) => {
       toast.error(e.message || "削除に失敗しました");
       setPendingDelete(null);
     },
+  });
+
+  const restore = useMutation({
+    mutationFn: (id: string) => adminApi.restoreEvent(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["adminEvents"] });
+      queryClient.invalidateQueries({ queryKey: ["adminOverview"] });
+      toast.success("イベントと所属サークルを復元しました");
+    },
+    onError: (e: any) => toast.error(e.message || "復元に失敗しました"),
   });
 
   const addPayment = useMutation({
@@ -173,6 +184,8 @@ export function SaasEventsTab() {
 
   // 検索/状態フィルタ
   const shown = (events ?? []).filter((e) => {
+    // 2026-10-16: 削除済みイベントは専用フィルタから復元できる。
+    if (deletionFilter === "deleted" ? !e.deletedAt : !!e.deletedAt) return false;
     if (statusFilter !== "all" && e.billingStatus !== statusFilter) return false;
     if (search.trim()) {
       const q = search.trim().toLowerCase();
@@ -208,7 +221,7 @@ export function SaasEventsTab() {
       <div className="border-b-thick border-border pb-3">
         <h2 className="text-sm font-bold flex items-center gap-2 uppercase tracking-wider">
           <Calendar className="h-4 w-4" />
-          契約管理 ({events?.length || 0})
+          契約管理 ({shown.length})
         </h2>
         <p className="text-[11px] text-muted-foreground font-mono mt-1">
           テナント横断の契約管理。プラン・上限・状態・契約金額・入金履歴を手動で管理します(内容は開けません)。
@@ -241,6 +254,18 @@ export function SaasEventsTab() {
           />
         </div>
         <div className="flex flex-wrap gap-1">
+          {(["active", "deleted"] as const).map((s) => (
+            <button
+              key={s}
+              type="button"
+              onClick={() => setDeletionFilter(s)}
+              className={`text-[10px] font-bold uppercase border-thick px-2 h-9 ${
+                deletionFilter === s ? "border-accent bg-accent text-accent-foreground" : "border-border hover:bg-muted"
+              }`}
+            >
+              {s === "active" ? "有効" : "削除済み"}
+            </button>
+          ))}
           {STATUS_FILTERS.map((s) => (
             <button
               key={s}
@@ -269,6 +294,11 @@ export function SaasEventsTab() {
                 <p className="font-bold text-foreground truncate">{e.eventName}</p>
                 <p className="text-[10px] text-muted-foreground truncate">owner: {e.ownerEmail || "—"}</p>
                 <div className="flex flex-wrap gap-2 text-[10px] mt-1">
+                  {e.deletedAt && (
+                    <span className="border-thin border-error text-error px-1.5 py-0.5">
+                      削除済み · {toDateInput(e.deletedAt)}
+                    </span>
+                  )}
                   <span className="border-thin border-border px-1.5 py-0.5 uppercase">{e.plan}</span>
                   <span
                     className={`border-thin px-1.5 py-0.5 uppercase ${
@@ -295,6 +325,17 @@ export function SaasEventsTab() {
                 </div>
               </div>
               <div className="flex items-center gap-2 shrink-0">
+                {e.deletedAt ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 text-[10px]"
+                    disabled={restore.isPending}
+                    onClick={() => restore.mutate(e.id)}
+                  >
+                    <RotateCcw className="h-3.5 w-3.5 mr-1" /> 復元
+                  </Button>
+                ) : <>
                 <Button
                   variant="outline"
                   size="sm"
@@ -315,6 +356,7 @@ export function SaasEventsTab() {
                 >
                   <Trash2 className="h-3.5 w-3.5" />
                 </button>
+                </>}
               </div>
             </div>
           ))}
@@ -476,7 +518,7 @@ export function SaasEventsTab() {
       <ConfirmDialog
         isOpen={!!pendingDelete}
         title="イベントを削除しますか?"
-        description={`「${pendingDelete?.eventName}」を論理削除します。この操作は元に戻せません。`}
+        description={`「${pendingDelete?.eventName}」と所属サークルを論理削除します。削除済みイベント一覧から期間制限なく復元できます。`}
         confirmLabel="削除する"
         onConfirm={() => pendingDelete && del.mutate(pendingDelete.id)}
         onCancel={() => setPendingDelete(null)}
