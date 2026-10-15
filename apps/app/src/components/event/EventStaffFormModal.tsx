@@ -91,7 +91,7 @@ export function EventStaffFormModal({ eventId, isOpen, onClose }: EventStaffForm
 
         <FormField
           id="inviteMaxUses"
-          label={form.purpose === "event_manager" ? "最大使用回数 (人数)" : "使用可能回数 (何サークル分)"}
+          label={`${form.purpose === "event_manager" ? "最大使用回数 (人数)" : "使用可能回数 (何サークル分)"}${form.maxUses === 0 ? "（無制限）" : ""}`}
           type="number"
           min={0}
           max={100}
@@ -100,10 +100,10 @@ export function EventStaffFormModal({ eventId, isOpen, onClose }: EventStaffForm
             const n = parseInt(e.target.value);
             setForm({ ...form, maxUses: Number.isNaN(n) ? 0 : Math.max(0, n) });
           }}
-          placeholder="1"
+          placeholder={form.maxUses === 0 ? "無制限" : "1"}
         />
         <p className="-mt-1 text-[10px] text-muted-foreground" aria-live="polite">
-          0回は無制限です（現在: {form.maxUses === 0 ? "無制限" : `${form.maxUses}回`}）。
+          0を入力すると無制限です（現在: {form.maxUses === 0 ? "無制限" : `${form.maxUses}回`}）。
         </p>
 
         <FormField

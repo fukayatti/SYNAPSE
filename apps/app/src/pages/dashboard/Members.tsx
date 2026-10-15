@@ -428,18 +428,19 @@ function MembersContent() {
           />
           <FormField
             id="max-uses"
-            label="最大使用回数"
+            label={`最大使用回数${inviteSettings.maxUses === 0 ? "（無制限）" : ""}`}
             type="number"
             min={0}
             max={100}
             value={inviteSettings.maxUses}
+            placeholder={inviteSettings.maxUses === 0 ? "無制限" : "1"}
             onChange={(e) => {
               const n = parseInt(e.target.value);
               setInviteSettings({ ...inviteSettings, maxUses: Number.isNaN(n) ? 0 : Math.max(0, n) });
             }}
           />
           <p className="-mt-1 text-[10px] text-muted-foreground" aria-live="polite">
-            0回は無制限です（現在: {inviteSettings.maxUses === 0 ? "無制限" : `${inviteSettings.maxUses}回`}）。
+            0を入力すると無制限です（現在: {inviteSettings.maxUses === 0 ? "無制限" : `${inviteSettings.maxUses}回`}）。
           </p>
           <FormField
             id="expires"

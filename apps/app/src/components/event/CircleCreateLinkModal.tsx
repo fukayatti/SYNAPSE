@@ -100,16 +100,16 @@ export function CircleCreateLinkModal({ eventId, isOpen, onClose }: CircleCreate
 					</p>
 					<FormField
 						id="circleInviteMaxUses"
-						label="使用可能回数（作成できるサークル数）"
+						label={`使用可能回数（作成できるサークル数${maxUses === 0 ? "・無制限" : ""}）`}
 						type="number"
 						min={0}
 						max={100}
 						value={maxUses}
 						onChange={(event) => setMaxUses(Number(event.target.value))}
-						placeholder="1"
+						placeholder={maxUses === 0 ? "無制限" : "1"}
 					/>
 					<p className="-mt-3 text-[10px] text-muted-foreground" aria-live="polite">
-						0回は無制限です（現在: {maxUses === 0 ? "無制限" : `${maxUses}回`}）。
+						0を入力すると無制限です（現在: {maxUses === 0 ? "無制限" : `${maxUses}回`}）。
 					</p>
 					<FormField
 						id="circleInviteExpiry"
