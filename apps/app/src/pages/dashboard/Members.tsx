@@ -275,8 +275,8 @@ function MembersContent() {
     createInviteMutation.mutate({
       circleId,
       role: inviteSettings.role,
-      // 空欄(0)のまま送られても妥当な下限に丸める
-      maxUses: Math.max(1, inviteSettings.maxUses || 1),
+      // 2026-10-15 Issue #122: 0回は無制限を表すため、使用回数制限を送らない。
+      maxUses: inviteSettings.maxUses === 0 ? undefined : Math.min(100, Math.max(1, inviteSettings.maxUses)),
       expiresInHours: Math.max(1, inviteSettings.expiresInHours || 24),
       createdBy: userEmail || "",
       targetEmail: inviteSettings.targetEmail || undefined,
@@ -426,12 +426,11 @@ function MembersContent() {
             value={inviteSettings.targetEmail}
             onChange={(e) => setInviteSettings({ ...inviteSettings, targetEmail: e.target.value })}
           />
-          {/* 編集中に 1 未満へ丸めると打ち直しがつっかえるため、空欄(0)を許容する。
-              実際の下限は送信時 (handleCreateInvite) に 1 以上へ丸める。 */}
           <FormField
             id="max-uses"
             label="最大使用回数"
             type="number"
+            min={0}
             max={100}
             value={inviteSettings.maxUses}
             onChange={(e) => {
@@ -439,6 +438,9 @@ function MembersContent() {
               setInviteSettings({ ...inviteSettings, maxUses: Number.isNaN(n) ? 0 : Math.max(0, n) });
             }}
           />
+          <p className="-mt-1 text-[10px] text-muted-foreground" aria-live="polite">
+            0回は無制限です（現在: {inviteSettings.maxUses === 0 ? "無制限" : `${inviteSettings.maxUses}回`}）。
+          </p>
           <FormField
             id="expires"
             label="有効期限（時間、最大168時間/7日間）"
@@ -493,7 +495,7 @@ function MembersContent() {
                       <Badge variant="warning">上限到達</Badge>
                     ) : null}
                     <span className="text-sm text-muted-foreground">
-                      使用: {token.usedCount}/{token.maxUses || "∞"}
+                      使用: {token.usedCount}/{token.maxUses == null || token.maxUses === 0 ? "無制限" : token.maxUses}
                     </span>
                     <span className="text-sm text-muted-foreground">
                       期限:{" "}

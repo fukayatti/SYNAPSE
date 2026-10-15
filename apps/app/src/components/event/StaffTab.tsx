@@ -207,7 +207,7 @@ export function StaffTab({
                     </div>
                     <div className="space-y-0.5 min-w-0">
                       <p className="font-bold text-foreground flex items-center gap-1.5">
-                        {purposeLabel}（{inv.usedCount}/{inv.maxUses ?? "∞"} 使用）
+                        {purposeLabel}（{inv.usedCount}/{inv.maxUses == null || inv.maxUses === 0 ? "無制限" : inv.maxUses} 使用）
                         {isExpired && (
                           <Badge variant="default" className="rounded-none text-[8px] font-mono border-thick border-destructive bg-destructive/10 text-destructive uppercase">期限切れ</Badge>
                         )}
