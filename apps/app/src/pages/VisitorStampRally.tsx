@@ -1,84 +1,189 @@
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, CheckCircle2, Ticket } from "lucide-react";
+import { ArrowLeft, CheckCircle2, ExternalLink, MapPin, Ticket } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ErrorState } from "@/components/ui/ErrorState";
+import { Modal } from "@/components/ui/Modal";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useVisitor } from "@/hooks/useVisitor";
-import { stampRallyApi } from "@/lib/api";
+import { stampRallyApi, type StampRallyCircle } from "@/lib/api";
 import { resolveAssetUrl } from "@/lib/asset-url";
 
+function safeHttpUrl(raw: string): string | null {
+  try {
+    const url = new URL(raw);
+    return url.protocol === "http:" || url.protocol === "https:" ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
+function dateLabel(value: string | null): string {
+  if (!value) return "受取完了";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "受取完了";
+  return new Intl.DateTimeFormat("ja-JP", { dateStyle: "medium", timeStyle: "short" }).format(date);
+}
+
+// 2026-10-15 (#123): 対象エリアを切替式にし、店舗ごとの注文詳細と景品案内を短く確認できるようにする。
 export default function VisitorStampRallyPage() {
   const navigate = useNavigate();
   const { userId, isLoaded } = useVisitor();
+  const [selectedAreaId, setSelectedAreaId] = useState<string | null>(null);
+  const [selectedCircle, setSelectedCircle] = useState<StampRallyCircle | null>(null);
   const query = useQuery({
     queryKey: ["visitor-stamp-rally", userId],
     queryFn: () => stampRallyApi.visitor(userId!),
     enabled: !!userId,
   });
 
+  const data = query.data;
+  const selectedArea = useMemo(() => {
+    if (!data?.areas.length) return null;
+    return data.areas.find((area) => area.id === selectedAreaId) ?? data.areas[0];
+  }, [data?.areas, selectedAreaId]);
+  const stampedCount = data?.stampedCount ?? 0;
+  const requiredCount = data?.requiredCount ?? 0;
+  const rulesUrl = data?.rulesUrl ? safeHttpUrl(data.rulesUrl) : null;
+
   if (!isLoaded || query.isLoading) {
     return <div className="max-w-2xl mx-auto p-4 space-y-4"><Skeleton className="h-12 w-full" /><Skeleton className="h-56 w-full" /></div>;
   }
 
   return (
-    <main className="max-w-2xl mx-auto p-4 pb-24 space-y-5">
+    <main className="max-w-2xl mx-auto p-4 pb-24 space-y-4">
       <button onClick={() => navigate("/visitor/mypage")} className="text-xs uppercase underline flex items-center gap-1">
         <ArrowLeft className="h-4 w-4" />マイページに戻る
       </button>
-      <header className="border-b-thick border-border pb-4">
-        <h1 className="text-2xl font-black uppercase flex items-center gap-2"><Ticket className="h-6 w-6" />[店舗利用実績]</h1>
-        <p className="text-xs text-muted-foreground mt-2">受取完了した店舗のサークルカットがスタンプになります。各エリアの条件を達成すると景品交換の案内が表示されます。</p>
+      <header className="border-b-thick border-border pb-3">
+        <h1 className="text-xl font-black uppercase flex items-center gap-2"><Ticket className="h-5 w-5" />[スタンプ]</h1>
+        <p className="text-xs text-muted-foreground mt-1">注文の受取が完了すると、利用した店舗にスタンプが付きます。</p>
       </header>
 
       {query.isError ? <ErrorState error={query.error} onRetry={() => query.refetch()} /> : null}
-      {!query.isError && (!query.data?.enabled || query.data.areas.length === 0) ? (
+      {!query.isError && (!data?.enabled || data.areas.length === 0) ? (
         <EmptyState icon={Ticket} message="このイベントではスタンプラリーを実施していません" />
       ) : null}
 
-      {!query.isError && query.data?.enabled && query.data.areas.map((area) => {
-        const stampedCount = area.circles.filter((circle) => circle.stamped).length;
-        const achieved = stampedCount >= area.requiredCount;
-        return (
-          <section key={area.id} className="border-b-thick border-border pb-5 space-y-4" aria-labelledby={`stamp-area-${area.id}`}>
-            <div className="flex items-end justify-between gap-3">
-              <div>
-                <h2 id={`stamp-area-${area.id}`} className="text-lg font-black">{area.name}</h2>
-                <p className="text-[11px] text-muted-foreground">対象店舗 {area.circles.length} 店舗・必要数 {area.requiredCount} 店舗</p>
+      {!query.isError && data?.enabled && data.areas.length > 0 && (
+        <>
+          <section className={`border-heavy border-border p-3 space-y-2 ${data.eligible ? "bg-primary text-primary-foreground" : "bg-muted"}`} aria-live="polite">
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <h2 className="text-sm font-black">{data.redeemedAt ? "景品交換済み" : data.eligible ? "景品交換できます" : "景品交換まであと少し"}</h2>
+                <p className={`text-xs mt-1 ${data.eligible ? "text-primary-foreground/85" : "text-muted-foreground"}`}>
+                  {data.legacy ? "エリアごとの条件で達成判定" : `利用店舗 ${stampedCount} / ${requiredCount} 店舗`}
+                </p>
               </div>
-              <p className={`shrink-0 text-sm font-black ${achieved ? "text-success" : "text-muted-foreground"}`} aria-live="polite">
-                {stampedCount} / {area.requiredCount}
-              </p>
+              <span className="text-xl font-black tabular-nums shrink-0">{data.legacy ? (data.eligible ? "達成" : "—") : <>{Math.min(stampedCount, requiredCount)}<span className="text-xs"> / {requiredCount}</span></>}</span>
             </div>
+            {data.eligible && (
+              <div className="border-t-thin border-current/40 pt-2 space-y-1">
+                <p className="font-bold text-sm">{data.rewardTitle || "景品交換"}</p>
+                {data.redemptionLocation && <p className="text-xs leading-relaxed whitespace-pre-wrap">{data.redemptionLocation}</p>}
+                <p className="text-[10px] opacity-80">景品交換場所でこの画面を提示してください。</p>
+                {data.redeemedAt && <p className="text-[10px]">交換記録: {dateLabel(data.redeemedAt)}</p>}
+              </div>
+            )}
+            {rulesUrl && (
+              <a href={rulesUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-[11px] underline underline-offset-2">
+                ルールを確認 <ExternalLink className="h-3 w-3" />
+              </a>
+            )}
+          </section>
 
-            <ul className="grid grid-cols-3 sm:grid-cols-4 gap-3" aria-label={`${area.name}のスタンプ`}>
-              {area.circles.map((circle) => (
-                <li key={circle.id} className={`min-w-0 text-center ${circle.stamped ? "" : "opacity-35 grayscale"}`}>
-                  <div className={`aspect-square border-thick border-border bg-background p-1 flex items-center justify-center ${circle.stamped ? "" : "border-dashed"}`}>
-                    {circle.iconImagePath ? (
-                      <img src={resolveAssetUrl(circle.iconImagePath)} alt={`${circle.name}のサークルカット`} className="w-full h-full object-contain" />
-                    ) : (
-                      <span className="text-[10px] font-black break-all">{circle.name}</span>
-                    )}
-                    {circle.stamped && <CheckCircle2 className="absolute h-5 w-5 sr-only" aria-hidden="true" />}
+          {data.areas.length > 1 && (
+            <nav className="flex gap-2 overflow-x-auto pb-1" aria-label="会場エリア">
+              {data.areas.map((area) => (
+                <button
+                  key={area.id}
+                  type="button"
+                  aria-pressed={(selectedArea?.id ?? data.areas[0]?.id) === area.id}
+                  onClick={() => setSelectedAreaId(area.id)}
+                  className={`shrink-0 border-thick border-border px-3 py-2 text-xs font-bold ${(selectedArea?.id ?? data.areas[0]?.id) === area.id ? "bg-primary text-primary-foreground" : "bg-background"}`}
+                >
+                  {area.name} <span className="opacity-75">{area.circles.filter((circle) => circle.stamped).length}/{area.requiredCount ?? area.circles.length}</span>
+                </button>
+              ))}
+            </nav>
+          )}
+
+          {selectedArea && (
+            <section className="border-thick border-border p-3 space-y-3" aria-labelledby={`stamp-area-${selectedArea.id}`}>
+              <div className="flex items-end justify-between gap-3">
+                <div>
+                  <h2 id={`stamp-area-${selectedArea.id}`} className="text-base font-black flex items-center gap-1.5"><MapPin className="h-4 w-4" />{selectedArea.name}</h2>
+                  <p className="text-[10px] text-muted-foreground mt-0.5">スタンプをタップすると注文内容を確認できます。</p>
+                </div>
+                <p className="shrink-0 text-xs font-black tabular-nums">
+                  {selectedArea.circles.filter((circle) => circle.stamped).length} / {selectedArea.requiredCount ?? selectedArea.circles.length}
+                </p>
+              </div>
+              {selectedArea.circles.length === 0 ? (
+                <p className="text-xs text-muted-foreground">このエリアに登録された店舗はありません。</p>
+              ) : (
+                <ul className="grid grid-cols-3 sm:grid-cols-4 gap-2" aria-label={`${selectedArea.name}のスタンプ`}>
+                  {selectedArea.circles.map((circle) => (
+                    <li key={circle.id} className="min-w-0">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedCircle(circle)}
+                        aria-label={`${circle.name}: ${circle.stamped ? "利用済み。注文内容を確認" : "未利用"}`}
+                        className={`w-full text-center ${circle.stamped ? "" : "opacity-50 grayscale"}`}
+                      >
+                        <span className={`relative aspect-square border-thick border-border bg-background p-1 flex items-center justify-center ${circle.stamped ? "" : "border-dashed"}`}>
+                          {circle.iconImagePath ? (
+                            <img src={resolveAssetUrl(circle.iconImagePath)} alt="" className="w-full h-full object-contain" />
+                          ) : (
+                            <span className="text-[10px] font-black break-all">{circle.name}</span>
+                          )}
+                          {circle.stamped && <CheckCircle2 className="absolute right-0.5 top-0.5 h-4 w-4 bg-background" aria-hidden="true" />}
+                        </span>
+                        <span className="block mt-1 text-[10px] font-bold leading-tight break-words">{circle.name}</span>
+                        <span className="block text-[9px] uppercase text-muted-foreground">{circle.stamped ? "利用済み" : "未利用"}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          )}
+        </>
+      )}
+
+      <Modal
+        isOpen={!!selectedCircle}
+        onClose={() => setSelectedCircle(null)}
+        title={`[${selectedCircle?.name ?? "店舗"}の注文]`}
+        subtitle="受取完了した注文と注文時点の商品名を表示しています。"
+        maxWidth="md"
+      >
+        {selectedCircle?.stamped ? (
+          selectedCircle.orders.length > 0 ? (
+            <ul className="space-y-3">
+              {selectedCircle.orders.map((order) => (
+                <li key={`${order.orderNumber}-${order.createdAt}`} className="border-thin border-border p-3 space-y-2">
+                  <div className="flex justify-between gap-3 text-[11px]">
+                    <span className="font-bold">注文 #{order.orderNumber}</span>
+                    <time className="text-muted-foreground text-right">{dateLabel(order.completedAt || order.createdAt)}</time>
                   </div>
-                  <p className="mt-1 text-[10px] font-bold leading-tight break-words">{circle.name}</p>
-                  <p className="text-[9px] uppercase text-muted-foreground">{circle.stamped ? "利用済み" : "未利用"}</p>
+                  {order.items.length ? (
+                    <ul className="divide-y divide-border">
+                      {order.items.map((item, index) => (
+                        <li key={`${item.menuName}-${index}`} className="py-1.5 text-xs">
+                          <div className="flex justify-between gap-3"><span>{item.menuName}</span><span className="shrink-0">×{item.quantity}</span></div>
+                          {item.toppings.length > 0 && <p className="text-[10px] text-muted-foreground mt-0.5">+ {item.toppings.join("、")}</p>}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : <p className="text-[11px] text-muted-foreground">注文品の記録はありません。</p>}
                 </li>
               ))}
             </ul>
-
-            {achieved && (
-              <div className="border-heavy border-border bg-primary text-primary-foreground p-4 space-y-2" role="status">
-                <h3 className="text-sm font-black uppercase flex items-center gap-2"><CheckCircle2 className="h-5 w-5" />[景品交換できます]</h3>
-                <p className="font-bold">{area.rewardTitle || "景品交換"}</p>
-                {area.rewardDescription && <p className="text-xs leading-relaxed">{area.rewardDescription}</p>}
-                <p className="text-[10px] text-primary-foreground/80">この画面をイベント本部の景品交換窓口で提示してください。</p>
-              </div>
-            )}
-          </section>
-        );
-      })}
+          ) : <p className="text-xs text-muted-foreground">利用履歴の詳細はありません。</p>
+        ) : <p className="text-xs text-muted-foreground">この店舗の受取完了注文はまだありません。</p>}
+      </Modal>
     </main>
   );
 }

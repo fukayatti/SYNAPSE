@@ -563,22 +563,70 @@ export function parseStoreAreas(raw?: string | null): EventStoreArea[] {
 export interface StampRallyArea {
   id: string;
   name: string;
-  requiredCount: number;
-  circleIds: string[];
-  rewardTitle: string;
-  rewardDescription: string;
+  requiredCount: number | null;
+  circles: StampRallyCircle[];
 }
 
 export interface StampRallySettings {
   enabled: boolean;
-  areas: StampRallyArea[];
+  targetAreaIds: string[];
+  requiredCount: number;
+  rewardTitle: string;
+  redemptionLocation: string;
+  rulesUrl: string;
 }
 
-export interface VisitorStampRallyArea extends StampRallyArea {
-  circles: (Circle & { stamped: boolean })[];
+export interface StampRallyCircle {
+  id: string;
+  name: string;
+  iconImagePath: string | null;
+  stamped: boolean;
+  orders: StampRallyOrder[];
+}
+
+export interface StampRallyOrder {
+  orderNumber: string;
+  completedAt: string | null;
+  createdAt: string;
+  items: Array<{
+    menuName: string;
+    quantity: number;
+    toppings: string[];
+  }>;
 }
 
 export interface VisitorStampRally {
+  enabled: boolean;
+  legacy: boolean;
+  stampedCircleIds: string[];
+  stampedCount: number;
+  targetCircleCount: number;
+  requiredCount: number;
+  eligible: boolean;
+  rewardTitle: string;
+  redemptionLocation: string;
+  rulesUrl: string;
+  redeemedAt: string | null;
+  areas: StampRallyArea[];
+}
+
+export interface StaffStampRallyLookup {
+  visitor: { id: string; eventId: string; displayId: number; nickname: string | null };
+  progress: VisitorStampRally;
+}
+
+export interface StampRallyRedemption {
+  id: string;
+  createdAt: string;
+  staffId: string;
+  eventUserId: string;
+  displayId: number;
+  nickname: string | null;
+}
+
+export interface VisitorStampRallyArea extends StampRallyArea {}
+
+export interface LegacyVisitorStampRally {
   enabled: boolean;
   stampedCircleIds: string[];
   areas: VisitorStampRallyArea[];
@@ -587,6 +635,15 @@ export interface VisitorStampRally {
 export const stampRallyApi = {
   visitor: (code: string) =>
     fetchApi<VisitorStampRally>(`/api/stamps/visitor/${encodeURIComponent(code)}`),
+  lookup: (eventId: string, code: string) =>
+    fetchApi<StaffStampRallyLookup>(`/api/stamps/event/${encodeURIComponent(eventId)}/lookup/${encodeURIComponent(code)}`),
+  redeem: (eventId: string, code: string) =>
+    fetchApi<{ success: boolean; redemption: { id: string; createdAt: string } }>(`/api/stamps/event/${encodeURIComponent(eventId)}/redeem`, {
+      method: "POST",
+      body: { code },
+    }),
+  redemptions: (eventId: string) =>
+    fetchApi<StampRallyRedemption[]>(`/api/stamps/event/${encodeURIComponent(eventId)}/redemptions`),
 };
 
 export type EventLifecycleStatus = "upcoming" | "live" | "ended" | "archived";

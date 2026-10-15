@@ -24,6 +24,7 @@ import { StaffTab } from "@/components/event/StaffTab";
 import { SettingsTab } from "@/components/event/SettingsTab";
 import { ContractTab } from "@/components/event/ContractTab";
 import { WristbandsTab } from "@/components/event/WristbandsTab";
+import { StampRedemptionsTab } from "@/components/event/StampRedemptionsTab";
 import { ExportTab } from "@/components/event/ExportTab";
 import { EventReviewsTab } from "@/pages/dashboard/Reviews";
 
@@ -202,6 +203,9 @@ export default function EventDashboard() {
               eventId={eventId}
             />
           )}
+
+          {/* TAB 6: スタンプラリー景品交換 */}
+          {activeTab === "stamp-redemptions" && <StampRedemptionsTab eventId={eventId} />}
         </div>
       </DashboardLayout>
     </EventAdminGuard>

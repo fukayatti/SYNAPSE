@@ -19,7 +19,7 @@ export default function VisitorHeader() {
   const links = [
     { to: "/visitor/events", label: "メニュー", icon: UtensilsCrossed, match: ["/visitor/events", "/visitor/menu"] },
     { to: "/visitor/mypage", label: "マイQR", icon: QrCode, match: ["/visitor/mypage"] },
-    { to: "/visitor/stamps", label: "利用実績", icon: Ticket, match: ["/visitor/stamps"] },
+    { to: "/visitor/stamps", label: "スタンプ", icon: Ticket, match: ["/visitor/stamps"] },
     { to: "/visitor/orders", label: "注文履歴", icon: Receipt, match: ["/visitor/orders"] },
   ];
 

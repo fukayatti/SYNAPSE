@@ -149,14 +149,19 @@ eventRoutes.get("/:id", async (c) => {
   return c.json(events[0]);
 });
 
-// 2026-10-07: エリアをまたぐスタンプラリーはイベント管理者が明示設定する。
-// 各サークルは一つのエリアにだけ割り当て、複数の実エリアをまとめる場合は
-// 同じ論理エリアへ登録することで、同じ購入が景品条件へ重複加算されるのを防ぐ。
+// 2026-10-15 (#123): 会場エリアとサークルの場所から対象店舗を算出し、
+// 選択エリア全体で異なる店舗数を数える。旧 areas[].circleIds 形式も読込互換のため受け付ける。
 eventRoutes.put(
   "/:id/stamp-rally-settings",
   zBody(z.object({
     settings: z.object({
       enabled: z.boolean(),
+      targetAreaIds: z.array(z.string().min(1).max(64)).max(50).optional(),
+      requiredCount: z.number().int().min(1).max(100).optional(),
+      rewardTitle: z.string().trim().max(100).optional(),
+      redemptionLocation: z.string().trim().max(500).optional(),
+      rulesUrl: z.string().trim().max(2048).optional(),
+      // 旧保存形式。新しい画面は targetAreaIds / requiredCount を送る。
       areas: z.array(z.object({
         id: z.string().min(1).max(64),
         name: z.string().trim().min(1).max(60),
@@ -175,30 +180,104 @@ eventRoutes.put(
     }
 
     const { settings } = c.req.valid("json");
-    if (settings.enabled && (
-      settings.areas.length === 0 || settings.areas.some((area) =>
-        area.circleIds.length === 0 || area.requiredCount > area.circleIds.length
-      )
-    )) {
-      apiError("BAD_REQUEST", "有効な各エリアに必要数以上の対象店舗を登録してください");
-    }
-    const assignedIds = settings.areas.flatMap((area) => area.circleIds);
-    if (new Set(assignedIds).size !== assignedIds.length) {
-      apiError("BAD_REQUEST", "サークルは複数のエリアへ重複登録できません");
-    }
-    if (assignedIds.length > 0) {
-      const assignedCircles = await db.select({ id: circle.id }).from(circle).where(and(
-        eq(circle.eventId, eventId),
-        isNull(circle.deletedAt),
-        inArray(circle.id, assignedIds),
-      ));
-      if (assignedCircles.length !== assignedIds.length) {
-        apiError("BAD_REQUEST", "対象外または削除済みのサークルが含まれています");
+    const eventRows = await db.select({ storeAreas: event.storeAreas }).from(event)
+      .where(and(eq(event.id, eventId), isNull(event.deletedAt))).limit(1);
+    if (!eventRows[0]) apiError("NOT_FOUND", "イベントが見つかりません");
+    if (settings.rulesUrl) {
+      let parsedRulesUrl: URL | null = null;
+      try { parsedRulesUrl = new URL(settings.rulesUrl); } catch { /* validation below returns a field error */ }
+      if (!parsedRulesUrl || (parsedRulesUrl.protocol !== "http:" && parsedRulesUrl.protocol !== "https:")) {
+        apiError("BAD_REQUEST", "ルールURLには http または https のURLを入力してください");
       }
     }
 
-    await db.update(event)
-      .set({ stampRallySettings: JSON.stringify(settings) })
+    let normalized: Record<string, unknown>;
+    if (settings.targetAreaIds !== undefined) {
+      const targetAreaIds = settings.targetAreaIds;
+      if (new Set(targetAreaIds).size !== targetAreaIds.length) {
+        apiError("BAD_REQUEST", "対象エリアを重複して選択できません");
+      }
+      let storeAreas: Array<{ id: string }> = [];
+      try {
+        const parsed: unknown = JSON.parse(eventRows[0]!.storeAreas || "[]");
+        if (Array.isArray(parsed)) {
+          storeAreas = parsed.filter((area): area is { id: string } =>
+            !!area && typeof area === "object" && typeof area.id === "string"
+          );
+        }
+      } catch {
+        storeAreas = [];
+      }
+      const validAreaIds = new Set(storeAreas.map((area) => area.id));
+      if (targetAreaIds.some((id) => !validAreaIds.has(id))) {
+        apiError("BAD_REQUEST", "イベントに登録されていない会場エリアが含まれています");
+      }
+
+      const eventCircles = await db.select({ id: circle.id, settings: circle.settings }).from(circle).where(and(
+        eq(circle.eventId, eventId),
+        isNull(circle.deletedAt),
+      ));
+      const targetCircleCount = eventCircles.filter((row) => {
+        try {
+          const circleSettings = JSON.parse(row.settings || "{}") as { storeAreaId?: unknown };
+          return typeof circleSettings.storeAreaId === "string" && targetAreaIds.includes(circleSettings.storeAreaId);
+        } catch {
+          return false;
+        }
+      }).length;
+      const requiredCount = settings.requiredCount ?? 3;
+      if (settings.enabled && (targetAreaIds.length === 0 || targetCircleCount < requiredCount)) {
+        apiError("BAD_REQUEST", "有効化するには対象エリアと必要数以上の店舗を指定してください");
+      }
+      if (settings.enabled && !settings.redemptionLocation?.trim()) {
+        apiError("BAD_REQUEST", "スタンプラリーを有効にするには景品交換場所を入力してください");
+      }
+      normalized = {
+        enabled: settings.enabled,
+        targetAreaIds,
+        requiredCount,
+        rewardTitle: settings.rewardTitle || "景品交換",
+        redemptionLocation: settings.redemptionLocation || "",
+        rulesUrl: settings.rulesUrl || "",
+      };
+    } else if (settings.areas) {
+      // 旧形式の更新を互換で受け付ける。既存管理画面・保存データの移行を急がせない。
+      if (settings.enabled && (
+        settings.areas.length === 0 || settings.areas.some((area) =>
+          area.circleIds.length === 0 || area.requiredCount > area.circleIds.length
+        )
+      )) {
+        apiError("BAD_REQUEST", "有効な各エリアに必要数以上の対象店舗を登録してください");
+      }
+      const assignedIds = settings.areas.flatMap((area) => area.circleIds);
+      if (new Set(assignedIds).size !== assignedIds.length) {
+        apiError("BAD_REQUEST", "サークルは複数のエリアへ重複登録できません");
+      }
+      if (assignedIds.length > 0) {
+        const assignedCircles = await db.select({ id: circle.id }).from(circle).where(and(
+          eq(circle.eventId, eventId),
+          isNull(circle.deletedAt),
+          inArray(circle.id, assignedIds),
+        ));
+        if (assignedCircles.length !== assignedIds.length) {
+          apiError("BAD_REQUEST", "対象外または削除済みのサークルが含まれています");
+        }
+      }
+      normalized = settings;
+    } else if (!settings.enabled) {
+      normalized = {
+        enabled: false,
+        targetAreaIds: [],
+        requiredCount: settings.requiredCount ?? 3,
+        rewardTitle: settings.rewardTitle || "景品交換",
+        redemptionLocation: settings.redemptionLocation || "",
+        rulesUrl: settings.rulesUrl || "",
+      };
+    } else {
+      apiError("BAD_REQUEST", "対象エリアを指定してください");
+    }
+
+    await db.update(event).set({ stampRallySettings: JSON.stringify(normalized) })
       .where(and(eq(event.id, eventId), isNull(event.deletedAt)));
     return c.json({ success: true });
   },

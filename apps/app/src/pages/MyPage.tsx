@@ -315,7 +315,7 @@ export default function MyPage() {
         </div>
       </section>
 
-      {/* 2026-10-07: 店舗利用実績と景品条件をマイQR画面からすぐ確認できるようにする。 */}
+      {/* 2026-10-15 (#123): スタンプと景品条件をマイQR画面からすぐ確認できるようにする。 */}
       <button
         onClick={() => navigate("/visitor/stamps")}
         className="group w-full flex items-center justify-between gap-2 border-thick border-border bg-background hover:bg-muted transition-all p-4 text-left"
@@ -325,7 +325,7 @@ export default function MyPage() {
             <Ticket className="h-5 w-5" />
           </span>
           <span>
-            <span className="block text-sm font-black uppercase tracking-tight">店舗利用実績を見る</span>
+            <span className="block text-sm font-black uppercase tracking-tight">スタンプを見る</span>
             <span className="block text-[11px] text-muted-foreground">利用した店舗と景品交換条件を確認</span>
           </span>
         </span>
