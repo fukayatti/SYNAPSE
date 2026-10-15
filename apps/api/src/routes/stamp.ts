@@ -430,7 +430,7 @@ stampRoutes.post(
     const session = await getSession(c);
     if (!session?.user) apiError("FORBIDDEN", "ログインが必要です");
     const result = await recordRedemption(db, eventId, visitor.id, session.user.id || session.user.email.toLowerCase());
-    if ("error" in result) apiError("BAD_REQUEST", result.error);
+    if ("error" in result && result.error) apiError("BAD_REQUEST", result.error);
     return c.json({ success: true, redemption: result.redemption }, 201);
   },
 );
@@ -471,7 +471,7 @@ stampRoutes.post(
     const session = await getSession(c);
     if (!session?.user) apiError("FORBIDDEN", "ログインが必要です");
     const result = await recordRedemption(db, visitor.eventId, visitor.id, session.user.id || session.user.email.toLowerCase());
-    if ("error" in result) apiError("BAD_REQUEST", result.error);
+    if ("error" in result && result.error) apiError("BAD_REQUEST", result.error);
     return c.json({ success: true, redemption: result.redemption }, 201);
   },
 );
