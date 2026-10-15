@@ -427,6 +427,26 @@ preOrderRoutes.post(
         apiError("CONFLICT", "カートが更新または確定されました。画面を再読み込みしてください");
       }
 
+      // 2026-10-15 Issue #120: 事前注文の保存時にも在庫不足を知らせる。保存済み内容の再送は
+      // 直前の一致確認で完了するため再検証せず、ここでは在庫を予約・減算しない。
+      // 他注文との競合はレジ確定時の原子的な在庫チェックで最終判定する。
+      const requestedMenuQuantities = new Map<string, number>();
+      for (const item of items) {
+        requestedMenuQuantities.set(
+          item.menuId,
+          (requestedMenuQuantities.get(item.menuId) ?? 0) + item.quantity,
+        );
+      }
+      for (const [menuId, requestedQuantity] of requestedMenuQuantities) {
+        const requestedMenu = menus.find((menuItem) => menuItem.id === menuId);
+        if (requestedMenu?.inventoryEnabled && requestedMenu.stockQuantity < requestedQuantity) {
+          apiError(
+            "BAD_REQUEST",
+            `${requestedMenu.name}の在庫が不足しています（残り${requestedMenu.stockQuantity}個 / 必要${requestedQuantity}個）`,
+          );
+        }
+      }
+
       const discountAmount = validatedCoupons.reduce((sum, item) => sum + item.discount, 0);
       const finalTotalPrice = Math.max(0, totalPrice - discountAmount);
       // preOrder.couponId は単一クーポン用の補助列。複数枚適用時は履歴テーブルを正本とする。

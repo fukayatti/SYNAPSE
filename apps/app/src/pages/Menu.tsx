@@ -23,6 +23,7 @@ import { ErrorState } from "@/components/ui/ErrorState";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { toast } from "sonner";
 import { EventTheme } from "@/components/EventTheme";
+import { ApiError } from "@/lib/api-error";
 import { ShoppingCart, Plus, Minus, CheckCircle, UtensilsCrossed, Ticket, X, QrCode } from "lucide-react";
 import { resolveAssetUrl } from "@/lib/asset-url";
 import { QRCodeSVG } from "qrcode.react";
@@ -451,6 +452,12 @@ function MenuPageContent() {
     },
   });
   const { mutate: saveDraft } = preOrderMutation;
+  const preOrderStockError =
+    preOrderMutation.error instanceof ApiError &&
+    preOrderMutation.error.code === "BAD_REQUEST" &&
+    /在庫が不足|売り切れ/.test(preOrderMutation.error.message)
+      ? `${preOrderMutation.error.message}。数量を調整してから再度お試しください。`
+      : null;
 
   useEffect(() => {
     const waitMs = preOrderMutation.isError
@@ -909,11 +916,17 @@ function MenuPageContent() {
               <div className="flex flex-wrap items-center gap-2 text-[10px] font-mono text-primary-foreground/80" role="status">
                 {preOrderMutation.isError ? (
                   <>
-                    <span>
-                      {isRetryablePreOrderSaveError(preOrderMutation.error)
-                        ? "カートを保存できませんでした。通信を確認して再試行してください。"
-                        : "カートの保存状態を確認できません。画面を再読み込みしてください。"}
-                    </span>
+                    {preOrderStockError ? (
+                      <span className="w-full font-bold text-destructive" role="alert">
+                        {preOrderStockError}
+                      </span>
+                    ) : (
+                      <span>
+                        {isRetryablePreOrderSaveError(preOrderMutation.error)
+                          ? "カートを保存できませんでした。通信を確認して再試行してください。"
+                          : "カートの保存状態を確認できません。画面を再読み込みしてください。"}
+                      </span>
+                    )}
                     {isRetryablePreOrderSaveError(preOrderMutation.error) && (
                       <Button
                         type="button"
