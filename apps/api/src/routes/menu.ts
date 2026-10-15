@@ -7,8 +7,11 @@ import { and, eq, inArray, isNull } from "drizzle-orm";
 import { ulid } from "ulidx";
 import { hasPermission } from "../utils/auth";
 import type { AppEnv } from "../types";
+import { JAPANESE_ALLERGENS_28 } from "@fesflow/config/allergens";
 
 const menuRoutes = new Hono<AppEnv>();
+const allergensSchema = z.array(z.enum(JAPANESE_ALLERGENS_28)).max(28)
+  .refine((allergens) => new Set(allergens).size === allergens.length, "アレルゲンの重複を解消してください");
 
 async function requireActiveCircle(c: Context<AppEnv>, circleId: string) {
   const db = c.get("db");
@@ -122,6 +125,7 @@ menuRoutes.post(
       // imagePath が送られず 400 Bad Request になっていた不具合の修正)。
       imagePath: z.string().optional(),
       additionalInfo: z.string().optional(),
+      allergens: allergensSchema,
       stockQuantity: z.number().min(0).optional(),
       inventoryEnabled: z.boolean().optional(),
       soldOut: z.boolean().optional(),
@@ -153,6 +157,7 @@ menuRoutes.post(
       // image_path は NOT NULL のため未指定時は空文字を入れる (フロントは空=画像なし扱い)
       imagePath: input.imagePath ?? "",
       additionalInfo: input.additionalInfo,
+      allergens: JSON.stringify(input.allergens),
       stockQuantity: input.stockQuantity ?? 0,
       inventoryEnabled: input.inventoryEnabled ?? false,
       soldOut: input.inventoryEnabled === true && (input.stockQuantity ?? 0) <= 0
@@ -190,6 +195,7 @@ menuRoutes.put(
       description: z.string().optional(),
       imagePath: z.string().optional(),
       additionalInfo: z.string().optional(),
+      allergens: allergensSchema.optional(),
       stockQuantity: z.number().min(0).optional(),
       inventoryEnabled: z.boolean().optional(),
       soldOut: z.boolean().optional(),
@@ -223,6 +229,7 @@ menuRoutes.put(
     if (input.imagePath !== undefined) updates.imagePath = input.imagePath;
     if (input.additionalInfo !== undefined)
       updates.additionalInfo = input.additionalInfo;
+    if (input.allergens !== undefined) updates.allergens = JSON.stringify(input.allergens);
     if (input.stockQuantity !== undefined)
       updates.stockQuantity = input.stockQuantity;
     if (input.inventoryEnabled !== undefined)

@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { wristbandApi, eventApi } from "@/lib/api";
+import { wristbandApi, eventApi, visitorApi } from "@/lib/api";
 import { useVisitor, saveVisitor } from "@/hooks/useVisitor";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -12,6 +12,8 @@ import { QRCodeSVG } from "qrcode.react";
 import { resolveAssetUrl } from "@/lib/asset-url";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { AllergenSelector } from "@/components/menu/AllergenSelector";
+import { parseJapaneseAllergens, type JapaneseAllergen } from "@fesflow/config/allergens";
 
 /**
  * 来場者マイページ (2026-07-11 注文履歴を /orders に分離しマイQR/身分表示に専念)。
@@ -36,6 +38,8 @@ export default function MyPage() {
   const [familyMonth, setFamilyMonth] = useState("");
   const [familyDay, setFamilyDay] = useState("");
   const [familyAge, setFamilyAge] = useState("");
+  const [familyAllergies, setFamilyAllergies] = useState<JapaneseAllergen[] | null>(null);
+  const [isAllergyEditorOpen, setIsAllergyEditorOpen] = useState(false);
   const queryClient = useQueryClient();
 
   useEffect(() => {
@@ -120,9 +124,31 @@ export default function MyPage() {
       setFamilyMonth("");
       setFamilyDay("");
       setFamilyAge("");
+      setIsAllergyEditorOpen(true);
       toast.success("家族のリストバンドを追加しました");
     },
     onError: (e: any) => toast.error(e?.message || "家族の追加に失敗しました"),
+  });
+
+  useEffect(() => {
+    if (!userStatus?.user) return;
+    const allergies = parseJapaneseAllergens(userStatus.user.allergies);
+    setFamilyAllergies(allergies);
+    if (allergies === null) setIsAllergyEditorOpen(true);
+  }, [userStatus?.user.allergies]);
+
+  const allergiesMutation = useMutation({
+    mutationFn: () => {
+      if (familyAllergies === null) throw new Error("アレルゲンまたは『なし』を選択してください");
+      return visitorApi.updateAllergies(userId, familyAllergies);
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["userWristbandStatus", userId] });
+      setIsAllergyEditorOpen(false);
+      familyMutation.reset();
+      toast.success("家族のアレルギーを保存しました");
+    },
+    onError: (e: any) => toast.error(e?.message || "家族のアレルギーを保存できませんでした"),
   });
 
   if (!isLoaded || statusLoading || isIssuing) {
@@ -313,6 +339,48 @@ export default function MyPage() {
             {familyMutation.isPending ? "追加しています…" : "家族を追加"}
           </Button>
         </div>
+      </section>
+
+      {/* 2026-10-15 (#124): アレルギーはリストバンド別でなく家族全員の和集合として保持する。
+          家族追加後に必ず編集欄を開き、追加メンバーの申告を確認できるようにする。 */}
+      <section className="border-thick border-border bg-background p-4 space-y-3">
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="text-sm font-black uppercase tracking-wider">家族のアレルギー</h2>
+          {!isAllergyEditorOpen && (
+            <Button type="button" variant="outline" className="h-8 rounded-none px-2 text-[10px]" onClick={() => setIsAllergyEditorOpen(true)}>
+              登録・編集
+            </Button>
+          )}
+        </div>
+        <p className="text-[11px] leading-relaxed text-muted-foreground">
+          ご家族の中に一人でも当てはまる品目をすべて登録してください。注文時にメニューと選択トッピングを照合し、該当時に警告します。
+        </p>
+        {!isAllergyEditorOpen ? (
+          <p className="border-thin border-border bg-muted/20 p-2 text-xs font-bold">
+            {familyAllergies === null ? "未登録" : familyAllergies.length > 0 ? familyAllergies.join("・") : "アレルゲンなし"}
+          </p>
+        ) : (
+          <div className="space-y-3">
+            {familyMutation.isSuccess && (
+              <p role="status" className="border-thick border-warning bg-warning/10 p-2 text-xs font-bold">
+                家族を追加しました。家族全員について、該当するアレルゲンを確認・更新してください。
+              </p>
+            )}
+            <AllergenSelector
+              value={familyAllergies}
+              onChange={setFamilyAllergies}
+              helpText="家族の誰か一人でも該当する品目はすべて選んでください。該当しない場合も『アレルゲンなし』を選択します。"
+            />
+            <Button
+              type="button"
+              className="w-full rounded-none"
+              disabled={familyAllergies === null || allergiesMutation.isPending}
+              onClick={() => allergiesMutation.mutate()}
+            >
+              {allergiesMutation.isPending ? "保存しています…" : "家族のアレルギーを保存"}
+            </Button>
+          </div>
+        )}
       </section>
 
       {/* 2026-10-15 (#123): スタンプと景品条件をマイQR画面からすぐ確認できるようにする。 */}

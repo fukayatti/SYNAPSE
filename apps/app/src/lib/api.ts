@@ -1,6 +1,7 @@
 import { apiErrorFromResponse, networkApiError } from "./api-error";
 import { readAuthContext } from "./auth-context";
 import type { RoleType } from "@fesflow/config";
+import type { JapaneseAllergen } from "@fesflow/config/allergens";
 import { createOrderResultSchema, type CreateOrderInput, type CreateOrderResult, type OrderStatus } from "@fesflow/config/order-contract";
 export type { CreateOrderInput, CreateOrderResult, OrderStatus } from "@fesflow/config/order-contract";
 
@@ -911,6 +912,8 @@ export interface Menu {
   category: string;
   price: number;
   description: string | null;
+  /** null=未登録、JSON配列の空文字列は明示的な「なし」。 */
+  allergens: string | null;
   imagePath: string | null;
   stockQuantity: number | null;
   inventoryEnabled: boolean;
@@ -929,6 +932,7 @@ export interface Topping {
   category: string;
   price: number;
   description: string | null;
+  allergens: string | null;
   imagePath: string | null;
   soldOut: boolean;
   stockQuantity: number;
@@ -1118,6 +1122,7 @@ export interface CreateMenuInput {
   category?: string;
   price: number;
   description?: string;
+  allergens: JapaneseAllergen[];
   imagePath?: string;
   imageUrl?: string;
   stockQuantity?: number;
@@ -1137,6 +1142,7 @@ export interface UpdateMenuInput {
   category?: string;
   price?: number;
   description?: string;
+  allergens?: JapaneseAllergen[];
   imagePath?: string | null;
   imageUrl?: string;
   stockQuantity?: number | null;
@@ -1157,6 +1163,7 @@ export interface CreateToppingInput {
   category?: string;
   price: number;
   description?: string;
+  allergens: JapaneseAllergen[];
   imagePath?: string;
   soldOut?: boolean;
   stockQuantity?: number;
@@ -1167,6 +1174,7 @@ export interface UpdateToppingInput {
   category?: string;
   price?: number;
   description?: string | null;
+  allergens?: JapaneseAllergen[];
   imagePath?: string | null;
   soldOut?: boolean;
   stockQuantity?: number;
@@ -1261,6 +1269,7 @@ export interface WristbandLookupResult {
     favoriteDate?: string | null;
     birthdayMonthDay?: string | null;
     age?: number | null;
+    allergies?: string | null;
     onboardedAt?: string | null;
   };
   wristband: {
@@ -1408,6 +1417,7 @@ export interface VisitorProfile {
   favoriteDate: string | null;
   birthdayMonthDay: string | null;
   age: number | null;
+  allergies?: string | null;
   onboardedAt: string | null;
 }
 
@@ -1423,6 +1433,11 @@ export const visitorApi = {
     fetchApi<VisitorProfile>("/api/wristbands/onboard", {
       method: "POST",
       body: data,
+    }),
+  updateAllergies: (userId: string, allergies: JapaneseAllergen[]) =>
+    fetchApi<{ success: boolean; allergies: JapaneseAllergen[] }>("/api/wristbands/allergies", {
+      method: "POST",
+      body: { userId, allergies },
     }),
 };
 

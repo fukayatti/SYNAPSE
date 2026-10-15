@@ -35,6 +35,8 @@ import type { CreateOrderInput } from "@fesflow/config/order-contract";
 import { ToppingSelection, parseToppingCategoryMaximums, parseToppingCategoryMinimums } from "@/components/menu/ToppingSelection";
 import { MenuCategoryFilter, menuCategoryKey } from "@/components/menu/MenuCategoryFilter";
 import { findVisitorRouteItem } from "@/lib/visitor-route";
+import { parseJapaneseAllergens } from "@fesflow/config/allergens";
+import { getCartAllergyWarnings, OrderAllergyWarning } from "@/features/orders/allergy-check";
 
 // 2026-07-13: 来場者モバイルオーダーもトッピング対応にするため、レジ (Register.tsx) と同じく
 // カートを「行 (line)」単位で持つ。同じメニューでもトッピング構成が違えば別行になる。
@@ -248,6 +250,7 @@ function MenuPageContent() {
     enabled: visitorLoaded && !!userId,
   });
   const activeWristband = wristbandStatus?.wristband;
+  const familyAllergies = parseJapaneseAllergens(wristbandStatus?.user.allergies);
   const canDisplayMyQr = !!activeWristband && ["active", "smartphone"].includes(activeWristband.status);
   const myQrButtonLabel = isWristbandStatusLoading
     ? "入場情報を確認中…"
@@ -571,6 +574,7 @@ function MenuPageContent() {
 
   // カート内トッピング編集用に menuId → メニュー(許可トッピング付き)を引けるようにする
   const menuMap = new Map((menus ?? []).map((m) => [m.id, m]));
+  const cartAllergyWarnings = getCartAllergyWarnings(cart, menuMap, familyAllergies);
 
   // 有効な外部モッドの一覧取得
   const getActiveMods = () => {
@@ -1052,6 +1056,12 @@ function MenuPageContent() {
             );
           })}
         </div>
+
+        <OrderAllergyWarning
+          warnings={cartAllergyWarnings}
+          familyAllergies={familyAllergies}
+          enabled={!!userId && cart.length > 0}
+        />
 
         <div className="border-t-thick border-border pt-3 space-y-2">
           {applicableCoupons.map((c) => (

@@ -30,6 +30,8 @@ export const eventUser = sqliteTable(
     // 2026-10-08: 入場時点の年齢と、年を含めない誕生日（月日）を別々に保持する。
     birthdayMonthDay: text("birthday_month_day"), // MM-DD
     age: integer("age"),
+    // 2026-10-15 (#124): 家族全員の申告をまとめたJSON配列。null=未登録、[]=該当なし。
+    allergies: text("allergies"),
     onboardedAt: integer("onboarded_at", { mode: "timestamp_ms" }), // 初回入力完了時刻
     createdAt: integer("created_at", { mode: "timestamp_ms" })
       .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)

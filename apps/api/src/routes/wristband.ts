@@ -8,9 +8,12 @@ import { zBody, zQuery } from "../z-validator";
 import { apiError } from "../http-error";
 import { audit } from "../utils/sudo";
 import type { AppEnv } from "../types";
+import { JAPANESE_ALLERGENS_28 } from "@fesflow/config/allergens";
 
 
 const wristbandRoutes = new Hono<AppEnv>();
+const allergyListSchema = z.array(z.enum(JAPANESE_ALLERGENS_28)).max(28)
+  .refine((allergies) => new Set(allergies).size === allergies.length, "アレルギー項目の重複を解消してください");
 
 async function getFamilyWristbands(db: DB, userId: string) {
   return db
@@ -737,8 +740,32 @@ wristbandRoutes.post(
       favoriteDate: updated.favoriteDate,
       birthdayMonthDay: updated.birthdayMonthDay,
       age: updated.age,
+      allergies: updated.allergies,
       onboardedAt: updated.onboardedAt,
     });
+  }
+);
+
+// 入場ウィザードの家族アレルギー登録 (2026-10-15, #124)。空配列は「なし」の確定値として保存する。
+wristbandRoutes.post(
+  "/allergies",
+  zBody(z.object({
+    userId: z.string().min(1),
+    allergies: allergyListSchema,
+  })),
+  async (c) => {
+    const db = c.get("db");
+    const { userId, allergies } = c.req.valid("json");
+    const [user] = await db.select().from(eventUser).where(eq(eventUser.id, userId));
+    if (!user) apiError("NOT_FOUND", "ユーザーが見つかりません");
+    if (!user.onboardedAt || user.status !== "available") {
+      apiError("CONFLICT", "入場登録後に家族のアレルギーを登録できます");
+    }
+
+    await db.update(eventUser)
+      .set({ allergies: JSON.stringify(allergies) })
+      .where(eq(eventUser.id, userId));
+    return c.json({ success: true, allergies });
   }
 );
 
