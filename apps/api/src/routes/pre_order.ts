@@ -329,7 +329,9 @@ preOrderRoutes.post(
         }
 
         // 2026-07-05: 売り切れメニューの事前オーダーをハードゲートで拒否する
-        if (m.soldOut) {
+        if (m.soldOut && !isStaleDraftWrite) {
+          // #120: 失われた応答の同一payload再送は後段で保存済みsnapshotと照合する。
+          // 保存済み注文の再送に、後から変わった売切状態を適用しない。
           apiError("BAD_REQUEST", `${m.name}は売り切れです`);
         }
 
@@ -344,7 +346,7 @@ preOrderRoutes.post(
           if (t.circleId !== circleId) {
             apiError("BAD_REQUEST", `トッピング ${t.name} は指定サークルに属していません`);
           }
-          if (t.soldOut) {
+          if (t.soldOut && !isStaleDraftWrite) {
             apiError("BAD_REQUEST", `${t.name}は売り切れです`);
           }
           const isLinked = menuToppingLinks.some(
