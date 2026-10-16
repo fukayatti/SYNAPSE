@@ -62,8 +62,8 @@ function MembersContent() {
   // ままになる。useAuth() (authChange 購読) から直接取得するよう統一する。
   const { circleId, role, userEmail, circleName: authCircleName, advancedPermissions } = useAuth();
   // 2026-10-16: 高度な権限管理 OFF では circle_staff が実効上 circle_manager 相当となるため、
-  // イベント管理者以外にはロール選択を出さない。権限の扱いは既存ポリシーに委ね、ここでは説明する。
-  // イベント管理者には既存の許可状態を保ち、MANAGEABLE_ROLES に circle_admin を含める。
+  // オーナーとイベント管理者にロール選択を表示する。circle_admin の付与は既存APIの許可範囲内。
+  // circle_staff へ与える実効権限と、ロール変更できる操作者の判定は分けて扱う。
   // 「ロールと権限」の説明は、拡張機能「スタッフ管理」が OFF なら staff:* (名簿の閲覧/編集/削除) を
   // 載せない。OFF ではスタッフ管理ページ自体が出ず、権限を持っていても使えないため (2026-10-05)。
   // クエリキーは DashboardLayout と共通 (["circle", circleId]) なので追加リクエストにならない。
@@ -73,7 +73,7 @@ function MembersContent() {
     enabled: !!circleId,
   });
   const staffExtensionEnabled = parseCircleSettings(circleData?.settings).extensions.staff;
-  // 2026-10-16: 高度な権限管理がOFFでも、サークル管理者はcircle_adminを付与できる。
+  // 2026-10-16: 高度な権限管理がOFFでも、オーナーとイベント管理者はcircle_adminを付与できる。
   // circle_staff の実効権限変換と、メンバーを編集できる実ロールの判定は別の責務として扱う。
   const canChooseRole = role === ROLES.CIRCLE_MANAGER || role === ROLES.EVENT_MANAGER;
   const circleName = authCircleName ?? "サークルダッシュボード";
@@ -715,7 +715,7 @@ function MembersContent() {
           {advancedPermissions === false && (
             <div className="mb-4 border-l-thick border-warning pl-3 text-sm leading-relaxed" role="note">
               高度な権限管理が OFF の場合、circle_staff は通常の機能権限の判定で circle_manager 相当として扱われます。メンバー管理などのオーナー限定操作は別途制御されます。
-              サークル管理者はこの画面から「管理者」ロールを付与できます。
+              オーナー（circle_manager）またはイベント管理者は、この画面から「管理者」ロールを付与できます。
               {role === ROLES.EVENT_MANAGER && (
                 <p className="mt-2">
                   ロールごとに権限を分ける場合は
