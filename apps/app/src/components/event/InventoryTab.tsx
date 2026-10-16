@@ -4,6 +4,7 @@ import { eventApi, type InventoryItem } from "@/lib/api";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState } from "@/components/ui/ErrorState";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { Modal } from "@/components/ui/Modal";
 import { Boxes, Radio, XCircle, AlertTriangle } from "lucide-react";
 
 // 全サークルの在庫/売り切れ一覧 (2026-07-12)
@@ -14,6 +15,7 @@ const LOW_STOCK = 5;
 export function InventoryTab({ eventId }: { eventId: string }) {
   const [live, setLive] = useState(false);
   const [onlyIssues, setOnlyIssues] = useState(false);
+  const [selectedItem, setSelectedItem] = useState<InventoryItem | null>(null);
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["event-inventory", eventId],
     queryFn: () => eventApi.inventory(eventId),
@@ -85,9 +87,12 @@ export function InventoryTab({ eventId }: { eventId: string }) {
           {shown.map((m: InventoryItem) => {
             const level = m.soldOut ? "out" : isLow(m) ? "low" : "ok";
             return (
-              <div
+              <button
+                type="button"
                 key={m.id}
-                className={`flex items-center justify-between gap-3 p-2.5 border-thin font-mono text-[12px] ${
+                aria-label={`${m.circleName}、${m.name} の在庫詳細を表示`}
+                onClick={() => setSelectedItem(m)}
+                className={`flex w-full flex-col items-stretch justify-between gap-2 p-3 text-left border-thin font-mono text-[12px] transition-colors hover:bg-muted/60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary sm:flex-row sm:items-center sm:gap-3 ${
                   level === "out"
                     ? "border-error bg-error/10"
                     : level === "low"
@@ -95,11 +100,11 @@ export function InventoryTab({ eventId }: { eventId: string }) {
                       : "border-border bg-background"
                 }`}
               >
-                <div className="min-w-0">
-                  <span className="text-muted-foreground">{m.circleName}</span>
-                  <span> · {m.name}</span>
+                <div className="min-w-0 space-y-1">
+                  <p className="break-words font-bold">{m.circleName}<span className="px-1 text-muted-foreground">｜</span>{m.name}</p>
+                  <p className="text-[10px] text-muted-foreground">{m.price.toLocaleString("ja-JP")}円</p>
                 </div>
-                <div className="flex items-center gap-1.5 shrink-0 tabular-nums">
+                <div className="flex shrink-0 items-center justify-between gap-2 tabular-nums sm:justify-end">
                   {level === "out" ? (
                     <span className="flex items-center gap-1 text-error font-bold">
                       <XCircle className="h-3.5 w-3.5" /> 売り切れ
@@ -113,15 +118,32 @@ export function InventoryTab({ eventId }: { eventId: string }) {
                   ) : (
                     <span className="text-success">販売中</span>
                   )}
+                  <span className="text-[10px] text-muted-foreground">詳細を見る</span>
                 </div>
-              </div>
+              </button>
             );
           })}
         </div>
       )}
       <p className="font-mono text-[10px] text-muted-foreground">
-        在庫 {LOW_STOCK} 以下を僅少(黄)として警告します。在庫の増減はレジ/サークル側の操作で反映されます。
+        在庫 {LOW_STOCK} 以下を僅少(黄)として表示します。項目を選ぶと商品情報と在庫状況を確認できます。
       </p>
+
+      <Modal
+        isOpen={!!selectedItem}
+        onClose={() => setSelectedItem(null)}
+        title={selectedItem ? `${selectedItem.circleName}｜${selectedItem.name}` : "商品詳細"}
+        maxWidth="md"
+      >
+        {selectedItem && <dl className="grid grid-cols-1 gap-3 text-xs sm:grid-cols-2">
+          <div className="border-b-thin border-border pb-2"><dt className="text-muted-foreground">店舗</dt><dd className="break-words font-bold">{selectedItem.circleName}</dd></div>
+          <div className="border-b-thin border-border pb-2"><dt className="text-muted-foreground">商品</dt><dd className="break-words font-bold">{selectedItem.name}</dd></div>
+          <div className="border-b-thin border-border pb-2"><dt className="text-muted-foreground">価格</dt><dd>{selectedItem.price.toLocaleString("ja-JP")}円</dd></div>
+          <div className="border-b-thin border-border pb-2"><dt className="text-muted-foreground">販売状態</dt><dd className={selectedItem.soldOut ? "font-bold text-error" : "font-bold text-success"}>{selectedItem.soldOut ? "売り切れ" : "販売中"}</dd></div>
+          {selectedItem.stockManaged && <div className="border-b-thin border-border pb-2"><dt className="text-muted-foreground">在庫数</dt><dd>{selectedItem.stockQuantity}個{selectedItem.stockQuantity <= LOW_STOCK && !selectedItem.soldOut ? "（僅少）" : ""}</dd></div>}
+          <div className="border-b-thin border-border pb-2"><dt className="text-muted-foreground">在庫管理</dt><dd>{selectedItem.stockManaged ? "有効" : "無効"}</dd></div>
+        </dl>}
+      </Modal>
     </div>
   );
 }

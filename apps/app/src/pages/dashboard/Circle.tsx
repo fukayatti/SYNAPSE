@@ -7,6 +7,7 @@ import {
   membershipApi,
   parseCircleSettings,
   parseEventPaymentMethods,
+  parseStoreAreas,
   type OrderFlowMode,
 } from "@/lib/api";
 import DashboardLayout from "@/components/DashboardLayout";
@@ -29,6 +30,7 @@ import { ToggleSwitch } from "@/components/ui/ToggleSwitch";
 import { ExtensionsManager } from "@/components/circle/ExtensionsManager";
 import { toast } from "sonner";
 import { Save, UserCheck, CreditCard, Crown, Clock, ChefHat, CheckCircle2 } from "lucide-react";
+import { useUnsavedChanges } from "@/components/UnsavedNavigationGuard";
 
 // 注文モードの選択肢
 const ORDER_FLOW_OPTIONS: {
@@ -85,6 +87,7 @@ function CircleSettingsContent() {
   const [staffEnabled, setStaffEnabled] = useState(false);
   // 対応する支払い方法 (2026-07-12)。イベントの paymentMethods の部分集合。
   const [acceptedPayments, setAcceptedPayments] = useState<string[]>([]);
+  const [storeAreaId, setStoreAreaId] = useState<string | null>(null);
   // 2026-07-16: 「運用設定」(注文モード・拡張機能・支払い方法) は circleApi.updateSettings が
   // settings カラムを丸ごと上書きする1本のAPIのため、3つを分けて保存することはできない。
   // そのため見た目も1つのセクションにまとめ、この3項目分の未保存判定を1つのスナップショットで行う。
@@ -93,6 +96,7 @@ function CircleSettingsContent() {
     stockEnabled: false,
     staffEnabled: false,
     acceptedPayments: [] as string[],
+    storeAreaId: null as string | null,
   });
 
   // オーナー譲渡確認
@@ -136,11 +140,13 @@ function CircleSettingsContent() {
       setStockEnabled(s.extensions.stock);
       setStaffEnabled(s.extensions.staff);
       setAcceptedPayments(s.acceptedPayments);
+      setStoreAreaId(s.storeAreaId);
       setSettingsSnapshot({
         orderFlowMode: s.orderFlowMode,
         stockEnabled: s.extensions.stock,
         staffEnabled: s.extensions.staff,
         acceptedPayments: s.acceptedPayments,
+        storeAreaId: s.storeAreaId,
       });
     }
   }, [circle]);
@@ -152,6 +158,7 @@ function CircleSettingsContent() {
     enabled: !!circle?.eventId,
   });
   const eventPayments = parseEventPaymentMethods(eventData?.paymentMethods);
+  const eventStoreAreas = parseStoreAreas(eventData?.storeAreas);
 
   const updateCircle = useMutation({
     mutationFn: async (input: {
@@ -183,18 +190,20 @@ function CircleSettingsContent() {
 
   // 「運用設定」の保存。circleApi.updateSettings は settings カラムを丸ごと上書きするため、
   // 注文モード・拡張機能・支払い方法を常にまとめて送る。旧stock値も後方互換用に保持する。
+  const settingsDraft = { orderFlowMode, stockEnabled, staffEnabled, acceptedPayments, storeAreaId };
   const updateSettings = useMutation({
-    mutationFn: async () =>
+    mutationFn: async (draft: typeof settingsDraft) =>
       circleApi.updateSettings(circleId, {
-        orderFlowMode,
-        extensions: { stock: stockEnabled, staff: staffEnabled },
+        orderFlowMode: draft.orderFlowMode,
+        extensions: { stock: draft.stockEnabled, staff: draft.staffEnabled },
         // イベントに存在する方法だけ残す (イベント側で削除された方法を掃除)
-        acceptedPayments: acceptedPayments.filter((p) => eventPayments.includes(p)),
+        acceptedPayments: draft.acceptedPayments.filter((p) => eventPayments.includes(p)),
+        storeAreaId: draft.storeAreaId,
       }),
-    onSuccess: () => {
+    onSuccess: (_result, draft) => {
       toast.success("運用設定を保存しました");
       queryClient.invalidateQueries({ queryKey: ["circle", circleId] });
-      setSettingsSnapshot({ orderFlowMode, stockEnabled, staffEnabled, acceptedPayments });
+      setSettingsSnapshot(draft);
     },
     onError: (error: any) => toast.error(error.message || "設定の保存に失敗しました"),
   });
@@ -244,8 +253,33 @@ function CircleSettingsContent() {
   // 未保存の変更があるかどうか (セクション単位)。変更が無ければ保存ボタンを disabled にする。
   const isFormDirty = JSON.stringify(form) !== JSON.stringify(formSnapshot);
   const isSettingsDirty =
-    JSON.stringify({ orderFlowMode, stockEnabled, staffEnabled, acceptedPayments }) !==
-    JSON.stringify(settingsSnapshot);
+    JSON.stringify(settingsDraft) !== JSON.stringify(settingsSnapshot);
+
+  // 2026-10-16: 基本情報と運用設定の下書きを離脱確認から順に保存する。
+  useUnsavedChanges({
+    isDirty: isFormDirty || isSettingsDirty,
+    onSave: async () => {
+      if (isFormDirty) {
+        if (!form.name.trim()) throw new Error("サークル名を入力してください。");
+        await updateCircle.mutateAsync({
+          id: circleId,
+          name: form.name,
+          description: form.description,
+          iconImagePath: form.iconImagePath || null,
+          backgroundImagePath: form.backgroundImagePath || null,
+        });
+      }
+      if (isSettingsDirty) await updateSettings.mutateAsync(settingsDraft);
+    },
+    onDiscard: () => {
+      setForm(formSnapshot);
+      setOrderFlowMode(settingsSnapshot.orderFlowMode);
+      setStockEnabled(settingsSnapshot.stockEnabled);
+      setStaffEnabled(settingsSnapshot.staffEnabled);
+      setAcceptedPayments(settingsSnapshot.acceptedPayments);
+      setStoreAreaId(settingsSnapshot.storeAreaId);
+    },
+  });
 
   // 上位管理者(オーナー/イベント管理者/システム管理者)のみオーナー譲渡を実行できる
   const canTransfer =
@@ -448,13 +482,31 @@ function CircleSettingsContent() {
               </div>
             </div>
 
+            {/* 2026-10-16 (#127): エリアIDはイベント共通の一覧を参照し、来場者表示とスタンプラリーで使い回す。 */}
+            <div className="space-y-2 border-t-thin border-border pt-4">
+              <Label htmlFor="circleStoreArea" className="text-xs font-bold uppercase">店舗エリア</Label>
+              <select
+                id="circleStoreArea"
+                className="w-full border-thick border-border bg-background p-3 font-mono text-sm"
+                value={storeAreaId ?? ""}
+                onChange={(e) => setStoreAreaId(e.target.value || null)}
+              >
+                <option value="">未設定</option>
+                {storeAreaId && !eventStoreAreas.some((area) => area.id === storeAreaId) && (
+                  <option value={storeAreaId}>削除済みエリア（別のエリアを選択）</option>
+                )}
+                {eventStoreAreas.map((area) => <option key={area.id} value={area.id}>{area.name}</option>)}
+              </select>
+              <p className="text-[11px] text-muted-foreground">イベントが登録した店舗エリアを選択します。</p>
+            </div>
+
             {/* 運用設定 (注文モード + 拡張機能 + 支払い方法) の保存。3項目を常にまとめて送る。 */}
             <div className="border-t-thick border-border pt-4 flex items-center justify-end gap-3">
               {isSettingsDirty && (
                 <span className="text-[10px] font-bold uppercase text-warning">未保存の変更があります</span>
               )}
               <Button
-                onClick={() => updateSettings.mutate()}
+                onClick={() => updateSettings.mutate(settingsDraft)}
                 disabled={!isSettingsDirty || updateSettings.isPending}
                 className="h-11 border-thick border-primary bg-primary font-mono text-xs font-bold text-primary-foreground rounded-none hover:bg-background hover:text-foreground uppercase px-6"
               >

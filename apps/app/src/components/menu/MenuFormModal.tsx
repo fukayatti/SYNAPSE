@@ -17,6 +17,8 @@ import { Save } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { parseToppingCategoryMaximums, parseToppingCategoryMinimums } from "@/components/menu/ToppingSelection";
+import { AllergenSelector } from "@/components/menu/AllergenSelector";
+import { parseJapaneseAllergens, type JapaneseAllergen } from "@fesflow/config/allergens";
 
 interface MenuFormModalProps {
   circleId: string;
@@ -32,6 +34,7 @@ type MenuForm = {
   price: number;
   imagePath: string;
   description: string;
+  allergens: JapaneseAllergen[] | null;
   // 売り切れは在庫管理ONなら残数から決め、OFFなら手動で切り替える。
   soldOut: boolean;
   inventoryEnabled: boolean;
@@ -78,13 +81,15 @@ export function MenuFormModal({ circleId, isOpen, onClose, menu, onDelete }: Men
   } = useEntityForm<MenuForm, MenuWithToppings>({
     isOpen,
     entity: menu,
-    emptyForm: { name: "", category: "", price: 0, imagePath: "", description: "", soldOut: false, inventoryEnabled: false, stockQuantity: 0, toppingIds: [], defaultToppingIds: [], toppingWizardEnabled: false, toppingCategoryMinimums: {}, toppingCategoryMaximums: {} },
+    // 2026-10-16: 新規メニューでも対応トッピングを選択でき、アレルゲン未選択を検証できるよう両方を初期化する。
+    emptyForm: { name: "", category: "", price: 0, imagePath: "", description: "", allergens: null, soldOut: false, inventoryEnabled: false, stockQuantity: 0, toppingIds: [], defaultToppingIds: [], toppingWizardEnabled: false, toppingCategoryMinimums: {}, toppingCategoryMaximums: {} },
     toForm: (m) => ({
       name: m.name,
       category: m.category || "",
       price: m.price,
       imagePath: m.imagePath || "",
       description: m.description || "",
+      allergens: parseJapaneseAllergens(m.allergens),
       soldOut: m.soldOut ?? false,
       inventoryEnabled: m.inventoryEnabled ?? false,
       stockQuantity: m.stockQuantity ?? 0,
@@ -97,14 +102,16 @@ export function MenuFormModal({ circleId, isOpen, onClose, menu, onDelete }: Men
     onClose,
     toastId: "menu-auto-save",
     invalidateKeys: [["menus", circleId]],
-    create: (data) =>
-      menuApi.create({
+    create: (data) => {
+      if (data.allergens === null) throw new Error("メニューを登録する前にアレルゲンを選択してください。");
+      return menuApi.create({
         circleId,
         name: data.name,
         category: data.category.trim(),
         price: data.price,
         imagePath: data.imagePath || undefined,
         description: data.description || undefined,
+        allergens: data.allergens,
         // 2026-09-27: 在庫管理は商品ごとに選び、新規商品の既定はOFF。
         inventoryEnabled: data.inventoryEnabled,
         stockQuantity: data.stockQuantity,
@@ -114,15 +121,18 @@ export function MenuFormModal({ circleId, isOpen, onClose, menu, onDelete }: Men
         toppingWizardEnabled: data.toppingWizardEnabled,
         toppingCategoryMinimums: data.toppingCategoryMinimums,
         toppingCategoryMaximums: data.toppingCategoryMaximums,
-      }),
-    update: (m, data) =>
-      menuApi.update(m.id, {
+      });
+    },
+    update: async (m, data) => {
+      if (data.allergens === null) throw new Error("メニューを保存する前にアレルゲンを選択してください。");
+      await menuApi.update(m.id, {
         name: data.name,
         category: data.category.trim(),
         price: data.price,
         // 2026-10-07 Issue #48: 空文字は画像削除の明示値として PUT に渡す。
         imagePath: data.imagePath,
         description: data.description || undefined,
+        allergens: data.allergens,
         soldOut: data.soldOut,
         toppingIds: data.toppingIds,
         inventoryEnabled: data.inventoryEnabled,
@@ -131,8 +141,11 @@ export function MenuFormModal({ circleId, isOpen, onClose, menu, onDelete }: Men
         toppingWizardEnabled: data.toppingWizardEnabled,
         toppingCategoryMinimums: data.toppingCategoryMinimums,
         toppingCategoryMaximums: data.toppingCategoryMaximums,
-      }),
-    validate: (data) => (!data.name ? "メニュー名を入力してください" : null),
+      });
+    },
+    validate: (data) => !data.name
+      ? "メニュー名を入力してください"
+      : data.allergens === null ? "アレルゲンまたは『なし』を選択してください" : null,
     messages: {
       createSuccess: "メニューを追加しました",
       createError: "メニューの追加に失敗しました",
@@ -241,6 +254,16 @@ export function MenuFormModal({ circleId, isOpen, onClose, menu, onDelete }: Men
           onChange={(e) => setForm({ ...form, description: e.target.value })}
           onBlur={triggerAutoSave}
           placeholder="商品の説明"
+        />
+
+        <AllergenSelector
+          value={form.allergens}
+          onChange={(allergens) => {
+            const next = { ...form, allergens };
+            setForm(next);
+            if (isEdit) saveNow(next);
+          }}
+          helpText="このメニュー全体に含まれるアレルゲンを登録してください。未使用の場合も『なし』を選択します。"
         />
 
         {/* 2026-09-27: 在庫管理は商品の明示opt-inとし、未選択商品は注文時も未管理にする。 */}

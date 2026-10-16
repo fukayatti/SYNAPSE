@@ -19,6 +19,9 @@
 		"./tsconfig.base.json": "./tsconfig.base.json",
 		"./order-contract": {
 			"default": "./src/order-contract.ts"
+		},
+		"./allergens": {
+			"default": "./src/allergens.ts"
 		}
 	},
 	"dependencies": {

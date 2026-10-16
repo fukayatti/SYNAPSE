@@ -17,6 +17,7 @@ import { Modal } from "@/components/ui/Modal";
 import { toast } from "sonner";
 import { Save, Sparkles, Plus, Trash2, Globe, Upload } from "lucide-react";
 import { ToggleSwitch } from "@/components/ui/ToggleSwitch";
+import { useUnsavedChanges } from "@/components/UnsavedNavigationGuard";
 
 // 2026-07-07: 旧「拡張機能 (モッド)」ダッシュボードページを廃止し、その管理UIを
 // サークル設定内の1セクションへ統合した。モッドの導入・有効化・設定・削除は
@@ -58,6 +59,7 @@ export function ExtensionsManager({ circleId }: { circleId: string }) {
   const queryClient = useQueryClient();
 
   const [installedMods, setInstalledMods] = useState<Record<string, InstalledModState>>({});
+  const [savedInstalledMods, setSavedInstalledMods] = useState<Record<string, InstalledModState>>({});
   const [manifestUrl, setManifestUrl] = useState("");
   const [isUrlImportOpen, setIsUrlImportOpen] = useState(false);
   const [pendingUninstall, setPendingUninstall] = useState<{ id: string; name: string } | null>(null);
@@ -72,18 +74,23 @@ export function ExtensionsManager({ circleId }: { circleId: string }) {
     if (circle && circle.mods) {
       try {
         const parsed = JSON.parse(circle.mods) as ModsPayload;
-        setInstalledMods(parsed?.installed ?? {});
+        const installed = parsed?.installed ?? {};
+        setInstalledMods(installed);
+        setSavedInstalledMods(installed);
       } catch (e) {
         console.error("Failed to parse mods JSON:", e);
         setInstalledMods({});
+        setSavedInstalledMods({});
       }
     }
   }, [circle]);
 
   const updateModsMutation = useMutation({
     mutationFn: async (mods: ModsPayload) => circleApi.updateMods(circleId, mods),
-    onSuccess: () => {
+    onSuccess: (_result, payload) => {
       toast.success("拡張機能の設定を保存しました");
+      setInstalledMods(payload.installed);
+      setSavedInstalledMods(payload.installed);
       queryClient.invalidateQueries({ queryKey: ["circle", circleId] });
     },
     onError: (error: any) => {
@@ -92,6 +99,13 @@ export function ExtensionsManager({ circleId }: { circleId: string }) {
   });
 
   const handleSave = () => updateModsMutation.mutate({ installed: installedMods });
+  const isDirty = JSON.stringify(installedMods) !== JSON.stringify(savedInstalledMods);
+  // 2026-10-16: 拡張機能の下書きをルート離脱時の保存/破棄対象にする。
+  useUnsavedChanges({
+    isDirty,
+    onSave: () => updateModsMutation.mutateAsync({ installed: installedMods }).then(() => undefined),
+    onDiscard: () => setInstalledMods(savedInstalledMods),
+  });
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];

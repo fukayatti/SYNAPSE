@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { adminApi, type AdminEvent, type BillingStatus } from "@/lib/api";
@@ -14,7 +14,8 @@ import { FormField, FormSelect, FormSubmitButton } from "@/components/ui/FormFie
 import { Label } from "@/components/ui/label";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { toast } from "sonner";
-import { Calendar, Trash2, Settings2, Save, Eye, Search, Coins, Plus } from "lucide-react";
+import { useUnsavedChanges } from "@/components/UnsavedNavigationGuard";
+import { Calendar, Trash2, Settings2, Save, Eye, Search, Coins, Plus, RotateCcw, ChevronLeft, ChevronRight } from "lucide-react";
 
 // SaaS 運営: イベント/契約管理 (2026-07-12 Phase C / 2026-07-15 契約金額・入金履歴で拡充)。
 // 全テナント(イベント)の契約状態・サークル上限・契約金額・入金履歴を手動で管理する
@@ -26,6 +27,7 @@ const STATUS_LABELS: Record<BillingStatus, string> = {
   unpaid: "未払い",
 };
 const STATUS_FILTERS: ("all" | BillingStatus)[] = ["all", "active", "trial", "unpaid", "suspended"];
+const PAGE_SIZE = 20;
 
 const yen = (n: number) => `¥${(n ?? 0).toLocaleString()}`;
 const toDateInput = (iso: string | null) => (iso ? iso.slice(0, 10) : "");
@@ -35,7 +37,9 @@ export function SaasEventsTab() {
   const navigate = useNavigate();
   const [editing, setEditing] = useState<AdminEvent | null>(null);
   const [pendingDelete, setPendingDelete] = useState<AdminEvent | null>(null);
+  const [pendingPaymentDelete, setPendingPaymentDelete] = useState<string | null>(null);
   const [form, setForm] = useState({
+    eventName: "",
     plan: "free",
     maxCircles: 1,
     billingStatus: "active" as BillingStatus,
@@ -43,12 +47,17 @@ export function SaasEventsTab() {
     nextBillingDate: "",
     contractNotes: "",
   });
+  const [formSnapshot, setFormSnapshot] = useState(form);
   const [impersonatingId, setImpersonatingId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const [page, setPage] = useState(0);
   const [statusFilter, setStatusFilter] = useState<"all" | BillingStatus>("all");
+  const [deletionFilter, setDeletionFilter] = useState<"active" | "deleted">("active");
 
   // 入金の追加フォーム (編集中テナント向け)
   const [pay, setPay] = useState({ amount: 0, method: "銀行振込", date: "", note: "" });
+
+  useEffect(() => setPage(0), [search, statusFilter, deletionFilter]);
 
   // 「このイベントとして表示」= 昇格(sudo)を確保してから event_manager になりすまし、
   // イベント管理画面へ遷移する。これが super_admin がテナント内容を見る唯一の経路 (Phase E)。
@@ -107,13 +116,23 @@ export function SaasEventsTab() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["adminEvents"] });
       queryClient.invalidateQueries({ queryKey: ["adminOverview"] });
-      toast.success("イベントを削除しました");
+      toast.success("イベントを削除しました。削除済みイベントから復元できます。");
       setPendingDelete(null);
     },
     onError: (e: any) => {
       toast.error(e.message || "削除に失敗しました");
       setPendingDelete(null);
     },
+  });
+
+  const restore = useMutation({
+    mutationFn: (id: string) => adminApi.restoreEvent(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["adminEvents"] });
+      queryClient.invalidateQueries({ queryKey: ["adminOverview"] });
+      toast.success("イベントと所属サークルを復元しました");
+    },
+    onError: (e: any) => toast.error(e.message || "復元に失敗しました"),
   });
 
   const addPayment = useMutation({
@@ -139,28 +158,33 @@ export function SaasEventsTab() {
       queryClient.invalidateQueries({ queryKey: ["contractPayments", editing?.id] });
       queryClient.invalidateQueries({ queryKey: ["adminEvents"] });
       toast.success("入金記録を削除しました");
+      setPendingPaymentDelete(null);
     },
     onError: (e: any) => toast.error(e.message || "削除に失敗しました"),
   });
 
   const openEdit = (e: AdminEvent) => {
-    setForm({
+    const nextForm = {
+      eventName: e.eventName,
       plan: e.plan,
       maxCircles: e.maxCircles,
       billingStatus: e.billingStatus,
       billingAmount: e.billingAmount ?? 0,
       nextBillingDate: toDateInput(e.nextBillingAt),
       contractNotes: e.contractNotes ?? "",
-    });
+    };
+    setForm(nextForm);
+    setFormSnapshot(nextForm);
     setPay({ amount: 0, method: "銀行振込", date: "", note: "" });
     setEditing(e);
   };
 
   const saveContract = () => {
-    if (!editing) return;
+    if (!editing || !form.eventName.trim()) return;
     update.mutate({
       id: editing.id,
       data: {
+        eventName: form.eventName.trim(),
         plan: form.plan,
         maxCircles: form.maxCircles,
         billingStatus: form.billingStatus,
@@ -171,8 +195,45 @@ export function SaasEventsTab() {
     });
   };
 
+  const defaultPaymentDraft = { amount: 0, method: "銀行振込", date: "", note: "" };
+  const isContractDirty = !!editing && JSON.stringify(form) !== JSON.stringify(formSnapshot);
+  const isPaymentDirty = !!editing && JSON.stringify(pay) !== JSON.stringify(defaultPaymentDraft);
+  // 2026-10-16: 契約編集と入金記録の入力を離脱確認からも同じ保存処理へ送る。
+  useUnsavedChanges({
+    isDirty: isContractDirty || isPaymentDirty,
+    onSave: async () => {
+      if (!editing) return;
+      if (isContractDirty) {
+        if (!form.eventName.trim()) throw new Error("イベント名は必須です。");
+        await update.mutateAsync({
+          id: editing.id,
+          data: {
+            eventName: form.eventName.trim(),
+            plan: form.plan,
+            maxCircles: form.maxCircles,
+            billingStatus: form.billingStatus,
+            billingAmount: form.billingAmount,
+            nextBillingAt: form.nextBillingDate ? new Date(form.nextBillingDate).toISOString() : null,
+            contractNotes: form.contractNotes || null,
+          },
+        });
+      }
+      if (isPaymentDirty) {
+        if (pay.amount < 1 || !pay.date) throw new Error("入金額と入金日を入力してください。");
+        await addPayment.mutateAsync();
+      }
+    },
+    onDiscard: () => {
+      setEditing(null);
+      setForm(formSnapshot);
+      setPay(defaultPaymentDraft);
+    },
+  });
+
   // 検索/状態フィルタ
   const shown = (events ?? []).filter((e) => {
+    // 2026-10-15 (#128): 削除済みイベントは専用フィルタから復元できる。
+    if (deletionFilter === "deleted" ? !e.deletedAt : !!e.deletedAt) return false;
     if (statusFilter !== "all" && e.billingStatus !== statusFilter) return false;
     if (search.trim()) {
       const q = search.trim().toLowerCase();
@@ -191,6 +252,8 @@ export function SaasEventsTab() {
     },
     { contracted: 0, received: 0, attention: 0 },
   );
+  // 2026-10-16: 絞り込み結果の集計は全件を維持し、表示行だけをページ分割する。
+  const pageEvents = shown.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
 
   if (isLoading) {
     return (
@@ -208,18 +271,18 @@ export function SaasEventsTab() {
       <div className="border-b-thick border-border pb-3">
         <h2 className="text-sm font-bold flex items-center gap-2 uppercase tracking-wider">
           <Calendar className="h-4 w-4" />
-          契約管理 ({events?.length || 0})
+          契約管理 ({shown.length})
         </h2>
         <p className="text-[11px] text-muted-foreground font-mono mt-1">
-          テナント横断の契約管理。プラン・上限・状態・契約金額・入金履歴を手動で管理します(内容は開けません)。
+          テナント横断の契約管理。契約金額は登録額の合計、入金合計は入金台帳の累計です。請求周期は現状管理していません。
         </p>
       </div>
 
       {/* サマリ */}
       <div className="grid grid-cols-3 gap-2">
         {[
-          { label: "契約金額 (表示中)", value: yen(summary.contracted), cls: "" },
-          { label: "入金合計 (表示中)", value: yen(summary.received), cls: "" },
+          { label: "登録契約額合計 (表示中)", value: yen(summary.contracted), cls: "" },
+          { label: "入金台帳累計 (表示中)", value: yen(summary.received), cls: "" },
           { label: "要対応 (未払い/停止)", value: `${summary.attention}`, cls: summary.attention > 0 ? "text-error" : "" },
         ].map((s) => (
           <div key={s.label} className="border-thick border-border bg-background p-3">
@@ -241,6 +304,18 @@ export function SaasEventsTab() {
           />
         </div>
         <div className="flex flex-wrap gap-1">
+          {(["active", "deleted"] as const).map((s) => (
+            <button
+              key={s}
+              type="button"
+              onClick={() => setDeletionFilter(s)}
+              className={`text-[10px] font-bold uppercase border-thick px-2 h-9 ${
+                deletionFilter === s ? "border-accent bg-accent text-accent-foreground" : "border-border hover:bg-muted"
+              }`}
+            >
+              {s === "active" ? "有効" : "削除済み"}
+            </button>
+          ))}
           {STATUS_FILTERS.map((s) => (
             <button
               key={s}
@@ -260,7 +335,7 @@ export function SaasEventsTab() {
         <EmptyState icon={Calendar} message="該当するテナントがありません" />
       ) : (
         <div className="space-y-2">
-          {shown.map((e) => (
+          {pageEvents.map((e) => (
             <div
               key={e.id}
               className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-3 border-thick border-border bg-background text-[12px] font-mono"
@@ -269,6 +344,11 @@ export function SaasEventsTab() {
                 <p className="font-bold text-foreground truncate">{e.eventName}</p>
                 <p className="text-[10px] text-muted-foreground truncate">owner: {e.ownerEmail || "—"}</p>
                 <div className="flex flex-wrap gap-2 text-[10px] mt-1">
+                  {e.deletedAt && (
+                    <span className="border-thin border-error text-error px-1.5 py-0.5">
+                      削除済み · {toDateInput(e.deletedAt)}
+                    </span>
+                  )}
                   <span className="border-thin border-border px-1.5 py-0.5 uppercase">{e.plan}</span>
                   <span
                     className={`border-thin px-1.5 py-0.5 uppercase ${
@@ -282,9 +362,9 @@ export function SaasEventsTab() {
                   <span className="border-thin border-border px-1.5 py-0.5">
                     {e.circleCount}/{e.maxCircles} サークル
                   </span>
-                  {e.billingAmount > 0 && (
-                    <span className="border-thin border-border px-1.5 py-0.5" title="契約金額 / 入金合計">
-                      {yen(e.paidTotal)} / {yen(e.billingAmount)}
+                  {(e.billingAmount > 0 || e.paidTotal > 0) && (
+                    <span className="border-thin border-border px-1.5 py-0.5" title="入金台帳の累計 / 登録済み契約金額">
+                      入金 {yen(e.paidTotal)} / 契約 {yen(e.billingAmount)}
                     </span>
                   )}
                   {e.nextBillingAt && (
@@ -295,6 +375,17 @@ export function SaasEventsTab() {
                 </div>
               </div>
               <div className="flex items-center gap-2 shrink-0">
+                {e.deletedAt ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 text-[10px]"
+                    disabled={restore.isPending}
+                    onClick={() => restore.mutate(e.id)}
+                  >
+                    <RotateCcw className="h-3.5 w-3.5 mr-1" /> 復元
+                  </Button>
+                ) : <>
                 <Button
                   variant="outline"
                   size="sm"
@@ -315,9 +406,18 @@ export function SaasEventsTab() {
                 >
                   <Trash2 className="h-3.5 w-3.5" />
                 </button>
+                </>}
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {shown.length > PAGE_SIZE && (
+        <div className="flex items-center justify-between gap-3">
+          <Button variant="outline" size="sm" disabled={page === 0} onClick={() => setPage((p) => Math.max(0, p - 1))}><ChevronLeft className="mr-1 h-4 w-4" />前へ</Button>
+          <span className="font-mono text-[10px] text-muted-foreground">{page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, shown.length)} / {shown.length} 件</span>
+          <Button variant="outline" size="sm" disabled={(page + 1) * PAGE_SIZE >= shown.length} onClick={() => setPage((p) => p + 1)}>次へ<ChevronRight className="ml-1 h-4 w-4" /></Button>
         </div>
       )}
 
@@ -326,9 +426,17 @@ export function SaasEventsTab() {
         isOpen={!!editing}
         onClose={() => setEditing(null)}
         title={editing ? `[契約管理: ${editing.eventName}]` : ""}
-        subtitle="プラン・上限・状態・契約金額・入金履歴を手動で管理します。"
+        subtitle="イベント名・プラン・上限・契約・入金履歴を管理します。"
       >
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <FormField
+            id="eventName"
+            label="イベント名"
+            value={form.eventName}
+            onChange={(e) => setForm({ ...form, eventName: e.target.value })}
+            required
+            maxLength={120}
+          />
           <FormField
             id="plan"
             label="プラン"
@@ -356,7 +464,7 @@ export function SaasEventsTab() {
           </FormSelect>
           <FormField
             id="billingAmount"
-            label="契約金額 (円)"
+            label="契約金額 (円・契約単位)"
             type="number"
             value={String(form.billingAmount)}
             onChange={(e) => setForm({ ...form, billingAmount: Math.max(0, Number(e.target.value) || 0) })}
@@ -383,7 +491,7 @@ export function SaasEventsTab() {
           />
         </div>
 
-        <FormSubmitButton onClick={saveContract} isPending={update.isPending} icon={Save}>
+        <FormSubmitButton onClick={saveContract} disabled={!form.eventName.trim()} isPending={update.isPending} icon={Save}>
           契約を更新
         </FormSubmitButton>
 
@@ -460,7 +568,8 @@ export function SaasEventsTab() {
                   <button
                     className="p-1 text-destructive hover:bg-muted shrink-0"
                     title="この入金記録を削除"
-                    onClick={() => removePayment.mutate(p.id)}
+                    aria-label={`${yen(p.amount)}の入金記録を削除`}
+                    onClick={() => setPendingPaymentDelete(p.id)}
                   >
                     <Trash2 className="h-3.5 w-3.5" />
                   </button>
@@ -476,10 +585,19 @@ export function SaasEventsTab() {
       <ConfirmDialog
         isOpen={!!pendingDelete}
         title="イベントを削除しますか?"
-        description={`「${pendingDelete?.eventName}」を論理削除します。この操作は元に戻せません。`}
+        description={`「${pendingDelete?.eventName}」と所属サークルを論理削除します。削除済みイベント一覧から期間制限なく復元できます。`}
         confirmLabel="削除する"
         onConfirm={() => pendingDelete && del.mutate(pendingDelete.id)}
         onCancel={() => setPendingDelete(null)}
+      />
+      <ConfirmDialog
+        isOpen={!!pendingPaymentDelete}
+        title="入金記録を削除しますか?"
+        description="選択した入金記録を台帳から削除します。監査ログには削除操作が残ります。"
+        confirmLabel="記録を削除"
+        isPending={removePayment.isPending}
+        onConfirm={() => pendingPaymentDelete && removePayment.mutate(pendingPaymentDelete)}
+        onCancel={() => setPendingPaymentDelete(null)}
       />
     </div>
   );

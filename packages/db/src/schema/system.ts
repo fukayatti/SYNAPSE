@@ -133,7 +133,7 @@ export const impersonationSession = sqliteTable(
   (table) => [uniqueIndex("impersonation_session_session_unique").on(table.sessionId)]
 );
 
-// 監査ログ。昇格・なりすまし開始/終了、なりすまし中の変更操作を記録する。
+// 監査ログ。2026-10-16からログイン利用者の変更操作とシステム管理者の参照操作を共通記録する。
 export const auditLog = sqliteTable(
   "audit_log",
   {

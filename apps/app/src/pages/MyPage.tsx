@@ -1,261 +1,131 @@
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { wristbandApi, eventApi } from "@/lib/api";
-import { useVisitor, saveVisitor } from "@/hooks/useVisitor";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import { Skeleton } from "@/components/ui/skeleton";
-import { ErrorState } from "@/components/ui/ErrorState";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { ArrowLeft, QrCode, Receipt, ChevronRight, UserCog, Pencil, Ticket } from "lucide-react";
-import { toast } from "sonner";
+import { ArrowRight, QrCode, UserRoundCog } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
-import { resolveAssetUrl } from "@/lib/asset-url";
+import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import { ErrorState } from "@/components/ui/ErrorState";
+import { Skeleton } from "@/components/ui/skeleton";
+import { useVisitor, saveVisitor } from "@/hooks/useVisitor";
+import { wristbandApi } from "@/lib/api";
 
-/**
- * 来場者マイページ (2026-07-11 注文履歴を /orders に分離しマイQR/身分表示に専念)。
- *
- * 来場者は eventUser.id ベアラーのみ (旧 useAuth/useGuestUser シムは撤去済み)。
- * リストバンドの登録/再発行/紛失処理はスマホ側では行わず、本部(イベント管理)で行う。
- */
+// 2026-10-16: QRの提示とアカウント情報の編集を別画面に分け、来場時に必要な操作を先に見せる。
 export default function MyPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const paramEventId = searchParams.get("eventId");
+  const eventId = searchParams.get("eventId");
   const action = searchParams.get("action");
-
-  const { session, userId: visitorUserId, isLoaded } = useVisitor();
-  const eventId = paramEventId || session?.eventId;
-  const userId = visitorUserId ?? "";
-
+  const { session, userId, isLoaded } = useVisitor();
   const [origin, setOrigin] = useState("");
   const [isIssuing, setIsIssuing] = useState(false);
 
   useEffect(() => {
-    if (typeof window !== "undefined") {
-      setOrigin(window.location.origin);
-    }
+    setOrigin(window.location.origin);
   }, []);
 
-  // 2026-07-12: セルフ発行用QRスキャン時の自動発行処理
   useEffect(() => {
-    if (action === "issue" && paramEventId && isLoaded) {
-      if (session && session.eventId === paramEventId && session.userId) {
-        // すでに現在のイベントのセッションがローカルストレージにある場合はクリーンなURLにリダイレクトして通常表示
-        navigate("/visitor/mypage", { replace: true });
-        return;
-      }
-
-      const runIssue = async () => {
-        setIsIssuing(true);
-        try {
-          // 物理リストバンドなし（スマホのみ）のイベントとして ID とデジタルQR用疑似バンドを発行
-          const res = await wristbandApi.issue(paramEventId);
-          saveVisitor({
-            userId: res.userId,
-            wristbandId: res.wristbandId,
-            eventId: paramEventId,
-            displayId: res.displayId,
-            nickname: null,
-            onboarded: false,
-          });
-          toast.success("デジタルQRを発行しました！");
-          navigate("/visitor/onboarding", { replace: true });
-        } catch (e) {
-          console.error("Self issuance failed:", e);
-          alert("QRコードのセルフ発行に失敗しました。再試行してください。");
-        } finally {
-          setIsIssuing(false);
-        }
-      };
-      runIssue();
+    if (action !== "issue" || !eventId || !isLoaded) return;
+    if (session?.eventId === eventId && session.userId) {
+      navigate("/visitor/mypage", { replace: true });
+      return;
     }
-  }, [action, paramEventId, session, isLoaded, navigate]);
 
-  // eventData はヘッダーのロゴ表示のみに使う装飾的な値。取得失敗しても
-  // ロゴが出ないだけで画面は成立するため ErrorState は出さない (判断: 2026-07-07)。
-  const { data: eventData } = useQuery({
-    queryKey: ["event", eventId],
-    queryFn: () => eventApi.get(eventId!),
-    enabled: !!eventId,
-  });
+    const issueDigitalBand = async () => {
+      setIsIssuing(true);
+      try {
+        const result = await wristbandApi.issue(eventId);
+        saveVisitor({
+          userId: result.userId,
+          wristbandId: result.wristbandId,
+          eventId,
+          displayId: result.displayId,
+          nickname: null,
+          onboarded: false,
+        });
+        toast.success("デジタルQRを発行しました");
+        navigate("/visitor/onboarding", { replace: true });
+      } catch (error) {
+        console.error("Self issuance failed:", error);
+        toast.error("QRコードを発行できませんでした。通信状況を確認して再試行してください。");
+      } finally {
+        setIsIssuing(false);
+      }
+    };
 
-  // ユーザー＆リストバンド状態取得 (マイQRの表示IDに使う)
-  const {
-    data: userStatus,
-    isLoading: statusLoading,
-    isError: statusError,
-    error: statusErrorObj,
-    refetch: refetchStatus,
-  } = useQuery({
+    void issueDigitalBand();
+  }, [action, eventId, isLoaded, navigate, session]);
+
+  const query = useQuery({
     queryKey: ["userWristbandStatus", userId],
-    queryFn: () => wristbandApi.lookup(userId),
+    queryFn: () => wristbandApi.lookup(userId!),
     enabled: !!userId && !isIssuing,
   });
 
-  if (!isLoaded || statusLoading || isIssuing) {
+  if (!isLoaded || query.isLoading || isIssuing) {
     return (
-      <div className="max-w-3xl mx-auto p-4 space-y-4 font-mono">
+      <div className="mx-auto max-w-2xl space-y-4 p-4 font-mono" aria-label="マイQRを読み込み中">
         <Skeleton className="h-12 w-48" />
         <Skeleton className="h-80 w-full" />
       </div>
     );
   }
 
-  // userStatus はマイQR・リストバンド状態など画面全体の前提になるため取得失敗時はページ全体を止める。
-  if (statusError) {
+  if (query.isError) {
     return (
-      <div className="max-w-3xl mx-auto p-4 font-mono">
-        <ErrorState
-          error={statusErrorObj}
-          title="ユーザー情報の取得に失敗しました"
-          onRetry={() => refetchStatus()}
-        />
+      <div className="mx-auto max-w-2xl p-4 font-mono">
+        <ErrorState error={query.error} title="来場者情報を読み込めませんでした" onRetry={() => query.refetch()} />
       </div>
     );
   }
 
-  const activeWristband = userStatus?.wristband;
-  const targetWbId = activeWristband?.id || userId;
-  // 2026-07-13: 来場者の表示QRのURLを物理リストバンドのQRと同じ形式 (/w/:id) に統一する。
-  // 店頭レジ側はすでに入力文字列から /w/:id や ?wb=... を解析してIDを抽出できるように修正済みのため、これで動作する。
-  const userCheckinUrl = `${origin}/w/${targetWbId}`;
+  const status = query.data;
+  const activeWristband = status?.familyWristbands.find((band) => band.id === session?.wristbandId) ?? status?.wristband;
+  const qrBandId = activeWristband?.id;
+  const checkinUrl = qrBandId && origin ? `${origin}/w/${qrBandId}` : null;
 
   return (
-    <div className="max-w-3xl mx-auto p-3 sm:p-4 space-y-4 sm:space-y-6 pb-24 font-mono">
-      {eventData?.logoUrl && (
-        <div className="border-thick border-border p-2 bg-background mb-4">
-          <img
-            src={resolveAssetUrl(eventData.logoUrl)}
-            alt={eventData.eventName}
-            className="w-full h-auto max-h-32 object-contain mx-auto block"
-          />
-        </div>
-      )}
+    <div className="mx-auto max-w-2xl space-y-5 px-4 py-6 pb-10 font-mono sm:py-8">
+      <header className="space-y-1 border-b-thick border-border pb-4">
+        <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">来場者メニュー</p>
+        <h1 className="text-2xl font-black tracking-tight sm:text-3xl">マイQR</h1>
+        <p className="text-xs leading-relaxed text-muted-foreground">注文の受け取りや受付で、このQRを提示してください。</p>
+      </header>
 
-      <button
-        onClick={() => navigate("/visitor/menu")}
-        className="text-xs uppercase tracking-widest underline hover:text-info flex items-center gap-1"
-      >
-        <ArrowLeft className="h-4 w-4" />
-        メニュー選択に戻る
-      </button>
-
-      <div className="border-b-thick border-border pb-4">
-        <h1 className="text-xl sm:text-2xl md:text-3xl font-black uppercase tracking-tight leading-tight">
-          [マイデジタルQR]
-        </h1>
-        <p className="text-[10px] sm:text-xs uppercase tracking-widest text-muted-foreground mt-1">
-          店頭でこちらのQRまたはリストバンドをお見せください
-        </p>
-      </div>
-
-      {/* リストバンド未登録の案内。
-          2026-07-11: 登録/再発行/紛失処理はすべて本部(受付/イベント管理)で行う。
-          未登録のうちは「使えるQR」を出さない (アクセスしただけで使えると誤解させないため)。
-          本部でリストバンドを登録すると、下のマイQRが表示される。 */}
-      {!activeWristband && (
-        <div className="border-thick border-border bg-muted p-4 flex items-start gap-3">
-          <QrCode className="h-5 w-5 shrink-0 mt-0.5" />
+      {checkinUrl ? (
+        <section aria-label="来場用QR" className="border-heavy border-border bg-primary p-4 text-center text-primary-foreground sm:p-6">
+          <div className="mx-auto inline-block border-thick border-background bg-background p-3 sm:p-4">
+            <QRCodeSVG value={checkinUrl} size={220} level="M" title="来場用QRコード" className="mx-auto block" />
+          </div>
+          <p className="mt-4 text-xs text-primary-foreground/80">来場者番号</p>
+          <p className="mt-1 text-2xl font-black tabular-nums">#{status?.user.displayId ?? session?.displayId ?? "—"}</p>
+          {activeWristband?.nickname && <p className="mt-1 text-sm">{activeWristband.nickname}</p>}
+        </section>
+      ) : (
+        <section className="flex items-start gap-3 border-thick border-border bg-muted p-4" aria-labelledby="visitor-qr-title">
+          <QrCode className="mt-0.5 h-5 w-5 shrink-0" aria-hidden="true" />
           <div className="space-y-1">
-            <p className="font-bold text-sm">リストバンドが未登録です</p>
-            <p className="text-xs text-muted-foreground leading-relaxed">
-              マイQRは、受付・本部でリストバンドを登録すると表示されます。
-              受付で発行された来場登録QR（またはリストバンドのQR）を読み取って登録してください。
-              登録すると、なくしても本部で再発行できます。
-            </p>
+            <h2 id="visitor-qr-title" className="text-sm font-bold">提示できるリストバンドがありません</h2>
+            <p className="text-xs leading-relaxed text-muted-foreground">受付で登録済みのリストバンドを確認してください。</p>
           </div>
-        </div>
+        </section>
       )}
 
-      {/* デジタルQRカード
-          2026-07-11: リストバンド未登録の来場者に「使えるQR」を出さないよう、activeWristband がある場合のみ表示する。 */}
-      {activeWristband && (
-        <Card className="border-heavy border-border bg-primary text-primary-foreground rounded-none p-4 sm:p-6 text-center shadow-none">
-          <CardHeader className="p-0 mb-4">
-            <div className="inline-block bg-background text-foreground px-3 py-1 text-xs font-black uppercase tracking-widest mx-auto">
-              MEMBER DIGITAL QR
-            </div>
-          </CardHeader>
-          <CardContent className="p-0 space-y-4">
-            <div className="bg-background p-3 sm:p-4 inline-block border-thick border-background mx-auto">
-              <QRCodeSVG value={userCheckinUrl} size={180} level="M" title="My Digital QR" className="mx-auto block" />
-            </div>
-            <div className="space-y-1">
-              <p className="text-xs text-primary-foreground/70 uppercase tracking-widest">
-                USER ID (呼出しID: #{userStatus?.user.displayId || "---"})
-              </p>
-              <p className="text-base sm:text-xl font-bold tracking-wider break-all px-2">{userId}</p>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* プロフィール表示 + 自己編集への導線 (2026-07-15)。
-          来場者が自分のニックネーム/お好きな日付を確認し、[編集]から修正できるようにする。
-          お好きな日付は本人確認用なので、伏せずに本人には見せる (公開はされない)。 */}
-      <div className="border-thick border-border bg-background p-4">
-        <div className="flex items-center justify-between gap-2 mb-3">
-          <span className="flex items-center gap-2 text-[11px] font-black uppercase tracking-widest text-muted-foreground">
-            <UserCog className="h-4 w-4" />
-            あなたの情報
-          </span>
-          <button
-            onClick={() => navigate("/visitor/onboarding?edit=1")}
-            className="flex items-center gap-1 border-[2px] border-border bg-background px-2.5 py-1 text-[11px] font-black uppercase tracking-wider hover:bg-primary hover:text-primary-foreground transition-colors"
-          >
-            <Pencil className="h-3.5 w-3.5" />
-            編集
-          </button>
+      <section className="border-t-thin border-border pt-4" aria-labelledby="account-summary-title">
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <h2 id="account-summary-title" className="flex items-center gap-2 text-sm font-black">
+              <UserRoundCog className="h-4 w-4" aria-hidden="true" />
+              アカウント情報
+            </h2>
+            <p className="mt-1 break-words text-sm font-bold">{status?.user.nickname || "ニックネーム未設定"}</p>
+            <p className="mt-1 text-xs text-muted-foreground">登録バンドやアレルギー情報を管理できます。</p>
+          </div>
+          <Button type="button" variant="outline" className="shrink-0" onClick={() => navigate("/visitor/account")}>
+            管理する <ArrowRight className="ml-1 h-4 w-4" aria-hidden="true" />
+          </Button>
         </div>
-        <dl className="grid gap-2 text-sm">
-          <div className="flex items-baseline justify-between gap-3">
-            <dt className="text-[11px] uppercase tracking-wider text-muted-foreground shrink-0">ニックネーム</dt>
-            <dd className="font-bold text-right break-all">
-              {userStatus?.user.nickname || <span className="text-muted-foreground font-normal">未設定</span>}
-            </dd>
-          </div>
-          <div className="flex items-baseline justify-between gap-3">
-            <dt className="text-[11px] uppercase tracking-wider text-muted-foreground shrink-0">お好きな日付</dt>
-            <dd className="font-bold text-right">
-              {userStatus?.user.favoriteDate || <span className="text-muted-foreground font-normal">未設定</span>}
-            </dd>
-          </div>
-        </dl>
-      </div>
-
-      {/* 2026-10-07: 店舗利用実績と景品条件をマイQR画面からすぐ確認できるようにする。 */}
-      <button
-        onClick={() => navigate("/visitor/stamps")}
-        className="group w-full flex items-center justify-between gap-2 border-thick border-border bg-background hover:bg-muted transition-all p-4 text-left"
-      >
-        <span className="flex items-center gap-3">
-          <span className="flex h-10 w-10 items-center justify-center border-thick border-border bg-primary text-primary-foreground shrink-0">
-            <Ticket className="h-5 w-5" />
-          </span>
-          <span>
-            <span className="block text-sm font-black uppercase tracking-tight">店舗利用実績を見る</span>
-            <span className="block text-[11px] text-muted-foreground">利用した店舗と景品交換条件を確認</span>
-          </span>
-        </span>
-        <ChevronRight className="h-5 w-5 shrink-0 transition-transform group-hover:translate-x-1" />
-      </button>
-
-      {/* 注文履歴への導線 (履歴は /orders に分離) */}
-      <button
-        onClick={() => navigate("/visitor/orders")}
-        className="group w-full flex items-center justify-between gap-2 border-thick border-border bg-background hover:bg-muted transition-all p-4 text-left"
-      >
-        <span className="flex items-center gap-3">
-          <span className="flex h-10 w-10 items-center justify-center border-thick border-border bg-primary text-primary-foreground shrink-0">
-            <Receipt className="h-5 w-5" />
-          </span>
-          <span>
-            <span className="block text-sm font-black uppercase tracking-tight">注文履歴を見る</span>
-            <span className="block text-[11px] text-muted-foreground">事前オーダー・店頭注文の状況を確認</span>
-          </span>
-        </span>
-        <ChevronRight className="h-5 w-5 shrink-0 transition-transform group-hover:translate-x-1" />
-      </button>
+      </section>
     </div>
   );
 }

@@ -1,14 +1,28 @@
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { zBody } from "../z-validator";
 import { apiError } from "../http-error";
 import { z } from "zod";
-import { menu, menuTopping, topping } from "@fesflow/db";
-import { eq, inArray } from "drizzle-orm";
+import { menu, menuTopping, topping, circle, event } from "@fesflow/db";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { ulid } from "ulidx";
 import { hasPermission } from "../utils/auth";
 import type { AppEnv } from "../types";
+import { JAPANESE_ALLERGENS_28 } from "@fesflow/config/allergens";
 
 const menuRoutes = new Hono<AppEnv>();
+const allergensSchema = z.array(z.enum(JAPANESE_ALLERGENS_28)).max(28)
+  .refine((allergens) => new Set(allergens).size === allergens.length, "アレルゲンの重複を解消してください");
+
+async function requireActiveCircle(c: Context<AppEnv>, circleId: string) {
+  const db = c.get("db");
+  const rows = await db
+    .select({ id: circle.id })
+    .from(circle)
+    .innerJoin(event, eq(event.id, circle.eventId))
+    .where(and(eq(circle.id, circleId), isNull(circle.deletedAt), isNull(event.deletedAt)))
+    .limit(1);
+  if (!rows[0]) apiError("NOT_FOUND", "サークルが見つかりません");
+}
 
 // メニュー一覧取得（toppingも含む）
 menuRoutes.get("/", async (c) => {
@@ -18,6 +32,9 @@ menuRoutes.get("/", async (c) => {
   if (!circleId) {
     apiError("BAD_REQUEST", "circleIdが必要です");
   }
+
+  // 2026-10-15 (#128): 既知のサークルIDを使った直接APIアクセスでも削除済みイベントを表示しない。
+  await requireActiveCircle(c, circleId);
 
   // メニューを取得
   const menus = await db.select().from(menu).where(eq(menu.circleId, circleId));
@@ -71,6 +88,9 @@ menuRoutes.get("/:id", async (c) => {
 
   const foundMenu = menus[0]!;
 
+  // 2026-10-15 (#128): 個別メニューURLも親サークル/イベント削除後は無効にする。
+  await requireActiveCircle(c, foundMenu.circleId);
+
   // トッピングを取得
   const menuToppings = await db
     .select()
@@ -105,6 +125,7 @@ menuRoutes.post(
       // imagePath が送られず 400 Bad Request になっていた不具合の修正)。
       imagePath: z.string().optional(),
       additionalInfo: z.string().optional(),
+      allergens: allergensSchema,
       stockQuantity: z.number().min(0).optional(),
       inventoryEnabled: z.boolean().optional(),
       soldOut: z.boolean().optional(),
@@ -136,6 +157,7 @@ menuRoutes.post(
       // image_path は NOT NULL のため未指定時は空文字を入れる (フロントは空=画像なし扱い)
       imagePath: input.imagePath ?? "",
       additionalInfo: input.additionalInfo,
+      allergens: JSON.stringify(input.allergens),
       stockQuantity: input.stockQuantity ?? 0,
       inventoryEnabled: input.inventoryEnabled ?? false,
       soldOut: input.inventoryEnabled === true && (input.stockQuantity ?? 0) <= 0
@@ -173,6 +195,7 @@ menuRoutes.put(
       description: z.string().optional(),
       imagePath: z.string().optional(),
       additionalInfo: z.string().optional(),
+      allergens: allergensSchema.optional(),
       stockQuantity: z.number().min(0).optional(),
       inventoryEnabled: z.boolean().optional(),
       soldOut: z.boolean().optional(),
@@ -206,6 +229,7 @@ menuRoutes.put(
     if (input.imagePath !== undefined) updates.imagePath = input.imagePath;
     if (input.additionalInfo !== undefined)
       updates.additionalInfo = input.additionalInfo;
+    if (input.allergens !== undefined) updates.allergens = JSON.stringify(input.allergens);
     if (input.stockQuantity !== undefined)
       updates.stockQuantity = input.stockQuantity;
     if (input.inventoryEnabled !== undefined)

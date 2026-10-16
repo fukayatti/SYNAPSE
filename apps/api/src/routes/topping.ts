@@ -7,8 +7,11 @@ import { asc, desc, eq } from "drizzle-orm";
 import { ulid } from "ulidx";
 import { hasPermission } from "../utils/auth";
 import type { AppEnv } from "../types";
+import { JAPANESE_ALLERGENS_28 } from "@fesflow/config/allergens";
 
 const toppingRoutes = new Hono<AppEnv>();
+const allergensSchema = z.array(z.enum(JAPANESE_ALLERGENS_28)).max(28)
+  .refine((allergens) => new Set(allergens).size === allergens.length, "アレルゲンの重複を解消してください");
 
 // トッピング一覧取得
 toppingRoutes.get("/", async (c) => {
@@ -62,6 +65,7 @@ toppingRoutes.post(
       // 価格は負値も許可 (割引トッピング等。2026-07-07 に min(0) を撤廃)。
       price: z.number(),
       description: z.string().optional(),
+      allergens: allergensSchema,
       imagePath: z.string().optional(),
       soldOut: z.boolean().optional(),
       stockQuantity: z.number().min(0).optional(),
@@ -93,6 +97,7 @@ toppingRoutes.post(
       category: input.category?.trim() ?? "",
       price: input.price,
       description: input.description,
+      allergens: JSON.stringify(input.allergens),
       imagePath: input.imagePath ?? null,
       soldOut: input.soldOut ?? false,
       stockQuantity: input.stockQuantity ?? 0,
@@ -112,6 +117,7 @@ toppingRoutes.put(
       category: z.string().max(100).optional(),
       price: z.number().optional(), // 負値許可 (割引トッピング)
       description: z.string().optional(),
+      allergens: allergensSchema.optional(),
       imagePath: z.string().optional(),
       soldOut: z.boolean().optional(),
       stockQuantity: z.number().min(0).optional(),
@@ -143,6 +149,7 @@ toppingRoutes.put(
     if (input.price !== undefined) updates.price = input.price;
     if (input.description !== undefined)
       updates.description = input.description;
+    if (input.allergens !== undefined) updates.allergens = JSON.stringify(input.allergens);
     if (input.imagePath !== undefined)
       updates.imagePath = input.imagePath ?? null;
     if (input.soldOut !== undefined) updates.soldOut = input.soldOut;

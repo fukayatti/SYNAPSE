@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { eventApi, circleApi, orderApi, membershipApi } from "@/lib/api";
 import { EventAdminGuard, useAuth } from "@/hooks/useCircleAuth";
@@ -23,13 +24,31 @@ import { StaffTab } from "@/components/event/StaffTab";
 import { SettingsTab } from "@/components/event/SettingsTab";
 import { ContractTab } from "@/components/event/ContractTab";
 import { WristbandsTab } from "@/components/event/WristbandsTab";
+import { StampRedemptionsTab } from "@/components/event/StampRedemptionsTab";
+import { StoreAreasTab } from "@/components/event/StoreAreasTab";
+import { StampRallyTab } from "@/components/event/StampRallyTab";
 import { ExportTab } from "@/components/event/ExportTab";
 import { EventReviewsTab } from "@/pages/dashboard/Reviews";
 
 export default function EventDashboard() {
   const { eventId } = useAuth();
-  const [activeTab, setActiveTab] = useState<string>("circles");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [activeTab, setActiveTab] = useState<string>(() => searchParams.get("tab") || "circles");
   const [eventName, setEventName] = useState<string>("イベントダッシュボード");
+
+  useEffect(() => {
+    setActiveTab(searchParams.get("tab") || "circles");
+  }, [searchParams]);
+
+  const changeTab = (tab: string) => {
+    setActiveTab(tab);
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      if (tab === "circles") next.delete("tab");
+      else next.set("tab", tab);
+      return next;
+    });
+  };
 
   // イベント情報取得
   const { data: eventData } = useQuery({
@@ -55,7 +74,7 @@ export default function EventDashboard() {
     queryKey: ["circles", eventId],
     queryFn: () => circleApi.list(eventId!),
     // 2026-10-03: 表示していない管理タブの問い合わせを実行しない。
-    enabled: !!eventId && (activeTab === "circles" || activeTab === "sales"),
+    enabled: !!eventId && (activeTab === "circles" || activeTab === "sales" || activeTab === "store-areas"),
     // 2026-10-07 (#9): 報告から30分を超えた混雑度を本部画面でも未報告へ切り替える。
     refetchInterval: activeTab === "circles" ? 60_000 : false,
   });
@@ -115,7 +134,7 @@ export default function EventDashboard() {
         subtitle="イベント全体管理"
         type="event"
         activeTab={activeTab}
-        onTabChange={setActiveTab}
+        onTabChange={changeTab}
         lotteryEnabled={!!eventData?.lotteryEnabled}
         eventId={eventId}
       >
@@ -153,12 +172,29 @@ export default function EventDashboard() {
           {activeTab === "circles" && (
             <CirclesTab
               eventId={eventId}
+              eventData={eventData}
               circles={circles}
               circlesLoading={circlesLoading}
               circlesError={circlesError}
               error={circlesErrorObj}
               onRetry={() => refetchCircles()}
             />
+          )}
+
+          {activeTab === "store-areas" && eventData && (
+            <StoreAreasTab
+              eventId={eventId}
+              event={eventData}
+              circles={circles}
+              circlesLoading={circlesLoading}
+              circlesError={circlesError}
+              circlesErrorObj={circlesErrorObj}
+              onRetryCircles={() => refetchCircles()}
+            />
+          )}
+
+          {activeTab === "stamp-rally" && eventData && (
+            <StampRallyTab eventId={eventId} event={eventData} />
           )}
 
           {/* TAB 2: 全体売上管理 */}
@@ -197,8 +233,12 @@ export default function EventDashboard() {
           {activeTab === "wristbands" && (
             <WristbandsTab
               eventId={eventId}
+              hasPhysicalWristband={eventData?.hasPhysicalWristband}
             />
           )}
+
+          {/* TAB 6: スタンプラリー景品交換 */}
+          {activeTab === "stamp-redemptions" && <StampRedemptionsTab eventId={eventId} />}
         </div>
       </DashboardLayout>
     </EventAdminGuard>

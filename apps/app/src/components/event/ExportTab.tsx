@@ -257,9 +257,10 @@ export function ExportTab({ eventId }: { eventId: string }) {
           return (
             <Card key={item.key} className="min-w-0 flex flex-col justify-between gap-6 p-6">
               <CardHeader className="min-w-0 p-0">
+                {/* 2026-10-16: 長いラベルと説明文をカード幅内で折り返し、横はみ出しを防ぐ。 */}
                 <div className="flex min-w-0 items-start gap-3">
                   <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
-                  <CardTitle className="min-w-0 break-words text-sm uppercase font-bold tracking-wider">{item.title}</CardTitle>
+                  <CardTitle className="min-w-0 whitespace-normal break-words text-sm uppercase font-bold tracking-wider">{item.title}</CardTitle>
                 </div>
                 <CardDescription className="break-words pt-2 text-xs leading-relaxed">
                   {item.description}

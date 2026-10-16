@@ -74,16 +74,66 @@ describe("SaaS 運営コンソール (admin)", () => {
 		const patch = await request(`/api/admin/events/${eventId}`, {
 			method: "PATCH",
 			headers: { "Content-Type": "application/json", Cookie: admin.cookie },
-			body: JSON.stringify({ plan: "standard", maxCircles: 20, billingStatus: "suspended" }),
+			body: JSON.stringify({ eventName: "運営対象祭・改名", plan: "standard", maxCircles: 20, billingStatus: "suspended" }),
 		});
 		expect(patch.status).toBe(200);
 
 		const db = testDb();
+		const ownerLogs = await db.select().from(auditLog).where(eq(auditLog.actorEmail, owner.email.toLowerCase()));
+		expect(ownerLogs).toContainEqual(expect.objectContaining({
+			action: "operator_change",
+			method: "POST",
+			path: "/api/festivals",
+		}));
 		const rows = await db.select().from(event).where(eq(event.id, eventId));
 		expect(rows[0]!.plan).toBe("standard");
+		expect(rows[0]!.eventName).toBe("運営対象祭・改名");
 		expect(rows[0]!.maxCircles).toBe(20);
 		expect(rows[0]!.billingStatus).toBe("suspended");
 		expect(rows[0]!.suspendedAt).not.toBeNull();
+
+		const audit = await request("/api/admin/audit?limit=10&offset=0", { headers: { Cookie: admin.cookie } });
+		expect(audit.status).toBe(200);
+		const auditPage = (await audit.json()) as {
+			rows: Array<{ action: string; method: string | null; path: string | null; actorEmail: string }>;
+			total: number;
+		};
+		expect(auditPage.total).toBeGreaterThan(0);
+		expect(auditPage.rows).toContainEqual(expect.objectContaining({
+			action: "admin_change",
+			method: "PATCH",
+			path: "/api/admin/events/:id",
+			actorEmail: admin.email.toLowerCase(),
+		}));
+		expect(auditPage.rows).toContainEqual(expect.objectContaining({
+			action: "admin_view",
+			method: "GET",
+			path: "/api/admin/events",
+			actorEmail: admin.email.toLowerCase(),
+		}));
+
+    const scopedMembershipId = uid("event-member");
+    await db.insert(membership).values({
+      id: scopedMembershipId,
+      userEmail: `${uid("event-member")}@example.com`,
+      userName: "イベント管理者",
+      role: "event_manager",
+      isActive: true,
+      eventId,
+    });
+    const invalidRole = await request(`/api/admin/memberships/${scopedMembershipId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", Cookie: admin.cookie },
+      body: JSON.stringify({ role: "circle_staff" }),
+    });
+    expect(invalidRole.status).toBe(400);
+		const failedAttemptLogs = await db.select().from(auditLog).where(eq(auditLog.actorEmail, admin.email.toLowerCase()));
+		expect(failedAttemptLogs).toContainEqual(expect.objectContaining({
+			action: "operator_failure",
+			method: "PATCH",
+			path: "/api/admin/memberships/:id",
+			summary: "操作失敗 (HTTP 400)",
+		}));
 	});
 
 	it("システム管理者はイベント保持日数を既定365日で確認し、30〜3650日の範囲で保存できる", async () => {

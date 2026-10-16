@@ -15,6 +15,7 @@ import { ErrorState } from "@/components/ui/ErrorState";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { toast } from "sonner";
 import { Ticket, Plus, Copy, Ban } from "lucide-react";
+import { useUnsavedChanges } from "@/components/UnsavedNavigationGuard";
 
 // サークル限定クーポン管理 (2026-09-16, issue #50)。
 // 「知り合い限定」で使える割引を、サークルが自分たちで作れるようにする画面。
@@ -151,6 +152,19 @@ function CouponsContent() {
       : form.kind === "free_topping"
         ? form.toppingIds.length > 0
         : form.discountPercent >= 1 && form.discountPercent <= 100);
+
+  // 2026-10-16: 作成モーダルの入力も共通遷移ガードに登録し、離脱時に同じ作成処理を使う。
+  useUnsavedChanges({
+    isDirty: showCreateForm && JSON.stringify(form) !== JSON.stringify(initialForm),
+    onSave: async () => {
+      if (!isFormValid) throw new Error("クーポン名・合言葉・対象を確認してください。");
+      await createMutation.mutateAsync();
+    },
+    onDiscard: () => {
+      setForm(initialForm);
+      setShowCreateForm(false);
+    },
+  });
 
   if (isLoading) {
     return (

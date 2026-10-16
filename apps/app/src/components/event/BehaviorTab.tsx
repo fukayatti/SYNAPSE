@@ -1,10 +1,11 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { eventApi, type EventBehavior } from "@/lib/api";
+import { circleApi, eventApi, type EventBehavior } from "@/lib/api";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState } from "@/components/ui/ErrorState";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Activity, RefreshCw, Radio, Users, Clock, Repeat, Footprints, UserCheck, ArrowRight } from "lucide-react";
+import { CongestionMonitor } from "./CongestionMonitor";
 
 // 来場者行動・混雑・スタッフ分析タブ (2026-07-14)
 // 「一人一人の行動ログ(注文・回遊・スタンプ・受付時刻)」の横断集計を表示する。
@@ -64,35 +65,38 @@ export function BehaviorTab({ eventId }: { eventId: string }) {
     refetchInterval: live ? 15_000 : false,
   });
 
-  if (isLoading) {
-    return (
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        {Array.from({ length: 8 }).map((_, i) => (
-          <Skeleton key={i} className="h-20" />
-        ))}
-      </div>
-    );
-  }
-  if (isError) return <ErrorState error={error} onRetry={() => refetch()} />;
-  if (!data) return <EmptyState icon={Activity} message="分析データがありません" />;
+  const {
+    data: circles,
+    isLoading: circlesLoading,
+    isError: circlesError,
+    error: circlesErrorObj,
+    refetch: refetchCircles,
+    isFetching: circlesFetching,
+  } = useQuery({
+    queryKey: ["circles", eventId],
+    queryFn: () => circleApi.list(eventId),
+    enabled: !!eventId,
+    // 2026-10-16: LIVE中は15秒、通常時も1分ごとに報告の有効期限を更新する。
+    refetchInterval: live ? 15_000 : 60_000,
+  });
 
-  const b: EventBehavior = data;
-  const j = b.journey;
+  const b: EventBehavior | undefined = data;
+  const j = b?.journey;
 
   // 表示は営業がある時間帯 (活動 or 受付がある範囲) に絞る
-  const activeHours = b.byHour.filter((h) => h.activeUsers > 0 || h.arrivals > 0 || h.orders > 0);
-  const maxActive = Math.max(1, ...b.byHour.map((h) => h.activeUsers));
-  const maxStay = Math.max(1, ...b.stayBuckets.map((s) => s.count));
-  const maxCircleCount = Math.max(1, ...b.circleCountBuckets.map((s) => s.count));
-  const maxFunnel = Math.max(1, ...b.funnel.map((f) => f.count));
-  const maxOPS = Math.max(1, ...b.staffing.byCircle.map((s) => s.ordersPerStaff ?? 0));
-  const maxTrans = Math.max(1, ...b.topTransitions.map((t) => t.count));
+  const activeHours = b?.byHour.filter((h) => h.activeUsers > 0 || h.arrivals > 0 || h.orders > 0) ?? [];
+  const maxActive = Math.max(1, ...(b?.byHour ?? []).map((h) => h.activeUsers));
+  const maxStay = Math.max(1, ...(b?.stayBuckets ?? []).map((s) => s.count));
+  const maxCircleCount = Math.max(1, ...(b?.circleCountBuckets ?? []).map((s) => s.count));
+  const maxFunnel = Math.max(1, ...(b?.funnel ?? []).map((f) => f.count));
+  const maxOPS = Math.max(1, ...(b?.staffing.byCircle ?? []).map((s) => s.ordersPerStaff ?? 0));
+  const maxTrans = Math.max(1, ...(b?.topTransitions ?? []).map((t) => t.count));
 
   const fmtHour = (h: number) => `${String(h).padStart(2, "0")}時`;
 
   return (
     <div className="space-y-6 text-foreground">
-      <div className="flex items-center justify-between border-b-thick border-border pb-3">
+      <div className="flex flex-col gap-3 border-b-thick border-border pb-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 className="text-sm font-bold flex items-center gap-2 uppercase tracking-wider">
             <Activity className="h-4 w-4" /> 来場者行動・混雑分析
@@ -114,15 +118,33 @@ export function BehaviorTab({ eventId }: { eventId: string }) {
           </button>
           <button
             type="button"
-            onClick={() => refetch()}
-            disabled={isFetching}
+            onClick={() => { void Promise.all([refetch(), refetchCircles()]); }}
+            disabled={isFetching || circlesFetching}
             className="flex items-center gap-1 font-mono text-[11px] uppercase border-thick border-border px-2 py-1 hover:bg-muted"
           >
-            <RefreshCw className={`h-3.5 w-3.5 ${isFetching ? "animate-spin" : ""}`} /> 更新
+            <RefreshCw className={`h-3.5 w-3.5 ${isFetching || circlesFetching ? "animate-spin" : ""}`} /> 更新
           </button>
         </div>
       </div>
 
+      <CongestionMonitor
+        circles={circles}
+        isLoading={circlesLoading}
+        isError={circlesError}
+        error={circlesErrorObj}
+        onRetry={() => { void refetchCircles(); }}
+      />
+
+      {isLoading ? (
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+          {Array.from({ length: 8 }).map((_, i) => <Skeleton key={i} className="h-20" />)}
+        </div>
+      ) : isError ? (
+        <ErrorState error={error} onRetry={() => { void refetch(); }} />
+      ) : !b || !j ? (
+        <EmptyState icon={Activity} message="分析データがありません" />
+      ) : (
+      <>
       {/* KPI: 一人あたりの行動 */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <StatCard label="購入転換率" value={`${j.buyerRate}%`} sub={`来場${j.visitors}人中 ${j.buyers}人が購入`} icon={Users} />
@@ -270,6 +292,8 @@ export function BehaviorTab({ eventId }: { eventId: string }) {
           ※来場者が続けて訪れたサークルの組を集計。人が流れる導線が分かると、出店配置や誘導の設計に使えます。
         </p>
       </section>
+      </>
+      )}
     </div>
   );
 }

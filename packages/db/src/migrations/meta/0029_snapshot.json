@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "de58c9a1-ea74-4ca6-8624-bb1c79322e76",
+  "id": "9dc4cbee-f6bc-4e41-a837-f0c3b3de27aa",
   "prevId": "fa51cc15-3bdf-433f-92e0-a95c70ed701d",
   "tables": {
     "account": {
@@ -540,6 +540,13 @@
           "notNull": false,
           "autoincrement": false
         },
+        "deleted_with_event_id": {
+          "name": "deleted_with_event_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "integer",
@@ -699,6 +706,13 @@
           "notNull": false,
           "autoincrement": false
         },
+        "official_website_url": {
+          "name": "official_website_url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "start_date": {
           "name": "start_date",
           "type": "integer",
@@ -752,6 +766,14 @@
           "notNull": true,
           "autoincrement": false,
           "default": "'[\"現金\"]'"
+        },
+        "store_areas": {
+          "name": "store_areas",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'[]'"
         },
         "stamp_rally_settings": {
           "name": "stamp_rally_settings",
@@ -1477,6 +1499,13 @@
           "notNull": false,
           "autoincrement": false
         },
+        "allergens": {
+          "name": "allergens",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "sold_out": {
           "name": "sold_out",
           "type": "integer",
@@ -1705,6 +1734,13 @@
           "notNull": false,
           "autoincrement": false
         },
+        "allergens": {
+          "name": "allergens",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "image_path": {
           "name": "image_path",
           "type": "text",
@@ -1743,14 +1779,6 @@
           "notNull": true,
           "autoincrement": false,
           "default": "(cast(unixepoch('subsecond') * 1000 as integer))"
-        },
-        "sort_order": {
-          "name": "sort_order",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 0
         }
       },
       "indexes": {
@@ -3157,6 +3185,13 @@
           "notNull": false,
           "autoincrement": false
         },
+        "allergies": {
+          "name": "allergies",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "onboarded_at": {
           "name": "onboarded_at",
           "type": "integer",
@@ -3499,6 +3534,96 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
+    "stamp_rally_redemption": {
+      "name": "stamp_rally_redemption",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "event_id": {
+          "name": "event_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "event_user_id": {
+          "name": "event_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "staff_id": {
+          "name": "staff_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(cast(unixepoch('subsecond') * 1000 as integer))"
+        }
+      },
+      "indexes": {
+        "stamp_rally_redemption_event_created_idx": {
+          "name": "stamp_rally_redemption_event_created_idx",
+          "columns": [
+            "event_id",
+            "created_at"
+          ],
+          "isUnique": false
+        },
+        "stamp_rally_redemption_event_user_unique": {
+          "name": "stamp_rally_redemption_event_user_unique",
+          "columns": [
+            "event_id",
+            "event_user_id"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "stamp_rally_redemption_event_id_event_id_fk": {
+          "name": "stamp_rally_redemption_event_id_event_id_fk",
+          "tableFrom": "stamp_rally_redemption",
+          "tableTo": "event",
+          "columnsFrom": [
+            "event_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "stamp_rally_redemption_event_user_id_event_user_id_fk": {
+          "name": "stamp_rally_redemption_event_user_id_event_user_id_fk",
+          "tableFrom": "stamp_rally_redemption",
+          "tableTo": "event_user",
+          "columnsFrom": [
+            "event_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
     "user_stamp": {
       "name": "user_stamp",
       "columns": {
@@ -3599,6 +3724,34 @@
           "notNull": true,
           "autoincrement": false,
           "default": "'active'"
+        },
+        "nickname": {
+          "name": "nickname",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "birthday_month_day": {
+          "name": "birthday_month_day",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "age": {
+          "name": "age",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "onboarded_at": {
+          "name": "onboarded_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         },
         "assigned_at": {
           "name": "assigned_at",

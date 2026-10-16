@@ -119,6 +119,31 @@ adminRoutes.use("*", async (c, next) => {
   await next();
 });
 
+// 2026-10-16: 管理者の参照操作を記録する。変更操作はAPI共通監査ミドルウェアが記録する。
+// 本文や生URLは保存せず、Honoのルート定義と実行者だけを残す。監査画面のポーリングと状態照会は除外する。
+adminRoutes.use("*", async (c, next) => {
+  await next();
+  const method = c.req.method.toUpperCase();
+  if (method !== "GET") return;
+  const route = c.req.routePath || "unmatched";
+  if (["/api/admin/audit", "/api/admin/sudo/status", "/api/admin/impersonate/status"].includes(route)) return;
+  try {
+    await c.get("db").insert(auditLog).values({
+      id: ulid(),
+      actorEmail: c.get("adminEmail"),
+      action: c.res.status >= 200 && c.res.status < 300 ? "admin_view" : "operator_failure",
+      method,
+      path: route,
+      summary: c.res.status >= 200 && c.res.status < 300
+        ? "システム管理画面から参照"
+        : `参照失敗 (HTTP ${c.res.status})`,
+    });
+  } catch (error) {
+    // 2026-10-16: 操作自体の成功応答を監査ログDBの一時障害で失敗に変えない。
+    console.error("admin_audit_write_failed", { route, method, error });
+  }
+});
+
 // メンテナンス設定の取得 (管理画面用)
 // 2026-10-04 (#83): 保持日数と削除可否を分離し、設定変更だけで本番削除が有効にならないようにする。
 adminRoutes.get("/settings", async (c) => {
@@ -287,7 +312,7 @@ adminRoutes.patch(
   zBody(
     z.object({
       role: z
-        .enum(["super_admin", "event_manager", "circle_manager", "staff", "viewer"])
+        .enum(["super_admin", "event_manager", "circle_manager", "circle_admin", "circle_staff"])
         .optional(),
       isActive: z.boolean().optional(),
     }),
@@ -303,6 +328,25 @@ adminRoutes.patch(
       apiError("NOT_FOUND", "メンバーシップが見つかりません");
     }
     const target = rows[0]!;
+
+    // 2026-10-16: ロールは所属スコープと一致させ、誤ったロールで到達不能な権限を作らない。
+    if (input.role !== undefined) {
+      const scope = target.role === "super_admin"
+        ? "system"
+        : target.circleId
+          ? "circle"
+          : target.eventId
+            ? "event"
+            : "system";
+      const allowedRoles = scope === "system"
+        ? ["super_admin"]
+        : scope === "event"
+          ? ["event_manager"]
+          : ["circle_manager", "circle_admin", "circle_staff"];
+      if (!allowedRoles.includes(input.role)) {
+        apiError("BAD_REQUEST", "所属スコープに設定できない権限です");
+      }
+    }
 
     // 自分自身の super_admin 権限を誤って失わないようガード
     const isSelfSuperAdmin =
@@ -437,7 +481,8 @@ adminRoutes.get("/overview", async (c) => {
 // 全イベント一覧 (契約状態・サークル数・オーナー付き)。テナント横断の運営ビュー。
 adminRoutes.get("/events", async (c) => {
   const db = c.get("db");
-  const events = await db.select().from(event).where(isNull(event.deletedAt)).orderBy(desc(event.createdAt));
+  // 2026-10-15 (#128): 削除済みイベントも運営画面に出し、期間制限なしの復元を可能にする。
+  const events = await db.select().from(event).orderBy(desc(event.createdAt));
   const circles = await db.select({ id: circle.id, eventId: circle.eventId }).from(circle).where(isNull(circle.deletedAt));
   const circleCount = new Map<string, number>();
   for (const c2 of circles) circleCount.set(c2.eventId, (circleCount.get(c2.eventId) ?? 0) + 1);
@@ -457,6 +502,7 @@ adminRoutes.get("/events", async (c) => {
     events.map((e) => ({
       id: e.id,
       eventName: e.eventName,
+      deletedAt: e.deletedAt,
       ownerEmail: e.ownerEmail,
       plan: e.plan,
       billingStatus: e.billingStatus,
@@ -523,7 +569,42 @@ adminRoutes.patch(
 adminRoutes.delete("/events/:id", async (c) => {
   const db = c.get("db");
   const id = c.req.param("id");
-  await db.update(event).set({ deletedAt: new Date() }).where(eq(event.id, id));
+  const existing = await db
+    .select({ deletedAt: event.deletedAt })
+    .from(event)
+    .where(eq(event.id, id));
+  if (!existing[0]) apiError("NOT_FOUND", "イベントが見つかりません");
+  // 2026-10-15 (#128): 子サークルにイベントIDを記録し、復元対象を明示する。
+  await c.env.DB.batch([
+    c.env.DB.prepare("UPDATE event SET deleted_at=COALESCE(deleted_at, ?) WHERE id=?")
+      .bind(Date.now(), id),
+    c.env.DB.prepare(`UPDATE circle SET deleted_at=(SELECT deleted_at FROM event WHERE id=?), deleted_with_event_id=?
+      WHERE event_id=? AND deleted_at IS NULL`)
+      .bind(id, id, id),
+  ]);
+  return c.json({ success: true });
+});
+
+// 2026-10-15 (#128): 論理削除したイベントは運営が期間制限なく復元できる。
+adminRoutes.post("/events/:id/restore", async (c) => {
+  const db = c.get("db");
+  const id = c.req.param("id");
+  const rows = await db
+    .select({ deletedAt: event.deletedAt })
+    .from(event)
+    .where(eq(event.id, id));
+  if (!rows[0]) apiError("NOT_FOUND", "イベントが見つかりません");
+  const deletedAt = rows[0].deletedAt;
+  if (!deletedAt) return c.json({ success: true });
+
+  // 2026-10-15 (#128): イベント削除と同時に隠したサークルだけを戻し、個別削除を維持する。
+  await c.env.DB.batch([
+    c.env.DB.prepare(`UPDATE circle SET deleted_at=NULL, deleted_with_event_id=NULL
+      WHERE event_id=? AND deleted_with_event_id=?`)
+      .bind(id, id),
+    c.env.DB.prepare("UPDATE event SET deleted_at=NULL WHERE id=?")
+      .bind(id),
+  ]);
   return c.json({ success: true });
 });
 
@@ -725,11 +806,16 @@ adminRoutes.post("/impersonate/stop", async (c) => {
   return c.json({ success: true });
 });
 
-// 監査ログ (直近 200 件)。
+// 監査ログ (新しい順、ページ単位)。
 adminRoutes.get("/audit", async (c) => {
   const db = c.get("db");
-  const rows = await db.select().from(auditLog).orderBy(desc(auditLog.createdAt)).limit(200);
-  return c.json(rows);
+  const limit = Math.min(100, Math.max(1, Number(c.req.query("limit") ?? 50) || 50));
+  const offset = Math.max(0, Number(c.req.query("offset") ?? 0) || 0);
+  const [rows, countRows] = await Promise.all([
+    db.select().from(auditLog).orderBy(desc(auditLog.createdAt)).limit(limit).offset(offset),
+    db.select({ count: sql<number>`count(*)` }).from(auditLog),
+  ]);
+  return c.json({ rows, total: countRows[0]?.count ?? 0, limit, offset });
 });
 
 // 現在ロック中の認証試行 (アカウントロックアウト) 一覧

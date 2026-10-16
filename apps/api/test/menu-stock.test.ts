@@ -77,6 +77,7 @@ describe("メニュー在庫の絶対値更新", () => {
 			circleId,
 			name: "在庫未管理ドリンク",
 			price: 200,
+			allergens: [],
 			stockQuantity: 8,
 		}, headers);
 		expect(res.status).toBe(201);

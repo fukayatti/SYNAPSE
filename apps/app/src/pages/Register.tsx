@@ -28,6 +28,8 @@ import { useOrderSubmission } from "@/features/orders/use-order-submission";
 import type { CreateOrderInput } from "@fesflow/config/order-contract";
 import { ToppingSelection, parseToppingCategoryMaximums, parseToppingCategoryMinimums } from "@/components/menu/ToppingSelection";
 import { MenuCategoryFilter, menuCategoryKey } from "@/components/menu/MenuCategoryFilter";
+import { parseJapaneseAllergens, type JapaneseAllergen } from "@fesflow/config/allergens";
+import { getCartAllergyWarnings, OrderAllergyWarning } from "@/features/orders/allergy-check";
 
 // カートは「行 (line)」単位。同じメニューでもトッピング構成が違えば別行として持てるように
 // menuId ではなく lineId をキーにする (トッピングあり/なしを同時注文したい要件のため)。
@@ -224,7 +226,7 @@ function CartBody({
   idPrefix: "desktop" | "mobile";
   menuMap: Map<string, MenuWithToppings>;
   peopleCount: number;
-  activeCustomer: { userId: string; wristbandId: string | null } | null;
+  activeCustomer: { userId: string; wristbandId: string | null; familyBandCount: number; allergies: JapaneseAllergen[] | null } | null;
   submitting: boolean;
   onToggleTopping: (lineId: string, topping: Topping) => void;
   onUpdateQuantity: (lineId: string, delta: number) => void;
@@ -243,6 +245,7 @@ function CartBody({
   const needsPayment = paymentMethods.length > 1 && !paymentMethod;
   // 2026-10-16: カート操作の状態を読み上げ可能にし、数量変更後の合計と選択状態を追えるようにする。
   const peopleCountId = `${idPrefix}-people-count`;
+  const allergyWarnings = getCartAllergyWarnings(cart, menuMap, activeCustomer?.allergies ?? null);
   return (
     // 2026-07-16: 親 (aside / モバイルのスライドアップパネル) は max-height + overflow-hidden で
     // 高さの上限を持つコンテナ。ここを h-full ではなく flex-1 min-h-0 にすることで、
@@ -364,6 +367,7 @@ function CartBody({
             onBlur={() => { if (peopleCount < 1) onSetPeople(1); }}
           />
         </div>
+        <p className="-mt-2 text-[10px] text-muted-foreground">家族の登録人数とは別項目です。注文の来店人数は必要に応じて入力してください。</p>
         <div className="flex justify-between items-center border-thick border-border px-4 py-3 bg-muted" role="status" aria-live="polite" aria-atomic="true">
           <span className="font-mono text-sm uppercase tracking-wider">合計金額</span>
           <span className="font-headline text-2xl sm:text-3xl font-black">¥{total.toLocaleString()}</span>
@@ -400,8 +404,14 @@ function CartBody({
           <div className="border-thick border-border bg-muted/20 p-2 text-xs font-mono">
             選択中の顧客: [{activeCustomer.userId}]
             {activeCustomer.wristbandId && ` (リストバンド: ${activeCustomer.wristbandId})`}
+            <div className="mt-1 font-bold">登録バンド数: {activeCustomer.familyBandCount}本（会計人数とは別）</div>
           </div>
         )}
+        <OrderAllergyWarning
+          warnings={allergyWarnings}
+          familyAllergies={activeCustomer?.allergies ?? null}
+          enabled={!!activeCustomer && cart.length > 0}
+        />
         {(!activeCustomer || cart.length === 0) && (
           <div className="border-thick border-destructive bg-destructive/10 p-2 space-y-1 font-mono text-[10px] uppercase tracking-wider text-destructive">
             {!activeCustomer && <p>[顧客未スキャン — リストバンド/QRをスキャンしてください]</p>}
@@ -444,7 +454,7 @@ function RegisterPageContent() {
   const [isCustomerQrModalOpen, setIsCustomerQrModalOpen] = useState(false);
   const [isCartPanelOpen, setIsCartPanelOpen] = useState(false);
   const [scannedCode, setScannedCode] = useState("");
-  const [activeCustomer, setActiveCustomer] = useState<{ userId: string; wristbandId: string | null } | null>(null);
+  const [activeCustomer, setActiveCustomer] = useState<{ userId: string; wristbandId: string | null; familyBandCount: number; allergies: JapaneseAllergen[] | null } | null>(null);
   const [activePreOrderId, setActivePreOrderId] = useState<string | null>(null);
   const [activePreOrderTotalPrice, setActivePreOrderTotalPrice] = useState<number | null>(null);
   const [activePreOrderCouponApplied, setActivePreOrderCouponApplied] = useState(false);
@@ -522,6 +532,8 @@ function RegisterPageContent() {
         setActiveCustomer({
           userId: data.user.id,
           wristbandId: data.wristband?.id || null,
+          familyBandCount: data.familyBandCount ?? 0,
+          allergies: parseJapaneseAllergens(data.user.allergies),
         });
         toast.success(`顧客を特定しました: ${data.wristband?.id || data.user.id}`);
         setScannedCode("");
@@ -768,7 +780,7 @@ function RegisterPageContent() {
         isOpen={isCustomerQrModalOpen}
         onClose={() => setIsCustomerQrModalOpen(false)}
         mode="customer"
-        onCustomerScanned={(userId, wristbandId) => setActiveCustomer({ userId, wristbandId })}
+        onCustomerScanned={(userId, wristbandId, familyBandCount, allergies) => setActiveCustomer({ userId, wristbandId, familyBandCount, allergies: parseJapaneseAllergens(allergies) })}
       />
 
       {/* 横幅に余裕がある画面 (xl+) はカートを右サイドバー固定、狭い画面は下部バー+スライドアップ */}
@@ -904,6 +916,7 @@ function RegisterPageContent() {
                   <span className="w-2.5 h-2.5 bg-success rounded-full animate-pulse" />
                   スキャン完了: ゲストID [{activeCustomer.userId}]
                   {activeCustomer.wristbandId && ` (リストバンド: ${activeCustomer.wristbandId})`}
+                  <span className="ml-2 font-bold">登録バンド {activeCustomer.familyBandCount}本（会計人数とは別）</span>
                 </div>
                 <Button
                   variant="destructive"

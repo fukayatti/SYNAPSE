@@ -13,6 +13,8 @@ import { UnsavedChangesDialog } from "@/components/ui/UnsavedChangesDialog";
 import { useEntityForm } from "@/hooks/useEntityForm";
 import { Save } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { AllergenSelector } from "@/components/menu/AllergenSelector";
+import { parseJapaneseAllergens, type JapaneseAllergen } from "@fesflow/config/allergens";
 
 interface ToppingFormModalProps {
   circleId: string;
@@ -24,7 +26,7 @@ interface ToppingFormModalProps {
 
 // 売り切れフラグを保持 (2026-07-15)。メニュー同様、在庫数はトッピング編集では扱わず
 // 在庫管理から操作する。ここで持つのは売切かどうかだけ。
-type ToppingForm = { name: string; category: string; price: number; imagePath: string; description: string; soldOut: boolean };
+type ToppingForm = { name: string; category: string; price: number; imagePath: string; description: string; allergens: JapaneseAllergen[] | null; soldOut: boolean };
 
 export function ToppingFormModal({ circleId, isOpen, onClose, topping, onDelete }: ToppingFormModalProps) {
   // 在庫管理拡張ONのサークルでは、売切はトッピング編集から変更不可 (在庫で自動制御)。
@@ -42,39 +44,48 @@ export function ToppingFormModal({ circleId, isOpen, onClose, topping, onDelete 
   } = useEntityForm<ToppingForm, Topping>({
     isOpen,
     entity: topping,
-    emptyForm: { name: "", category: "", price: 0, imagePath: "", description: "", soldOut: false },
+    emptyForm: { name: "", category: "", price: 0, imagePath: "", description: "", allergens: null, soldOut: false },
     toForm: (t) => ({
       name: t.name,
       category: t.category || "",
       price: t.price,
       imagePath: t.imagePath || "",
       description: t.description || "",
+      allergens: parseJapaneseAllergens(t.allergens),
       soldOut: t.soldOut ?? false,
     }),
     onClose,
     toastId: "topping-auto-save",
     invalidateKeys: [["toppings", circleId]],
-    create: (data) =>
-      toppingApi.create({
+    create: (data) => {
+      if (data.allergens === null) throw new Error("トッピングを登録する前にアレルゲンを選択してください。");
+      return toppingApi.create({
         circleId,
         name: data.name,
         category: data.category.trim(),
         price: data.price,
         imagePath: data.imagePath || undefined,
         description: data.description || undefined,
+        allergens: data.allergens,
         soldOut: data.soldOut,
-      }),
-    update: (t, data) =>
-      toppingApi.update(t.id, {
+      });
+    },
+    update: async (t, data) => {
+      if (data.allergens === null) throw new Error("トッピングを保存する前にアレルゲンを選択してください。");
+      await toppingApi.update(t.id, {
         name: data.name,
         category: data.category.trim(),
         price: data.price,
         // 2026-10-07 Issue #48: 空文字は画像削除の明示値として PUT に渡す。
         imagePath: data.imagePath,
         description: data.description || null,
+        allergens: data.allergens,
         soldOut: data.soldOut,
-      }),
-    validate: (data) => (!data.name ? "トッピング名を入力してください" : null),
+      });
+    },
+    validate: (data) => !data.name
+      ? "トッピング名を入力してください"
+      : data.allergens === null ? "アレルゲンまたは『なし』を選択してください" : null,
     messages: {
       createSuccess: "トッピングを追加しました",
       createError: "トッピングの追加に失敗しました",
@@ -154,6 +165,16 @@ export function ToppingFormModal({ circleId, isOpen, onClose, topping, onDelete 
           onChange={(e) => setForm({ ...form, description: e.target.value })}
           onBlur={triggerAutoSave}
           placeholder="トッピングの説明"
+        />
+
+        <AllergenSelector
+          value={form.allergens}
+          onChange={(allergens) => {
+            const next = { ...form, allergens };
+            setForm(next);
+            if (isEdit) saveNow(next);
+          }}
+          helpText="このトッピングに含まれるアレルゲンを登録してください。該当しない場合も『なし』を選択します。"
         />
 
         {/* 売り切れ設定 (2026-07-15)。在庫管理拡張ONのサークルでは在庫で自動制御されるため変更不可。 */}

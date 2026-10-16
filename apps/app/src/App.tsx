@@ -49,6 +49,7 @@ const pageImports = {
 	Onboarding: () => import("@/pages/Onboarding"),
 	Menu: () => import("@/pages/Menu"),
 	MyPage: () => import("@/pages/MyPage"),
+	VisitorAccount: () => import("@/pages/VisitorAccount"),
 	Orders: () => import("@/pages/Orders"),
 	VisitorStampRally: () => import("@/pages/VisitorStampRally"),
 	VisitorReviews: () => import("@/pages/VisitorReviews"),
@@ -86,6 +87,7 @@ const Onboarding = lazy(pageImports.Onboarding);
 const StaffOnboarding = lazy(pageImports.StaffOnboarding);
 const Menu = lazy(pageImports.Menu);
 const MyPage = lazy(pageImports.MyPage);
+const VisitorAccount = lazy(pageImports.VisitorAccount);
 const Orders = lazy(pageImports.Orders);
 const VisitorStampRally = lazy(pageImports.VisitorStampRally);
 const VisitorReviews = lazy(pageImports.VisitorReviews);
@@ -150,7 +152,7 @@ function VisitorLayout() {
 // 発行後にニックネーム/お好きな日付を入れずマイページ・注文履歴へ素通りできてしまっていた。
 // 入場済み(セッションあり)なのに未オンボーディングの来場者は、パーソナライズ画面に入る前に
 // オンボーディングへ強制送還する。メニュー閲覧(/visitor/events, /visitor/menu)は誰でも自由なので
-// このゲートは掛けない — マイページ/注文履歴のみを保護する。
+// このゲートは掛けない — 入場者情報を扱うページだけを保護する。
 function VisitorOnboardingGate() {
 	const { isLoaded, isEntered, isOnboarded } = useVisitor();
 	const [searchParams] = useSearchParams();
@@ -205,6 +207,7 @@ export default function App() {
 					{/* マイページ・注文履歴はオンボーディング必須ゲートで保護する */}
 					<Route element={<VisitorOnboardingGate />}>
 						<Route path="/visitor/mypage" element={<MyPage />} />
+						<Route path="/visitor/account" element={<VisitorAccount />} />
 						<Route path="/visitor/orders" element={<Orders />} />
 						<Route path="/visitor/stamps" element={<VisitorStampRally />} />
 						<Route path="/visitor/reviews" element={<VisitorReviews />} />

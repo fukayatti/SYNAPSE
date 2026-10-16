@@ -161,11 +161,12 @@ function CircleExportContent() {
   return (
     <DashboardLayout title={circleName || "サークルダッシュボード"} subtitle="データエクスポート" type="circle">
       <div className="space-y-6">
-        <div className="space-y-3 border-b-thick border-border pb-6">
-          <h2 className="text-xl font-headline flex items-center gap-3 uppercase tracking-wider">
+        {/* 2026-10-16: 狭い幅では説明を見出しの下へ移し、広い幅では横に並べて余白を使う。 */}
+        <div className="flex min-w-0 flex-col gap-3 border-b-thick border-border pb-6 sm:flex-row sm:items-start sm:justify-between">
+          <h2 className="shrink-0 text-xl font-headline flex items-center gap-3 uppercase tracking-wider">
             <Download className="h-5 w-5 shrink-0" /> データエクスポート
           </h2>
-          <p className="max-w-3xl text-sm leading-relaxed text-muted-foreground font-mono">
+          <p className="min-w-0 max-w-3xl break-words text-sm leading-relaxed text-muted-foreground font-mono sm:max-w-[60%]">
             サークル内の売上・注文履歴・商品一覧などのデータを CSV 形式でダウンロードできます。
           </p>
         </div>
@@ -177,9 +178,10 @@ function CircleExportContent() {
             return (
               <Card key={item.key} className="min-w-0 flex flex-col justify-between gap-6 p-6">
                 <CardHeader className="min-w-0 p-0">
+                  {/* 2026-10-16: 長いラベルと説明文をカード幅内で折り返し、横はみ出しを防ぐ。 */}
                   <div className="flex min-w-0 items-start gap-3">
                     <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
-                    <CardTitle className="min-w-0 break-words text-sm uppercase font-bold tracking-wider">{item.title}</CardTitle>
+                    <CardTitle className="min-w-0 whitespace-normal break-words text-sm uppercase font-bold tracking-wider">{item.title}</CardTitle>
                   </div>
                   <CardDescription className="break-words pt-2 text-xs leading-relaxed">
                     {item.description}

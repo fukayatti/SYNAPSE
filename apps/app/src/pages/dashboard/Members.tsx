@@ -1,5 +1,5 @@
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
@@ -46,6 +46,7 @@ import {
   X,
 } from "lucide-react";
 import { toast } from "sonner";
+import { useUnsavedChanges } from "@/components/UnsavedNavigationGuard";
 
 // 2026-10-08: 直接追加APIと同じく、ブラウザー標準の email 判定で誤入力を送信前に止める。
 function isValidEmailAddress(value: string): boolean {
@@ -101,6 +102,7 @@ function MembersContent() {
     userName: "",
     role: "circle_staff" as Role,
   });
+  const emptyMember = { userId: "", userEmail: "", userName: "", role: "circle_staff" as Role };
 
   const [inviteSettings, setInviteSettings] = useState({
     role: "circle_staff" as Role,
@@ -108,6 +110,7 @@ function MembersContent() {
     expiresInHours: 24,
     targetEmail: "",
   });
+  const savedInviteSettingsRef = useRef(inviteSettings);
 
   // API呼び出し
   const {
@@ -177,11 +180,11 @@ function MembersContent() {
       eventId?: string;
       role: Role;
       expiresInHours?: number;
-      maxUses?: number;
+      maxUses?: number | null;
       createdBy: string;
       targetEmail?: string;
     }) => membershipApi.createInvite(input),
-    onSuccess: (data) => {
+    onSuccess: (data, variables) => {
       refetchTokens();
       // 招待作成後すぐ共有できるよう、生成されたリンクをクリップボードへコピーする。
       // 従来は「作成しました」だけで、リンクは下の一覧までスクロールして copy し直す必要があり
@@ -194,6 +197,12 @@ function MembersContent() {
         toast.success("招待を作成しました");
       }
       setInviteSettings((prev) => ({ ...prev, targetEmail: "" }));
+      savedInviteSettingsRef.current = {
+        role: variables.role,
+        maxUses: variables.maxUses ?? 0,
+        expiresInHours: variables.expiresInHours ?? 24,
+        targetEmail: "",
+      };
       setShowInviteForm(false);
     },
   });
@@ -288,13 +297,57 @@ function MembersContent() {
     createInviteMutation.mutate({
       circleId,
       role: inviteSettings.role,
-      // 空欄(0)のまま送られても妥当な下限に丸める
-      maxUses: Math.max(1, inviteSettings.maxUses || 1),
+      // 2026-10-15 Issue #122: 0回は無制限を表すため、APIへ null を明示して保存する。
+      maxUses: inviteSettings.maxUses === 0 ? null : Math.min(100, Math.max(1, inviteSettings.maxUses)),
       expiresInHours: Math.max(1, inviteSettings.expiresInHours || 24),
       createdBy: userEmail || "",
       targetEmail: inviteSettings.targetEmail || undefined,
     });
   };
+
+  // 2026-10-16: メンバー追加と招待発行の入力もページ遷移時に保存/破棄できるよう登録する。
+  useUnsavedChanges({
+    isDirty: showAddForm && JSON.stringify(newMember) !== JSON.stringify(emptyMember),
+    onSave: async () => {
+      if (!circleId || !isValidEmailAddress(newMember.userEmail) || !newMember.userName.trim()) {
+        throw new Error("有効なメールアドレスと名前を入力してください。");
+      }
+      await addMemberMutation.mutateAsync({
+        userEmail: newMember.userEmail,
+        userName: newMember.userName,
+        circleId,
+        role: newMember.role,
+      });
+    },
+    onDiscard: () => {
+      setNewMember(emptyMember);
+      setShowAddForm(false);
+    },
+  });
+  useUnsavedChanges({
+    isDirty: showInviteForm && JSON.stringify(inviteSettings) !== JSON.stringify(savedInviteSettingsRef.current),
+    onSave: async () => {
+      if (!circleId) throw new Error("サークル情報を読み込んでから招待してください。");
+      if (inviteSettings.targetEmail && !isValidEmailAddress(inviteSettings.targetEmail)) {
+        throw new Error("招待先メールアドレスを確認してください。");
+      }
+      if (inviteSettings.expiresInHours < 1 || inviteSettings.expiresInHours > 168 || inviteSettings.maxUses < 0 || inviteSettings.maxUses > 100) {
+        throw new Error("使用回数は0〜100回、有効期限は1〜168時間で入力してください。");
+      }
+      await createInviteMutation.mutateAsync({
+        circleId,
+        role: inviteSettings.role,
+        maxUses: inviteSettings.maxUses === 0 ? null : Math.min(100, Math.max(1, inviteSettings.maxUses)),
+        expiresInHours: Math.max(1, inviteSettings.expiresInHours || 24),
+        createdBy: userEmail || "",
+        targetEmail: inviteSettings.targetEmail || undefined,
+      });
+    },
+    onDiscard: () => {
+      setInviteSettings(savedInviteSettingsRef.current);
+      setShowInviteForm(false);
+    },
+  });
 
   const copyInviteLink = (token: string) => {
     // 単一ドメイン化 (2026-07-07): 招待受諾ページは /circle/invite/:token に移設
@@ -439,19 +492,22 @@ function MembersContent() {
             value={inviteSettings.targetEmail}
             onChange={(e) => setInviteSettings({ ...inviteSettings, targetEmail: e.target.value })}
           />
-          {/* 編集中に 1 未満へ丸めると打ち直しがつっかえるため、空欄(0)を許容する。
-              実際の下限は送信時 (handleCreateInvite) に 1 以上へ丸める。 */}
           <FormField
             id="max-uses"
-            label="最大使用回数"
+            label={`最大使用回数${inviteSettings.maxUses === 0 ? "（無制限）" : ""}`}
             type="number"
+            min={0}
             max={100}
             value={inviteSettings.maxUses}
+            placeholder={inviteSettings.maxUses === 0 ? "無制限" : "1"}
             onChange={(e) => {
               const n = parseInt(e.target.value);
               setInviteSettings({ ...inviteSettings, maxUses: Number.isNaN(n) ? 0 : Math.max(0, n) });
             }}
           />
+          <p className="-mt-1 text-[10px] text-muted-foreground" aria-live="polite">
+            0を入力すると無制限です（現在: {inviteSettings.maxUses === 0 ? "無制限" : `${inviteSettings.maxUses}回`}）。
+          </p>
           <FormField
             id="expires"
             label="有効期限（時間、最大168時間/7日間）"
@@ -506,7 +562,7 @@ function MembersContent() {
                       <Badge variant="warning">上限到達</Badge>
                     ) : null}
                     <span className="text-sm text-muted-foreground">
-                      使用: {token.usedCount}/{token.maxUses || "∞"}
+                      使用: {token.usedCount}/{token.maxUses == null || token.maxUses === 0 ? "無制限" : token.maxUses}
                     </span>
                     <span className="text-sm text-muted-foreground">
                       期限:{" "}

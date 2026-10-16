@@ -43,8 +43,8 @@ export function EventStaffFormModal({ eventId, isOpen, onClose }: EventStaffForm
         role: data.purpose === "event_manager" ? "event_manager" : "circle_manager",
         // 2026-07-15: 共同管理者でも直接リンク共有可能にするためメールアドレスは任意。
         targetEmail: data.email.trim() ? data.email.toLowerCase() : undefined,
-        // 2026-07-15: 共同管理者でも最大使用回数を指定できるように修正。
-        maxUses: Math.max(1, data.maxUses),
+        // 2026-10-15 Issue #122: 0回は1回制限ではなく無制限として保存する。
+        maxUses: data.maxUses === 0 ? null : Math.min(100, Math.max(1, data.maxUses)),
         // 2026-07-15: サークルと同様に時間(1〜168時間)でクランプして送信。
         expiresInHours: Math.min(168, Math.max(1, data.expiresInHours)),
       }),
@@ -67,7 +67,7 @@ export function EventStaffFormModal({ eventId, isOpen, onClose }: EventStaffForm
         isOpen={isOpen}
         onClose={handleOverlayClose}
         maxWidth="md"
-        title="[招待の発行]"
+        title="スタッフ招待を発行"
       >
         <FormSelect
           id="invitePurpose"
@@ -91,16 +91,20 @@ export function EventStaffFormModal({ eventId, isOpen, onClose }: EventStaffForm
 
         <FormField
           id="inviteMaxUses"
-          label={form.purpose === "event_manager" ? "最大使用回数 (人数)" : "使用可能回数 (何サークル分)"}
+          label={`${form.purpose === "event_manager" ? "最大使用回数 (人数)" : "使用可能回数 (何サークル分)"}${form.maxUses === 0 ? "（無制限）" : ""}`}
           type="number"
+          min={0}
           max={100}
           value={String(form.maxUses)}
           onChange={(e) => {
             const n = parseInt(e.target.value);
             setForm({ ...form, maxUses: Number.isNaN(n) ? 0 : Math.max(0, n) });
           }}
-          placeholder="1"
+          placeholder={form.maxUses === 0 ? "無制限" : "1"}
         />
+        <p className="-mt-1 text-[10px] text-muted-foreground" aria-live="polite">
+          0を入力すると無制限です（現在: {form.maxUses === 0 ? "無制限" : `${form.maxUses}回`}）。
+        </p>
 
         <FormField
           id="inviteExpiry"
@@ -126,7 +130,7 @@ export function EventStaffFormModal({ eventId, isOpen, onClose }: EventStaffForm
 
       <UnsavedChangesDialog
         isOpen={isConfirmOpen}
-        title="[確認: スタッフ招待フォームを閉じます]"
+        title="招待を発行せずに閉じますか？"
         description="招待を発行するには「招待を発行する」を押してください。破棄する場合は「保存せず閉じる」を選択してください。"
         onConfirm={handleSaveAndClose}
         onDiscard={handleDiscardAndClose}

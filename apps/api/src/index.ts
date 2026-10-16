@@ -25,12 +25,14 @@ import { nanoid } from "nanoid";
 import {
   createDb,
   membership,
+  auditLog,
   type WorkerEnv,
 } from "@fesflow/db";
 import { eq, and } from "drizzle-orm";
 import { createAuth } from "@fesflow/auth";
 import { createStorage } from "@fesflow/storage";
 import { getSession } from "./utils/auth";
+import { betterAuthSessionId, getImpersonation } from "./utils/sudo";
 import {
   authAttemptBucket,
   retryAfterSeconds,
@@ -150,6 +152,45 @@ app.use("/*", async (c, next) => {
   c.set("db", db);
   c.set("auth", auth);
   await next();
+});
+
+// 2026-10-16: ログイン利用者が行う変更と失敗した変更試行をAPI境界で記録し、テナント操作のログ漏れを防ぐ。
+// 詳細ログのある昇格・なりすまし開始/終了・設定変更と、既存のリストバンド監査は重複させない。
+app.use("/api/*", async (c, next) => {
+  await next();
+  const method = c.req.method.toUpperCase();
+  if (!["POST", "PUT", "PATCH", "DELETE"].includes(method)) return;
+  const succeeded = c.res.status >= 200 && c.res.status < 300;
+  const route = c.req.routePath || "unmatched";
+  const manuallyAudited = new Set([
+    "PUT /api/admin/settings",
+    "POST /api/admin/sessions/cleanup",
+    "POST /api/admin/sudo/elevate",
+    "POST /api/admin/impersonate",
+    "POST /api/admin/impersonate/stop",
+  ]);
+  if (succeeded && manuallyAudited.has(`${method} ${route}`)) return;
+  try {
+    const session = c.get("session") ?? await getSession(c);
+    if (!session?.user?.email) return;
+    const impersonation = await getImpersonation(c, betterAuthSessionId(session));
+    await c.get("db").insert(auditLog).values({
+      id: nanoid(),
+      actorEmail: session.user.email.toLowerCase(),
+      action: !succeeded ? "operator_failure" : impersonation ? "impersonated_write" : route.startsWith("/api/admin/") ? "admin_change" : "operator_change",
+      asRole: impersonation?.role ?? null,
+      eventId: impersonation?.eventId ?? null,
+      circleId: impersonation?.circleId ?? null,
+      method,
+      path: route,
+      summary: succeeded
+        ? impersonation ? "なりすまし中の変更操作" : "ログイン利用者による変更操作"
+        : `操作失敗 (HTTP ${c.res.status})`,
+    });
+  } catch (error) {
+    // 2026-10-16: 監査ログの一時的な保存障害で、完了した業務操作を失敗応答に変えない。
+    console.error("request_audit_write_failed", { route, method, error });
+  }
 });
 
 // Better Auth ハンドラ

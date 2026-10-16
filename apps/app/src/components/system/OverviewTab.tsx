@@ -3,6 +3,8 @@ import { useQuery } from "@tanstack/react-query";
 import { adminApi } from "@/lib/api";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState } from "@/components/ui/ErrorState";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { toast } from "sonner";
 import { Calendar, Store, Users, Lock, AlertTriangle } from "lucide-react";
 
 // SaaS 運営ダッシュボード (2026-07-12 Phase C)。
@@ -16,6 +18,7 @@ const STATUS_LABELS: Record<string, string> = {
 
 export function OverviewTab() {
   const [isCleaning, setIsCleaning] = useState(false);
+  const [cleanupConfirmOpen, setCleanupConfirmOpen] = useState(false);
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["adminOverview"],
     queryFn: () => adminApi.overview(),
@@ -27,15 +30,16 @@ export function OverviewTab() {
   });
 
   const handleCleanup = async () => {
-    if (!window.confirm("期限切れセッションをすべてクリーンアップしますか？")) return;
     setIsCleaning(true);
     try {
       await adminApi.cleanupSessions();
       refetchExpired();
+      toast.success("期限切れセッションを削除しました");
     } catch (e) {
-      alert("クリーンアップに失敗しました");
+      toast.error(e instanceof Error ? e.message : "クリーンアップに失敗しました");
     } finally {
       setIsCleaning(false);
+      setCleanupConfirmOpen(false);
     }
   };
 
@@ -68,7 +72,7 @@ export function OverviewTab() {
             </div>
           </div>
           <button
-            onClick={handleCleanup}
+            onClick={() => setCleanupConfirmOpen(true)}
             disabled={isCleaning}
             className="border-thick border-destructive bg-destructive text-white px-4 py-1.5 font-bold active:translate-y-0.5 disabled:opacity-50 text-[11px] uppercase tracking-wider cursor-pointer"
           >
@@ -88,6 +92,9 @@ export function OverviewTab() {
           </div>
         ))}
       </div>
+      <p className="-mt-3 text-[11px] text-muted-foreground">
+        イベント・サークルは削除されていない件数、アカウントは有効な所属を持つ利用者のメール単位です。リストバンド数ではありません。
+      </p>
 
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="border-thick border-border bg-background p-4">
@@ -156,15 +163,15 @@ export function OverviewTab() {
         return (
           <div className="border-thick border-border bg-background p-4 space-y-3">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-border pb-2">
-              <h3 className="text-[11px] uppercase font-mono font-bold tracking-wider">[ユーザー登録成長推移 (過去14日間)]</h3>
+              <h3 className="text-[11px] uppercase font-mono font-bold tracking-wider">[アカウント・来場者登録数 (過去14日間)]</h3>
               <div className="flex items-center gap-4 text-[10px] font-mono">
                 <div className="flex items-center gap-1.5">
                   <span className="inline-block w-3 h-1 bg-foreground" />
-                  <span>アカウント</span>
+                  <span>アカウント(user)</span>
                 </div>
                 <div className="flex items-center gap-1.5">
                   <span className="inline-block w-3 h-1 bg-accent" />
-                  <span>来場者</span>
+                  <span>イベント来場者(eventUser)</span>
                 </div>
               </div>
             </div>
@@ -260,9 +267,18 @@ export function OverviewTab() {
                 </div>
               </div>
             )}
+            <p className="text-[10px] text-muted-foreground">アカウントは user 作成数、来場者は eventUser 作成数を日ごとに集計しています。同一人物の複数イベント登録はイベントごとに数えます。</p>
           </div>
         );
       })()}
+      <ConfirmDialog
+        isOpen={cleanupConfirmOpen}
+        title="期限切れセッションを削除しますか?"
+        description={`${expiredData?.count ?? 0} 件の期限切れセッションを削除します。この操作は取り消せません。`}
+        confirmLabel={isCleaning ? "削除中..." : "削除する"}
+        onConfirm={handleCleanup}
+        onCancel={() => setCleanupConfirmOpen(false)}
+      />
     </div>
   );
 }
