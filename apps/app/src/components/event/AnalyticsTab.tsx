@@ -4,40 +4,113 @@ import { eventApi, type EventAnalytics } from "@/lib/api";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState } from "@/components/ui/ErrorState";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { BarChart3, RefreshCw, Users, Coins, Receipt, Star, Radio, Download } from "lucide-react";
+import {
+  Activity,
+  ArrowRight,
+  BarChart3,
+  Coins,
+  Download,
+  Radio,
+  Receipt,
+  RefreshCw,
+  Users,
+  type LucideIcon,
+} from "lucide-react";
 
-// イベント統計・分析タブ (2026-07-12)
-// サーバ側で横断集計した来場者/売上/注文/評価/回遊の指標を表示する。
-// 集計は GET /api/festivals/:id/analytics (event_manager 権限)。
+// 2026-10-16: 全期間の要約から時間帯・年代・注文・回遊へ掘り下げられる構成にし、集計単位も画面内で説明する。
 
-function yen(n: number): string {
-  return `¥${n.toLocaleString("ja-JP")}`;
+type TrendMetric = "visitors" | "orders" | "revenue";
+
+const trendMetrics: { key: TrendMetric; label: string }[] = [
+  { key: "visitors", label: "アカウント作成" },
+  { key: "orders", label: "注文数" },
+  { key: "revenue", label: "売上" },
+];
+
+function yen(value: number): string {
+  return `¥${value.toLocaleString("ja-JP")}`;
 }
 
-// CSV の1セルをエスケープする (カンマ/改行/ダブルクオート対応)。
-function csvCell(v: string | number | null): string {
-  const s = v == null ? "" : String(v);
-  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+function integer(value: number): string {
+  return value.toLocaleString("ja-JP");
 }
 
-// 統計をCSV(精算・報告書用)としてダウンロードする。Excel の文字化け対策に BOM を付ける。
-function downloadCsv(eventLabel: string, a: EventAnalytics) {
-  const t = a.totals;
+function hourLabel(hour: number): string {
+  return `${String(hour).padStart(2, "0")}時`;
+}
+
+function metricValue(value: number, metric: TrendMetric): string {
+  return metric === "revenue" ? yen(value) : `${integer(value)}${metric === "visitors" ? "アカウント" : "件"}`;
+}
+
+function getPeak<T extends { hour: number }>(
+  rows: T[],
+  valueFor: (row: T) => number,
+): T | undefined {
+  return rows.reduce<T | undefined>(
+    (peak, row) => (!peak || valueFor(row) > valueFor(peak) ? row : peak),
+    undefined,
+  );
+}
+
+// CSVの1セルをエスケープする (カンマ/改行/ダブルクオート対応)。
+function csvCell(value: string | number | null): string {
+  const text = value == null ? "" : String(value);
+  return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+// 画面と同じ集計単位で、概要・時間帯・年代・サークル・注文内訳を書き出す。
+function downloadCsv(eventLabel: string, analytics: EventAnalytics) {
+  const totals = analytics.totals;
+  const ageTotal = analytics.ageBuckets.reduce((sum, bucket) => sum + bucket.count, 0);
+  const ageRows = analytics.ageBuckets.map((bucket) => [
+    bucket.label,
+    bucket.count,
+    ageTotal ? `${Math.round((bucket.count / ageTotal) * 100)}%` : "0%",
+  ]);
   const lines: (string | number | null)[][] = [
     ["イベント統計サマリ"],
-    ["総来場者数", "総売上", "総注文数", "総客数", "平均客単価", "サークル数", "平均評価", "完了率", "回遊のべ訪問"],
-    [t.visitors, t.revenue, t.orders, t.customers, t.avgSpend, t.circles, t.avgRating ?? "", `${t.completedRate}%`, t.circleVisits],
+    ["来場アカウント数", "登録プロフィール数", "受付完了アカウント数", "受付完了率", "売上", "注文数", "注文完了率", "注文記録上の延べ人数"],
+    [
+      totals.visitors,
+      totals.visitorProfiles,
+      totals.onboarded,
+      `${totals.onboardedRate}%`,
+      totals.revenue,
+      totals.orders,
+      `${totals.completedRate}%`,
+      totals.customers,
+    ],
     [],
-    ["サークル別 (精算)"],
+    ["時間帯別 (日本時間・全開催日の合算)"],
+    ["時刻", "アカウント作成数", "注文数", "売上"],
+    ...analytics.byHour.map((row) => [hourLabel(row.hour), row.visitors, row.orders, row.revenue]),
+    [],
+    ["年代構成 (リストバンド/プロフィール単位)"],
+    ["年齢回答ありプロフィール", ageTotal, "未回答プロフィール", Math.max(0, totals.visitorProfiles - ageTotal)],
+    ["年代", "年齢登録プロフィール数", "回答者内の構成比"],
+    ...ageRows,
+    [],
+    ["サークル別売上"],
     ["サークル名", "売上", "注文数", "レビュー数", "平均評価"],
-    ...a.circleRanking.map((c) => [c.name, c.revenue, c.orders, c.reviews, c.avgRating ?? ""]),
+    ...analytics.circleRanking.map((circle) => [
+      circle.name,
+      circle.revenue,
+      circle.orders,
+      circle.reviews,
+      circle.avgRating ?? "",
+    ]),
     [],
     ["人気メニュー"],
     ["メニュー", "販売個数", "売上"],
-    ...a.menuRanking.map((m) => [m.menuName, m.quantity, m.revenue]),
+    ...analytics.menuRanking.map((menu) => [menu.menuName, menu.quantity, menu.revenue]),
+    [],
+    ["支払い方法"],
+    ["支払い方法", "注文数", "売上"],
+    ...analytics.paymentBreakdown.map((payment) => [payment.method, payment.orders, payment.revenue]),
   ];
   const csv = lines.map((row) => row.map(csvCell).join(",")).join("\r\n");
-  const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" });
+  const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
@@ -45,223 +118,518 @@ function downloadCsv(eventLabel: string, a: EventAnalytics) {
   document.body.appendChild(link);
   link.click();
   link.remove();
-  // 2026-10-08: Blob URLの即時解放によるダウンロード開始前の失効を防ぐ。
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 function StatCard({
   label,
   value,
-  sub,
+  note,
   icon: Icon,
+  accent = false,
 }: {
   label: string;
   value: string;
-  sub?: string;
-  icon?: React.ComponentType<{ className?: string }>;
+  note: string;
+  icon: LucideIcon;
+  accent?: boolean;
 }) {
   return (
-    <div className="border-thick border-border bg-background p-3 flex flex-col gap-1">
-      <div className="flex items-center gap-1.5 text-muted-foreground">
-        {Icon && <Icon className="h-3.5 w-3.5" />}
-        <span className="font-mono text-[10px] uppercase tracking-widest">{label}</span>
+    <div className={`min-w-0 border-t-thick pt-3 ${accent ? "border-accent" : "border-border"}`}>
+      <div className="flex items-center gap-2 text-muted-foreground">
+        <Icon aria-hidden="true" className="h-4 w-4 shrink-0" />
+        <span className="truncate font-mono text-[10px] font-bold uppercase tracking-widest">{label}</span>
       </div>
-      <div className="font-headline text-[24px] leading-none tabular-nums">{value}</div>
-      {sub && <div className="font-mono text-[10px] text-muted-foreground">{sub}</div>}
+      <p className="mt-2 break-words font-headline text-[clamp(1rem,5vw,1.875rem)] leading-none tabular-nums">{value}</p>
+      <p className="mt-2 min-h-4 text-[10px] leading-4 text-muted-foreground">{note}</p>
     </div>
   );
 }
 
-// シンプルな横棒 (外部チャートライブラリ非依存、ブランド風の実線バー)
-function Bars({
+function SectionTitle({ id, label, note }: { id?: string; label: string; note?: string }) {
+  return (
+    <div className="mb-4 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 border-b-thin border-border pb-2">
+      <h3 id={id} className="flex items-center gap-2 font-mono text-xs font-bold uppercase tracking-widest">
+        {label}
+      </h3>
+      {note && <p className="text-[10px] text-muted-foreground">{note}</p>}
+    </div>
+  );
+}
+
+function RankingBars({
   rows,
   max,
-  fmt,
 }: {
-  rows: { label: string; value: number }[];
+  rows: { key: string; label: string; value: number; valueLabel: string; detail: string }[];
   max: number;
-  fmt: (v: number) => string;
 }) {
+  if (rows.length === 0) {
+    return <p className="py-2 text-xs text-muted-foreground">データがまだありません。</p>;
+  }
+
+  const scale = Math.max(1, max);
   return (
-    <div className="space-y-1.5">
-      {rows.map((r, i) => (
-        <div key={i} className="flex items-center gap-2 font-mono text-[11px]">
-          <span className="w-16 shrink-0 text-right text-muted-foreground truncate">{r.label}</span>
-          <div className="flex-1 bg-muted h-4 relative">
-            <div
-              className="h-4 bg-accent"
-              style={{ width: max > 0 ? `${Math.max(2, (r.value / max) * 100)}%` : "0%" }}
-            />
+    <ol className="space-y-3">
+      {rows.map((row, index) => (
+        <li key={row.key} className="min-w-0">
+          <div className="flex min-w-0 items-baseline justify-between gap-3 text-xs">
+            <span className="flex min-w-0 items-baseline gap-2">
+              <span className="shrink-0 font-mono text-[10px] text-muted-foreground">{String(index + 1).padStart(2, "0")}</span>
+              <span className="truncate font-medium">{row.label}</span>
+            </span>
+            <span className="shrink-0 font-mono text-[11px] tabular-nums">{row.valueLabel}</span>
           </div>
-          <span className="w-20 shrink-0 tabular-nums">{fmt(r.value)}</span>
-        </div>
+          <div aria-hidden="true" className="mt-1.5 h-2 bg-muted">
+            <div className="h-full bg-accent" style={{ width: `${Math.max(row.value > 0 ? 2 : 0, (row.value / scale) * 100)}%` }} />
+          </div>
+          <p className="mt-1 text-right font-mono text-[10px] text-muted-foreground">{row.detail}</p>
+        </li>
       ))}
-    </div>
+    </ol>
+  );
+}
+
+function HourlyTrend({
+  rows,
+  metric,
+  onMetricChange,
+}: {
+  rows: EventAnalytics["byHour"];
+  metric: TrendMetric;
+  onMetricChange: (metric: TrendMetric) => void;
+}) {
+  const valueFor = (row: EventAnalytics["byHour"][number]) => row[metric];
+  const values = rows.map(valueFor);
+  const total = values.reduce((sum, value) => sum + value, 0);
+  const max = Math.max(1, ...values);
+  const peak = getPeak(rows, valueFor);
+
+  const width = 960;
+  const height = 220;
+  const left = 12;
+  const right = width - 12;
+  const top = 14;
+  const baseline = height - 14;
+  const chartHeight = baseline - top;
+  const coords = rows.map((row, index) => ({
+    ...row,
+    x: rows.length <= 1 ? width / 2 : left + (index / (rows.length - 1)) * (right - left),
+    y: baseline - (valueFor(row) / max) * chartHeight,
+  }));
+  const linePath = coords.map((point, index) => `${index === 0 ? "M" : "L"}${point.x.toFixed(1)},${point.y.toFixed(1)}`).join(" ");
+  const areaPath = coords.length
+    ? `${linePath} L${coords[coords.length - 1]!.x.toFixed(1)},${baseline} L${coords[0]!.x.toFixed(1)},${baseline} Z`
+    : "";
+  const tickX = (hour: number) => left + (hour / 23) * (right - left);
+  const metricLabel = trendMetrics.find((entry) => entry.key === metric)!.label;
+  const format = (value: number) => metricValue(value, metric);
+
+  return (
+    <section aria-labelledby="event-hourly-trend-title" className="min-w-0">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+        <h3 id="event-hourly-trend-title" className="flex items-center gap-2 font-mono text-xs font-bold uppercase tracking-widest">
+          <Activity aria-hidden="true" className="h-4 w-4" />
+          時間帯別の動き
+        </h3>
+        <div role="group" aria-label="グラフで表示する指標" className="flex flex-wrap gap-1">
+          {trendMetrics.map((option) => (
+            <button
+              key={option.key}
+              type="button"
+              aria-pressed={metric === option.key}
+              onClick={() => onMetricChange(option.key)}
+              className={`min-h-8 border-thin px-2 font-mono text-[10px] font-bold transition-colors focus-visible:border-heavy focus-visible:outline-none ${
+                metric === option.key
+                  ? "border-primary bg-primary text-primary-foreground"
+                  : "border-border bg-background text-foreground hover:bg-muted"
+              }`}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <p className="mb-2 flex flex-wrap items-baseline justify-between gap-2 text-[10px] text-muted-foreground">
+        <span>全期間を日本時間で集計 · アカウントは作成時刻、注文と売上は注文時刻</span>
+        <span>
+          合計 <strong className="font-mono text-foreground">{format(total)}</strong>
+          {peak && valueFor(peak) > 0 && (
+            <> / ピーク <strong className="font-mono text-foreground">{hourLabel(peak.hour)} · {format(valueFor(peak))}</strong></>
+          )}
+        </span>
+      </p>
+
+      {total === 0 ? (
+        <div className="flex h-48 items-center justify-center bg-muted/30 text-xs text-muted-foreground">
+          この指標の記録はまだありません。
+        </div>
+      ) : (
+        <>
+          <svg
+            viewBox={`0 0 ${width} ${height}`}
+            preserveAspectRatio="none"
+            aria-hidden="true"
+            className="h-48 w-full overflow-visible text-accent sm:h-56"
+          >
+            {[0.25, 0.5, 0.75, 1].map((ratio) => {
+              const y = baseline - ratio * chartHeight;
+              return <line key={ratio} x1={left} x2={right} y1={y} y2={y} className="stroke-border" strokeDasharray="3 7" strokeWidth="1" />;
+            })}
+            <path d={areaPath} fill="currentColor" fillOpacity="0.1" />
+            <path d={linePath} fill="none" stroke="currentColor" strokeLinejoin="round" strokeLinecap="round" strokeWidth="3" />
+            {coords.map((point) => (
+              <circle
+                key={point.hour}
+                cx={point.x}
+                cy={point.y}
+                r={peak?.hour === point.hour ? 5 : 2.5}
+                fill="currentColor"
+              >
+                <title>{hourLabel(point.hour)}: {format(valueFor(point))}</title>
+              </circle>
+            ))}
+            {[0, 6, 12, 18, 23].map((hour) => (
+              <line key={hour} x1={tickX(hour)} x2={tickX(hour)} y1={baseline} y2={baseline + 4} className="stroke-border" strokeWidth="1" />
+            ))}
+          </svg>
+          <div aria-hidden="true" className="mt-1 flex justify-between font-mono text-[9px] text-muted-foreground">
+            {[0, 6, 12, 18, 23].map((hour) => <span key={hour}>{hourLabel(hour)}</span>)}
+          </div>
+        </>
+      )}
+
+      <table className="sr-only">
+        <caption>時間帯別{metricLabel}。全期間、日本時間で集計。</caption>
+        <thead><tr><th scope="col">時刻</th><th scope="col">{metricLabel}</th></tr></thead>
+        <tbody>
+          {rows.map((row) => <tr key={row.hour}><th scope="row">{hourLabel(row.hour)}</th><td>{format(valueFor(row))}</td></tr>)}
+        </tbody>
+      </table>
+    </section>
   );
 }
 
 export function AnalyticsTab({ eventId, eventName }: { eventId: string; eventName?: string }) {
-  // リアルタイム自動更新 (2026-07-12): ON で 15 秒ごとに再取得する。
-  // 開催中の混雑状況/売上をライブで見るための機能。
   const [live, setLive] = useState(false);
-  const { data, isLoading, isError, error, refetch, isFetching } = useQuery({
+  const [trendMetric, setTrendMetric] = useState<TrendMetric>("visitors");
+  const analyticsQuery = useQuery({
     queryKey: ["event-analytics", eventId],
     queryFn: () => eventApi.analytics(eventId),
     enabled: !!eventId,
     refetchInterval: live ? 15_000 : false,
   });
+  const behaviorQuery = useQuery({
+    queryKey: ["event-behavior", eventId],
+    queryFn: () => eventApi.behavior(eventId),
+    enabled: !!eventId,
+    refetchInterval: live ? 15_000 : false,
+  });
 
-  if (isLoading) {
+  if (analyticsQuery.isLoading) {
     return (
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        {Array.from({ length: 8 }).map((_, i) => (
-          <Skeleton key={i} className="h-20" />
-        ))}
+      <div className="space-y-6">
+        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+          {Array.from({ length: 4 }).map((_, index) => <Skeleton key={index} className="h-24" />)}
+        </div>
+        <div className="grid gap-6 xl:grid-cols-[minmax(0,1.4fr)_minmax(18rem,0.8fr)]">
+          <Skeleton className="h-72" />
+          <Skeleton className="h-72" />
+        </div>
       </div>
     );
   }
-  if (isError) return <ErrorState error={error} onRetry={() => refetch()} />;
-  if (!data) return <EmptyState icon={BarChart3} message="統計データがありません" />;
+  if (analyticsQuery.isError) {
+    return <ErrorState error={analyticsQuery.error} onRetry={() => analyticsQuery.refetch()} />;
+  }
+  if (!analyticsQuery.data) {
+    return <EmptyState icon={BarChart3} message="統計データがありません" />;
+  }
 
-  const a: EventAnalytics = data;
-  const t = a.totals;
-  const maxHourRevenue = Math.max(1, ...a.byHour.map((h) => h.revenue));
-  const maxCircleRevenue = Math.max(1, ...a.circleRanking.map((c) => c.revenue));
-  const maxAge = Math.max(1, ...a.ageBuckets.map((b) => b.count));
-  // 表示は営業がある時間帯 (注文か来場がある範囲) に絞る
-  const activeHours = a.byHour.filter((h) => h.orders > 0 || h.visitors > 0);
+  const analytics = analyticsQuery.data;
+  const totals = analytics.totals;
+  const behavior = behaviorQuery.data;
+  const ageAnswerCount = analytics.ageBuckets.reduce((sum, bucket) => sum + bucket.count, 0);
+  const ageUnansweredCount = Math.max(0, totals.visitorProfiles - ageAnswerCount);
+  const ageCoverage = totals.visitorProfiles ? Math.round((ageAnswerCount / totals.visitorProfiles) * 100) : 0;
+  const maxAgeCount = Math.max(1, ...analytics.ageBuckets.map((bucket) => bucket.count));
+  const topAgeGroup = [...analytics.ageBuckets].sort((a, b) => b.count - a.count)[0];
+  const activityPeak = behavior ? getPeak(behavior.byHour, (row) => row.activeUsers) : undefined;
+  const salesPeak = getPeak(analytics.byHour, (row) => row.revenue);
+  const maxMenuQuantity = Math.max(1, ...analytics.menuRanking.map((menu) => menu.quantity));
+  const maxCircleRevenue = Math.max(1, ...analytics.circleRanking.map((circle) => circle.revenue));
+  const maxPaymentRevenue = Math.max(1, ...analytics.paymentBreakdown.map((payment) => payment.revenue));
+  const averageOrderValue = totals.orders ? Math.round(totals.revenue / totals.orders) : 0;
+  const isFetching = analyticsQuery.isFetching || behaviorQuery.isFetching;
+  const refreshAll = () => {
+    void Promise.all([analyticsQuery.refetch(), behaviorQuery.refetch()]);
+  };
+
+  const menuRows = analytics.menuRanking.slice(0, 5).map((menu) => ({
+    key: menu.menuName,
+    label: menu.menuName,
+    value: menu.quantity,
+    valueLabel: `${integer(menu.quantity)}個`,
+    detail: `売上 ${yen(menu.revenue)}`,
+  }));
+  const paymentRows = analytics.paymentBreakdown.slice(0, 5).map((payment) => ({
+    key: payment.method,
+    label: payment.method,
+    value: payment.revenue,
+    valueLabel: yen(payment.revenue),
+    detail: `${integer(payment.orders)}件 · 売上構成 ${totals.revenue ? Math.round((payment.revenue / totals.revenue) * 100) : 0}%`,
+  }));
+  const circleRows = analytics.circleRanking.slice(0, 6).map((circle) => ({
+    key: circle.circleId,
+    label: circle.name || "名称未設定",
+    value: circle.revenue,
+    valueLabel: yen(circle.revenue),
+    detail: `${integer(circle.orders)}注文 · ${circle.avgRating == null ? "評価なし" : `★${circle.avgRating} / ${circle.reviews}件`}`,
+  }));
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between border-b-thick border-border pb-3">
-        <h2 className="text-sm font-bold flex items-center gap-2 uppercase tracking-wider">
-          <BarChart3 className="h-4 w-4" /> 統計・分析
-        </h2>
-        <div className="flex items-center gap-2">
+    <div className="space-y-6 text-foreground">
+      <header className="flex flex-col gap-4 border-b-thick border-border pb-4 sm:flex-row sm:items-end sm:justify-between">
+        <div className="min-w-0">
+          <p className="mb-1 flex items-center gap-2 font-mono text-[10px] font-bold uppercase tracking-[0.18em] text-muted-foreground">
+            <BarChart3 aria-hidden="true" className="h-4 w-4" />
+            EVENT OVERVIEW
+          </p>
+          <h2 className="text-xl font-bold sm:text-2xl">イベント実績の全体像</h2>
+          <p className="mt-1 max-w-2xl text-xs leading-5 text-muted-foreground">
+            {eventName ? `${eventName}の` : ""}登録アカウント・注文・回遊をまとめて確認できます。表示範囲は全期間です。
+          </p>
+        </div>
+        <div className="grid grid-cols-2 gap-2 sm:flex sm:shrink-0">
           <button
             type="button"
-            onClick={() => downloadCsv(eventName || "event", data)}
-            className="flex items-center gap-1 font-mono text-[11px] uppercase border-thick border-border px-2 py-1 hover:bg-muted"
-            title="統計・精算データをCSVで書き出す"
+            onClick={() => downloadCsv(eventName || "event", analytics)}
+            className="inline-flex min-h-10 items-center justify-center gap-2 border-thick border-border bg-background px-3 font-mono text-[10px] font-bold uppercase tracking-wider hover:bg-muted focus-visible:border-heavy focus-visible:outline-none"
+            title="統計データをCSVで書き出す"
           >
-            <Download className="h-3.5 w-3.5" /> CSV
+            <Download aria-hidden="true" className="h-4 w-4" />
+            CSV
           </button>
           <button
             type="button"
-            onClick={() => setLive((v) => !v)}
-            className={`flex items-center gap-1 font-mono text-[11px] uppercase border-thick px-2 py-1 transition-colors ${
-              live ? "border-accent bg-accent text-accent-foreground" : "border-border hover:bg-muted"
+            aria-pressed={live}
+            onClick={() => setLive((current) => !current)}
+            className={`inline-flex min-h-10 items-center justify-center gap-2 border-thick px-3 font-mono text-[10px] font-bold uppercase tracking-wider transition-colors focus-visible:border-heavy focus-visible:outline-none ${
+              live ? "border-accent bg-accent text-accent-foreground" : "border-border bg-background hover:bg-muted"
             }`}
-            title="ONで15秒ごとに自動更新 (開催中のライブ表示)"
+            title="ライブ更新を有効にすると15秒ごとに再取得します"
           >
-            <Radio className={`h-3.5 w-3.5 ${live ? "animate-pulse" : ""}`} /> LIVE
+            <Radio aria-hidden="true" className={`h-4 w-4 ${live ? "animate-pulse" : ""}`} />
+            {live ? "LIVE ON" : "LIVE"}
           </button>
           <button
             type="button"
-            onClick={() => refetch()}
+            onClick={refreshAll}
             disabled={isFetching}
-            className="flex items-center gap-1 font-mono text-[11px] uppercase border-thick border-border px-2 py-1 hover:bg-muted"
+            className="col-span-2 inline-flex min-h-10 items-center justify-center gap-2 border-thick border-border bg-background px-3 font-mono text-[10px] font-bold uppercase tracking-wider hover:bg-muted focus-visible:border-heavy focus-visible:outline-none disabled:cursor-wait disabled:opacity-60 sm:col-span-1"
           >
-            <RefreshCw className={`h-3.5 w-3.5 ${isFetching ? "animate-spin" : ""}`} /> 更新
+            <RefreshCw aria-hidden="true" className={`h-4 w-4 ${isFetching ? "animate-spin" : ""}`} />
+            更新
           </button>
         </div>
-      </div>
+      </header>
 
-      {/* KPI カード */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <StatCard label="総来場者数" value={t.visitors.toLocaleString()} sub={`オンボード率 ${t.onboardedRate}%`} icon={Users} />
-        <StatCard label="総売上" value={yen(t.revenue)} icon={Coins} />
-        <StatCard label="総注文数" value={t.orders.toLocaleString()} sub={`完了率 ${t.completedRate}%`} icon={Receipt} />
-        <StatCard label="総客数" value={t.customers.toLocaleString()} sub={`平均客単価 ${yen(t.avgSpend)}`} />
-        <StatCard label="サークル数" value={t.circles.toLocaleString()} />
-        <StatCard label="平均評価" value={t.avgRating != null ? `★${t.avgRating}` : "—"} sub={`${t.reviews}件`} icon={Star} />
-        <StatCard label="回遊(のべ訪問)" value={t.circleVisits.toLocaleString()} sub={`${t.visitingUsers}人が訪問`} />
-        <StatCard label="平均客単価" value={yen(t.avgSpend)} />
-      </div>
+      <section aria-label="イベントの主要指標" className="grid grid-cols-2 gap-x-4 gap-y-5 lg:grid-cols-4 lg:gap-x-6">
+        <StatCard
+          label="登録アカウント"
+          value={`${integer(totals.visitors)}件`}
+          note={`受付登録完了 ${integer(totals.onboarded)}件 · ${totals.onboardedRate}%`}
+          icon={Users}
+          accent
+        />
+        <StatCard
+          label="来場プロフィール"
+          value={`${integer(totals.visitorProfiles)}件`}
+          note="家族を含む · 有効バンド/単独登録プロフィール"
+          icon={Users}
+        />
+        <StatCard
+          label="売上"
+          value={yen(totals.revenue)}
+          note={`キャンセルを除く ${integer(totals.orders)}注文`}
+          icon={Coins}
+        />
+        <StatCard
+          label="注文"
+          value={`${integer(totals.orders)}件`}
+          note={`完了率 ${totals.completedRate}% · 平均注文額 ${yen(averageOrderValue)}`}
+          icon={Receipt}
+        />
+      </section>
 
-      {/* 時間帯別売上 */}
-      <section className="space-y-2">
-        <h3 className="font-mono text-[11px] uppercase tracking-widest text-muted-foreground">時間帯別 売上 / 注文 / 来場</h3>
-        {activeHours.length === 0 ? (
-          <p className="font-mono text-[11px] text-muted-foreground">まだ売上・来場データがありません。</p>
-        ) : (
-          <Bars
-            rows={activeHours.map((h) => ({ label: `${h.hour}時`, value: h.revenue }))}
-            max={maxHourRevenue}
-            fmt={yen}
-          />
-        )}
-        {activeHours.length > 0 && (
-          <p className="font-mono text-[10px] text-muted-foreground">
-            棒は売上。各時間帯の注文/来場は下のサークル別と合わせて確認できます。
+      <section aria-label="注目データ" className="grid grid-cols-2 gap-x-4 gap-y-3 border-y-thin border-border py-4 lg:grid-cols-4 lg:gap-6">
+        <div className="min-w-0">
+          <p className="text-[10px] text-muted-foreground">来場アカウントの行動ピーク</p>
+          <p className="mt-1 font-mono text-sm font-bold tabular-nums">
+            {activityPeak && activityPeak.activeUsers > 0 ? `${hourLabel(activityPeak.hour)} · ${integer(activityPeak.activeUsers)}アカウント` : behaviorQuery.isLoading ? "読込中" : "記録なし"}
           </p>
-        )}
+        </div>
+        <div className="min-w-0">
+          <p className="text-[10px] text-muted-foreground">売上のピーク</p>
+          <p className="mt-1 font-mono text-sm font-bold tabular-nums">
+            {salesPeak && salesPeak.revenue > 0 ? `${hourLabel(salesPeak.hour)} · ${yen(salesPeak.revenue)}` : "記録なし"}
+          </p>
+        </div>
+        <div className="min-w-0">
+          <p className="text-[10px] text-muted-foreground">最多の年代</p>
+          <p className="mt-1 truncate font-mono text-sm font-bold">
+            {topAgeGroup ? `${topAgeGroup.label} · ${integer(topAgeGroup.count)}人` : "年代データなし"}
+          </p>
+        </div>
+        <div className="min-w-0">
+          <p className="text-[10px] text-muted-foreground">人気メニュー</p>
+          <p className="mt-1 truncate font-mono text-sm font-bold">
+            {analytics.menuRanking[0] ? `${analytics.menuRanking[0].menuName} · ${integer(analytics.menuRanking[0].quantity)}個` : "注文データなし"}
+          </p>
+        </div>
       </section>
 
-      {/* サークル別ランキング */}
-      <section className="space-y-2">
-        <h3 className="font-mono text-[11px] uppercase tracking-widest text-muted-foreground">サークル別 売上ランキング</h3>
-        {a.circleRanking.length === 0 ? (
-          <p className="font-mono text-[11px] text-muted-foreground">サークルがありません。</p>
-        ) : (
-          <Bars
-            rows={a.circleRanking.slice(0, 15).map((c) => ({ label: c.name, value: c.revenue }))}
-            max={maxCircleRevenue}
-            fmt={yen}
+      <div className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1.45fr)_minmax(18rem,0.85fr)]">
+        <HourlyTrend rows={analytics.byHour} metric={trendMetric} onMetricChange={setTrendMetric} />
+
+        <section aria-labelledby="event-age-title" className="min-w-0">
+          <SectionTitle
+            id="event-age-title"
+            label="年代構成"
+            note={ageAnswerCount ? `年齢登録あり ${integer(ageAnswerCount)} / ${integer(totals.visitorProfiles)}プロフィール · 回答率 ${ageCoverage}%` : "年齢回答なし"}
           />
-        )}
-      </section>
-
-      {/* 人気メニュー + 年齢層 */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <section className="space-y-2">
-          <h3 className="font-mono text-[11px] uppercase tracking-widest text-muted-foreground">人気メニュー (販売個数 Top)</h3>
-          {a.menuRanking.length === 0 ? (
-            <p className="font-mono text-[11px] text-muted-foreground">販売実績がありません。</p>
+          {analytics.ageBuckets.length === 0 ? (
+            <p className="py-2 text-xs text-muted-foreground">年代データがまだありません。</p>
           ) : (
-            <div className="space-y-1">
-              {a.menuRanking.slice(0, 10).map((m, i) => (
-                <div key={m.menuName} className="flex items-center justify-between font-mono text-[11px] border-b border-border py-1">
-                  <span className="truncate">
-                    <span className="text-muted-foreground mr-2">{i + 1}.</span>
-                    {m.menuName}
-                  </span>
-                  <span className="tabular-nums shrink-0">{m.quantity}個 / {yen(m.revenue)}</span>
-                </div>
-              ))}
+            <div className="space-y-3">
+              {analytics.ageBuckets.map((bucket) => {
+                const share = ageAnswerCount ? Math.round((bucket.count / ageAnswerCount) * 100) : 0;
+                return (
+                  <div key={bucket.label} className="min-w-0">
+                    <div className="flex items-baseline justify-between gap-2 text-xs">
+                      <span className="font-bold">{bucket.label}</span>
+                      <span className="shrink-0 font-mono tabular-nums">
+                        {integer(bucket.count)}人 <span className="text-muted-foreground">({share}%)</span>
+                      </span>
+                    </div>
+                    <div aria-hidden="true" className="mt-1 h-2 bg-muted">
+                      <div className="h-full bg-foreground/80" style={{ width: `${(bucket.count / maxAgeCount) * 100}%` }} />
+                    </div>
+                  </div>
+                );
+              })}
+              <p className="border-t-thin border-border pt-2 text-[10px] leading-4 text-muted-foreground">
+                年代は各有効バンドの申告年齢です。未回答 {integer(ageUnansweredCount)}人。注文・回遊はアカウント単位で家族間共有されるため、年代別には割り振らずイベント全体で表示します。
+              </p>
             </div>
-          )}
-        </section>
-
-        <section className="space-y-2">
-          <h3 className="font-mono text-[11px] uppercase tracking-widest text-muted-foreground">支払い方法別 売上</h3>
-          {a.paymentBreakdown.length === 0 ? (
-            <p className="font-mono text-[11px] text-muted-foreground">売上がありません。</p>
-          ) : (
-            <div className="space-y-1">
-              {a.paymentBreakdown.map((p) => (
-                <div key={p.method} className="flex items-center justify-between font-mono text-[11px] border-b border-border py-1">
-                  <span>{p.method}</span>
-                  <span className="tabular-nums shrink-0">{p.orders}件 / {yen(p.revenue)}</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
-
-        <section className="space-y-2">
-          <h3 className="font-mono text-[11px] uppercase tracking-widest text-muted-foreground">登録日付の分布 (年齢層換算)</h3>
-          {a.ageBuckets.length === 0 ? (
-            <p className="font-mono text-[11px] text-muted-foreground">日付データがまだありません。</p>
-          ) : (
-            <Bars
-              rows={a.ageBuckets.map((b) => ({ label: b.label, value: b.count }))}
-              max={maxAge}
-              fmt={(v) => `${v}人`}
-            />
           )}
         </section>
       </div>
+
+      <div className="grid min-w-0 gap-6 xl:grid-cols-2">
+        <section aria-labelledby="event-order-title" className="min-w-0">
+          <SectionTitle
+            id="event-order-title"
+            label="注文の内訳"
+            note={`平均注文額 ${yen(averageOrderValue)} · 注文時の延べ人数 ${integer(totals.customers)}人`}
+          />
+          <div className="grid gap-5 md:grid-cols-2">
+            <div>
+              <h4 className="mb-3 font-mono text-[10px] font-bold uppercase tracking-widest text-muted-foreground">人気メニュー · 個数</h4>
+              <RankingBars rows={menuRows} max={maxMenuQuantity} />
+            </div>
+            <div>
+              <h4 className="mb-3 font-mono text-[10px] font-bold uppercase tracking-widest text-muted-foreground">支払い方法 · 売上</h4>
+              <RankingBars rows={paymentRows} max={maxPaymentRevenue} />
+            </div>
+          </div>
+        </section>
+
+        <section aria-labelledby="event-circulation-title" className="min-w-0">
+          <SectionTitle id="event-circulation-title" label="回遊とサークル接点" note="来場者の行動記録から集計" />
+          <div className="grid grid-cols-2 gap-x-4 gap-y-4 sm:grid-cols-4">
+            <div>
+              <p className="text-[10px] text-muted-foreground">訪問記録</p>
+              <p className="mt-1 font-mono text-lg font-bold tabular-nums">{integer(totals.circleVisits)}回</p>
+            </div>
+            <div>
+              <p className="text-[10px] text-muted-foreground">訪問記録のあるアカウント</p>
+              <p className="mt-1 font-mono text-lg font-bold tabular-nums">{integer(totals.visitingUsers)}件</p>
+            </div>
+            <div>
+              <p className="text-[10px] text-muted-foreground">注文アカウント</p>
+              <p className="mt-1 font-mono text-lg font-bold tabular-nums">{behavior ? `${integer(behavior.journey.buyers)}件` : behaviorQuery.isLoading ? "読込中" : "—"}</p>
+            </div>
+            <div>
+              <p className="text-[10px] text-muted-foreground">複数サークル接点率</p>
+              <p className="mt-1 font-mono text-lg font-bold tabular-nums">{behavior ? `${behavior.journey.multiCircleRate}%` : "—"}</p>
+            </div>
+          </div>
+          <p className="mt-2 text-[10px] leading-4 text-muted-foreground">
+            来場アカウント数はアカウント単位です。平均 {behavior ? behavior.journey.avgCirclesPerVisitor : "—"} サークルに接点（注文・訪問・スタンプの記録）し、回遊の流れは記録された連続訪問の組み合わせです。
+          </p>
+          <div className="mt-4 border-t-thin border-border pt-3">
+            <h4 className="mb-2 font-mono text-[10px] font-bold uppercase tracking-widest text-muted-foreground">よくある回遊</h4>
+            {behaviorQuery.isLoading ? (
+              <p className="text-xs text-muted-foreground">行動データを読み込んでいます。</p>
+            ) : behaviorQuery.isError ? (
+              <p className="text-xs text-muted-foreground">回遊の詳細を取得できませんでした。</p>
+            ) : !behavior?.topTransitions.length ? (
+              <p className="text-xs text-muted-foreground">2サークル以上を続けて訪れた記録が集まると表示されます。</p>
+            ) : (
+              <ol className="space-y-2">
+                {behavior.topTransitions.slice(0, 5).map((transition, index) => (
+                  <li key={`${transition.from}-${transition.to}`} className="flex min-w-0 items-center justify-between gap-3 text-xs">
+                    <span className="flex min-w-0 items-center gap-1.5">
+                      <span className="w-4 shrink-0 font-mono text-[10px] text-muted-foreground">{index + 1}.</span>
+                      <span className="truncate">{transition.from}</span>
+                      <ArrowRight aria-hidden="true" className="h-3 w-3 shrink-0 text-muted-foreground" />
+                      <span className="truncate">{transition.to}</span>
+                    </span>
+                    <span className="shrink-0 font-mono tabular-nums">{integer(transition.count)}回</span>
+                  </li>
+                ))}
+              </ol>
+            )}
+          </div>
+        </section>
+      </div>
+
+      <section aria-labelledby="event-circle-ranking-title" className="min-w-0">
+        <SectionTitle id="event-circle-ranking-title" label="サークル別の実績" note={`売上上位 ${Math.min(6, analytics.circleRanking.length)} / ${integer(totals.circles)}サークル`} />
+        {analytics.circleRanking.length === 0 ? (
+          <p className="py-2 text-xs text-muted-foreground">サークルの販売実績がまだありません。</p>
+        ) : (
+          <div className="grid gap-x-8 gap-y-4 md:grid-cols-2">
+            {circleRows.map((row, index) => (
+              <div key={row.key} className="min-w-0">
+                <div className="flex items-baseline justify-between gap-3 text-xs">
+                  <span className="flex min-w-0 items-baseline gap-2">
+                    <span className="shrink-0 font-mono text-[10px] text-muted-foreground">{String(index + 1).padStart(2, "0")}</span>
+                    <span className="truncate font-medium">{row.label}</span>
+                  </span>
+                  <span className="shrink-0 font-mono tabular-nums">{row.valueLabel}</span>
+                </div>
+                <div aria-hidden="true" className="mt-1.5 h-2 bg-muted">
+                  <div className="h-full bg-accent" style={{ width: `${Math.max(row.value > 0 ? 2 : 0, (row.value / maxCircleRevenue) * 100)}%` }} />
+                </div>
+                <p className="mt-1 text-right font-mono text-[10px] text-muted-foreground">{row.detail}</p>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <footer className="border-t-thin border-border pt-3 text-[10px] leading-4 text-muted-foreground">
+        来場登録数・注文者数・回遊はアカウント単位です。年代は有効なリストバンドごとのプロフィールを家族分も含めて集計し、アカウントにバンドがない場合はアカウントの申告年齢を1件として扱います。家族で注文を共有するため、注文・売上を年代別には配賦しません。売上・注文はキャンセルを除外し、注文完了率は完了済みの注文数から計算しています。時間帯は日本時間で、全開催日の同じ時刻を合算しています。
+        {behaviorQuery.isError && (
+          <span className="mt-1 block">
+            回遊・注文者の補足データを取得できませんでした。{" "}
+            <a href="/event/dashboard?tab=behavior" className="underline underline-offset-2 hover:text-foreground">行動分析を開く</a>
+          </span>
+        )}
+      </footer>
     </div>
   );
 }

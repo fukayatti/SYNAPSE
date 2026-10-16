@@ -772,6 +772,7 @@ export function parseEventPaymentMethods(raw?: string | null): string[] {
 export interface EventAnalytics {
   totals: {
     visitors: number;
+    visitorProfiles: number;
     onboarded: number;
     onboardedRate: number;
     orders: number;
