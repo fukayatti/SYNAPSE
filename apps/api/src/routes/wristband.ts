@@ -665,7 +665,8 @@ wristbandRoutes.post(
   zBody(
     z.object({
       userId: z.string().min(1),
-      wristbandId: z.string().optional(),
+      // 2026-10-16: SPA はスマホ入場時に wristbandId=null を送るため、API も null を受け付ける。
+      wristbandId: z.string().nullable().optional(),
       nickname: z.string().trim().min(1).max(30),
       favoriteDate: z.string().optional(), // YYYY-MM-DD
       birthdayMonthDay: z.string().regex(/^\d{2}-\d{2}$/).optional(),
