@@ -150,6 +150,9 @@ function MenuCard({
           className="w-full h-10 sm:h-11 border-thick border-border bg-primary text-primary-foreground font-mono text-xs sm:text-sm font-bold uppercase rounded-none hover:bg-background hover:text-foreground transition-all"
           onClick={menu.toppingWizardEnabled && availableToppings.length > 0 ? openToppingWizard : handleAdd}
           disabled={menu.soldOut || (!menu.toppingWizardEnabled && !selectionReady)}
+          aria-label={menu.toppingWizardEnabled && availableToppings.length > 0
+            ? `${menu.name}のトッピングを選択`
+            : `${menu.name}をカートに追加。トッピング込み ¥${(menu.price + selectedExtra).toLocaleString()}`}
         >
           {menu.toppingWizardEnabled && availableToppings.length > 0
             ? "選択"
@@ -200,6 +203,7 @@ function MenuCard({
 // カート本体。デスクトップのサイドバーとモバイルのスライドアップの両方で使い回す。
 function CartBody({
   cart,
+  idPrefix,
   menuMap,
   peopleCount,
   activeCustomer,
@@ -217,6 +221,7 @@ function CartBody({
   onSetPayment,
 }: {
   cart: CartLine[];
+  idPrefix: "desktop" | "mobile";
   menuMap: Map<string, MenuWithToppings>;
   peopleCount: number;
   activeCustomer: { userId: string; wristbandId: string | null } | null;
@@ -236,6 +241,8 @@ function CartBody({
 }) {
   // 支払い方法が2つ以上あるのに未選択なら確定を止める。
   const needsPayment = paymentMethods.length > 1 && !paymentMethod;
+  // 2026-10-16: カート操作の状態を読み上げ可能にし、数量変更後の合計と選択状態を追えるようにする。
+  const peopleCountId = `${idPrefix}-people-count`;
   return (
     // 2026-07-16: 親 (aside / モバイルのスライドアップパネル) は max-height + overflow-hidden で
     // 高さの上限を持つコンテナ。ここを h-full ではなく flex-1 min-h-0 にすることで、
@@ -261,8 +268,11 @@ function CartBody({
                     <p className="font-bold text-sm truncate">{line.menuName}</p>
                     <p className="text-xs text-muted-foreground">¥{line.menuPrice.toLocaleString()}</p>
                   </div>
+                  {/* 2026-10-16: アイコンだけの操作にも商品名を含む読み上げ名を付ける。 */}
                   <button
+                    type="button"
                     onClick={() => onRemoveLine(line.lineId)}
+                    aria-label={`${line.menuName}をカートから削除`}
                     className="w-8 h-8 border-thin border-border flex items-center justify-center hover:bg-error hover:text-white shrink-0 transition-all"
                   >
                     <Trash2 className="h-3 w-3" />
@@ -282,6 +292,7 @@ function CartBody({
                             type="button"
                             disabled={topping.soldOut}
                             onClick={() => onToggleTopping(line.lineId, topping)}
+                            aria-pressed={on}
                             className={cn(
                               "flex min-h-10 w-full items-center justify-between gap-2 border-thick rounded-none px-2 py-1 text-left text-xs font-bold transition-all disabled:opacity-40 disabled:cursor-not-allowed",
                               on
@@ -307,16 +318,20 @@ function CartBody({
 
                 {/* 数量 */}
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center border-thin border-border">
+                  <div className="flex items-center border-thin border-border" role="group" aria-label={`${line.menuName}の数量`}>
                     <button
+                      type="button"
                       onClick={() => onUpdateQuantity(line.lineId, -1)}
+                      aria-label={`${line.menuName}の数量を1減らす`}
                       className="w-10 h-10 flex items-center justify-center hover:bg-primary hover:text-primary-foreground transition-all border-r-thin border-border"
                     >
                       <Minus className="h-4 w-4" />
                     </button>
-                    <span className="w-10 text-center font-black text-lg">{line.quantity}</span>
+                    <span className="w-10 text-center font-black text-lg" aria-live="polite" aria-atomic="true">{line.quantity}</span>
                     <button
+                      type="button"
                       onClick={() => onUpdateQuantity(line.lineId, 1)}
+                      aria-label={`${line.menuName}の数量を1増やす`}
                       className="w-10 h-10 flex items-center justify-center hover:bg-primary hover:text-primary-foreground transition-all border-l-thin border-border"
                     >
                       <Plus className="h-4 w-4" />
@@ -335,11 +350,12 @@ function CartBody({
           これが無いと flex の既定 shrink:1 により極端なケースで確定ボタンごと潰れうる。 */}
       <div className="shrink-0 p-3 sm:p-4 border-t-thick border-border space-y-3 bg-background">
         <div className="flex items-center gap-3">
-          <Label htmlFor="peopleCount" className="font-mono text-xs uppercase tracking-wider whitespace-nowrap">来店人数</Label>
+          {/* 2026-10-16: PC用とモバイル用のカートが同時にDOMへあるため、入力IDを分けてラベル先を一意にする。 */}
+          <Label htmlFor={peopleCountId} className="font-mono text-xs uppercase tracking-wider whitespace-nowrap">来店人数</Label>
           {/* 入力中は 0/空を許容し、フォーカスを外した時に 1 未満なら 1 へ戻す
               (min=1 だと打ち直しのたびに値が押し戻されて入力しづらいため)。 */}
           <Input
-            id="peopleCount"
+            id={peopleCountId}
             type="number"
             inputMode="numeric"
             className="h-10 text-center font-bold border-thick border-border rounded-none"
@@ -348,7 +364,7 @@ function CartBody({
             onBlur={() => { if (peopleCount < 1) onSetPeople(1); }}
           />
         </div>
-        <div className="flex justify-between items-center border-thick border-border px-4 py-3 bg-muted">
+        <div className="flex justify-between items-center border-thick border-border px-4 py-3 bg-muted" role="status" aria-live="polite" aria-atomic="true">
           <span className="font-mono text-sm uppercase tracking-wider">合計金額</span>
           <span className="font-headline text-2xl sm:text-3xl font-black">¥{total.toLocaleString()}</span>
         </div>
@@ -366,6 +382,7 @@ function CartBody({
                   key={m}
                   type="button"
                   onClick={() => onSetPayment(m)}
+                  aria-pressed={paymentMethod === m}
                   className={cn(
                     "border-thick rounded-none px-2 py-2.5 text-sm font-bold transition-all",
                     paymentMethod === m
@@ -950,10 +967,11 @@ function RegisterPageContent() {
           </div>
           <CartBody
             cart={cart}
+            idPrefix="desktop"
             menuMap={menuMap}
             peopleCount={peopleCount}
             activeCustomer={activeCustomer}
-            submitting={createOrder.isPending}
+            submitting={createOrder.isPending || claimOrder.isPending}
             onToggleTopping={toggleTopping}
             onUpdateQuantity={updateQuantity}
             onRemoveLine={removeLine}
@@ -978,7 +996,7 @@ function RegisterPageContent() {
             className="flex w-full items-center justify-between gap-2 px-3 py-3 font-mono sm:px-4 sm:py-4"
           >
             <div className="flex min-w-0 items-center gap-2 sm:gap-3">
-              <span className="shrink-0 bg-background px-2 py-0.5 text-xs font-black uppercase text-foreground">
+              <span className="shrink-0 bg-background px-2 py-0.5 text-xs font-black uppercase text-foreground" aria-live="polite" aria-atomic="true">
                 {getTotalCount()}点
               </span>
               <span className="truncate text-lg font-black tabular-nums sm:text-2xl">
@@ -1006,6 +1024,7 @@ function RegisterPageContent() {
               <h2 className="font-black text-lg uppercase">[カート確認]</h2>
               <button
                 onClick={() => setIsCartPanelOpen(false)}
+                aria-label="カートを閉じる"
                 className="w-10 h-10 border-thin border-primary-foreground flex items-center justify-center hover:bg-primary-foreground hover:text-primary transition-all"
               >
                 <X className="h-5 w-5" />
@@ -1013,10 +1032,11 @@ function RegisterPageContent() {
             </div>
             <CartBody
               cart={cart}
+              idPrefix="mobile"
               menuMap={menuMap}
               peopleCount={peopleCount}
               activeCustomer={activeCustomer}
-              submitting={createOrder.isPending}
+              submitting={createOrder.isPending || claimOrder.isPending}
               onToggleTopping={toggleTopping}
               onUpdateQuantity={updateQuantity}
               onRemoveLine={removeLine}

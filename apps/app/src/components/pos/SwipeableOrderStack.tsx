@@ -75,12 +75,15 @@ function groupedToppings(toppings: NonNullable<SwipeableOrder["items"][number]["
     const category = topping.category?.trim() || "未分類";
     groups.set(category, [...(groups.get(category) ?? []), topping]);
   }
+  // 2026-10-16: 管理画面で調整したトッピング順をカテゴリの出現順にも反映する。
   return [...groups.entries()]
-    .sort(([a], [b]) => a.localeCompare(b, "ja"))
-    .map(([category, options]) => [
+    .map(([category, options]) => ({
       category,
-      [...options].sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || a.toppingName.localeCompare(b.toppingName, "ja")),
-    ] as const);
+      firstSortOrder: Math.min(...options.map((option) => option.sortOrder ?? 0)),
+      options: [...options].sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || a.toppingName.localeCompare(b.toppingName, "ja")),
+    }))
+    .sort((a, b) => a.firstSortOrder - b.firstSortOrder || a.category.localeCompare(b.category, "ja"))
+    .map(({ category, options }) => [category, options] as const);
 }
 
 function KitchenOrderCard({
@@ -103,11 +106,17 @@ function KitchenOrderCard({
   const action = orderAction(order.status);
   const badge = statusBadge(order.status);
   const canCancel = order.status === "pending" || order.status === "preparing";
+  const gestureInstructions = [
+    action ? `上へスワイプで${action.label}` : null,
+    canCancel ? "下へスワイプで確認後キャンセル" : null,
+  ].filter((instruction): instruction is string => instruction !== null);
 
   // 2026-10-16: 横移動は一覧のスクロールに任せ、カード上端だけ縦スワイプ操作に使う。
   // 内容を読むための縦スクロールと注文状態の誤変更を分け、操作には画面上のボタンも残す。
   const onGestureDown = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (isUpdating || (!action && !canCancel)) return;
+    if (isUpdating || (!action && !canCancel) || !event.isPrimary || event.button !== 0) return;
+    // 2026-10-16: 指やマウスがヘッダーから外れても、ジェスチャーの終了を同じカードで受け取る。
+    event.currentTarget.setPointerCapture(event.pointerId);
     gestureStart.current = { x: event.clientX, y: event.clientY };
     setGestureHint(null);
   };
@@ -137,6 +146,7 @@ function KitchenOrderCard({
       className={`flex h-full flex-col border-thick border-border bg-background ${view === "horizontal" ? "snap-start" : ""}`}
       data-order-id={order.id}
     >
+      {/* 2026-10-16: 読み上げでも、その状態で実際に使えるスワイプだけ案内する。 */}
       <div
         className="relative touch-pan-x cursor-grab select-none border-b-thin border-border active:cursor-grabbing"
         onPointerDown={onGestureDown}
@@ -146,7 +156,8 @@ function KitchenOrderCard({
           gestureStart.current = null;
           setGestureHint(null);
         }}
-        aria-label={`注文 ${order.orderNumber} の操作。上へスワイプで${action?.label ?? "操作なし"}、下へスワイプでキャンセル`}
+        role="group"
+        aria-label={`注文 ${order.orderNumber}。${gestureInstructions.length > 0 ? gestureInstructions.join("、") : `状態: ${badge.label}。変更できません`}`}
       >
         {gestureHint && (
           <div className={`pointer-events-none absolute inset-0 z-10 flex items-center justify-center ${gestureHint === "cancel" ? "bg-destructive/15 text-destructive" : "bg-success/15 text-success"}`}>
@@ -168,7 +179,7 @@ function KitchenOrderCard({
             </div>
             <Badge variant={badge.variant} className="shrink-0">{badge.label}</Badge>
           </div>
-          <p className="mt-2 flex items-center gap-2 font-mono text-[10px] text-muted-foreground">
+          <p className="mt-2 flex items-center gap-2 font-mono text-xs text-muted-foreground">
             {action ? <><ArrowUp className="h-3.5 w-3.5" />上へ: {action.label}</> : <span>状態の変更なし</span>}
             {canCancel && <><span aria-hidden="true">·</span><ArrowDown className="h-3.5 w-3.5" />下へ: 確認してキャンセル</>}
           </p>
@@ -179,9 +190,11 @@ function KitchenOrderCard({
         {order.items.map((item) => (
           <section key={item.id} className="border-b-thin border-border pb-3 last:border-b-0 last:pb-0">
             <div className="flex items-start gap-3">
-              <span className="flex h-12 min-w-14 shrink-0 items-center justify-center border-thick border-primary bg-primary px-2 font-headline text-xl leading-none text-primary-foreground" aria-label={`数量 ${item.quantity} 個`}>
+              {/* 2026-10-16: 視覚用の「×N」と読み上げ用の数量表現を分け、注文数の誤認を防ぐ。 */}
+              <span className="flex h-12 min-w-14 shrink-0 items-center justify-center border-thick border-primary bg-primary px-2 font-headline text-xl leading-none text-primary-foreground" aria-hidden="true">
                 ×{item.quantity}
               </span>
+              <span className="sr-only">数量 {item.quantity} 個</span>
               <div className="min-w-0 flex-1">
                 <div className="flex items-start justify-between gap-2">
                   <h3 className="break-words text-base font-black leading-snug sm:text-lg">{item.menuName}</h3>
@@ -191,12 +204,12 @@ function KitchenOrderCard({
                   <div className="mt-2 space-y-2">
                     {groupedToppings(item.toppings).map(([category, toppings]) => (
                       <div key={category}>
-                        <p className="mb-1 font-mono text-[10px] font-black uppercase tracking-wider text-muted-foreground">{category}</p>
+                        <p className="mb-1 font-mono text-xs font-black uppercase tracking-wider text-muted-foreground">{category}</p>
                         <ul className="space-y-1 border-l-thick border-border pl-2">
                           {toppings.map((topping) => (
                             <li key={topping.id} className="flex items-start justify-between gap-2 text-xs font-bold">
                               <span className="break-words">{topping.toppingName}</span>
-                              <span className="shrink-0 font-mono text-[10px] text-muted-foreground">各{item.quantity}個分</span>
+                              <span className="shrink-0 font-mono text-xs text-muted-foreground">各{item.quantity}個分</span>
                             </li>
                           ))}
                         </ul>
@@ -219,6 +232,7 @@ function KitchenOrderCard({
           <Button
             onClick={action.kind === "start" ? onStart : onComplete}
             disabled={isUpdating}
+            aria-label={`注文${order.orderNumber}を${action.label}`}
             className="h-12 w-full border-thick border-border font-mono font-black uppercase"
           >
             <action.icon className="mr-2 h-4 w-4" />{action.label}
@@ -233,6 +247,7 @@ function KitchenOrderCard({
             variant="outline"
             onClick={onCancelRequest}
             disabled={isUpdating}
+            aria-label={`注文${order.orderNumber}をキャンセル`}
             className="h-12 w-full border-thick border-destructive font-mono font-bold text-destructive hover:bg-destructive hover:text-primary-foreground"
           >
             <XCircle className="mr-2 h-4 w-4" />キャンセル
@@ -281,7 +296,9 @@ export function SwipeableOrderStack({
       <div className="flex flex-col gap-3 border-b-thick border-border pb-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <p className="font-mono text-xs font-black uppercase tracking-wider">{ordered.length}件の注文</p>
-          <p className="mt-1 font-mono text-[10px] text-muted-foreground">左から古い順 · 新しい注文は右端</p>
+          <p className="mt-1 font-mono text-xs text-muted-foreground">
+            {view === "horizontal" ? "左から古い順 · 新しい注文は右端" : "古い順 · 下に行くほど新しい"}
+          </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {view === "horizontal" && ordered.length > 0 && (
@@ -304,14 +321,15 @@ export function SwipeableOrderStack({
           </div>
         </div>
       </div>
+      {/* 2026-10-16: リストは1列にして上から下の順を保ち、奇数件でも最新が左へ戻らないようにする。 */}
       <div
         ref={scrollRef}
         className={view === "horizontal" && ordered.length > 0
           ? "flex items-stretch gap-3 overflow-x-auto overscroll-x-contain pb-3 [scrollbar-width:thin]"
-          : "grid grid-cols-1 items-stretch gap-3 xl:grid-cols-2"}
+          : "grid grid-cols-1 items-stretch gap-3"}
       >
         {ordered.length === 0 ? (
-          <Card className="border-thick border-dashed border-border xl:col-span-2">
+          <Card className="border-thick border-dashed border-border">
             <CardContent className="flex flex-col items-center justify-center py-16">
               <CheckCircle className="mb-4 h-12 w-12 text-muted-foreground/40" />
               <p className="font-headline text-xl uppercase text-muted-foreground">注文はありません</p>
