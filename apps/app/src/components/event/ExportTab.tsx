@@ -255,13 +255,14 @@ export function ExportTab({ eventId }: { eventId: string }) {
           const Icon = item.icon;
           const isDownloading = downloading[item.key] || false;
           return (
-            <Card key={item.key} className="rounded-none border-thick border-border shadow-none bg-background flex flex-col justify-between">
+            <Card key={item.key} className="min-w-0 rounded-none border-thick border-border shadow-none bg-background flex flex-col justify-between">
               <CardHeader className="p-4 pb-2">
-                <div className="flex items-center gap-2">
+                {/* 2026-10-16: 長い日本語ラベルでもカード幅を押し広げず、枠内で折り返す。 */}
+                <div className="flex min-w-0 items-start gap-2">
                   <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
-                  <CardTitle className="text-xs uppercase font-bold tracking-wider">{item.title}</CardTitle>
+                  <CardTitle className="min-w-0 whitespace-normal break-words text-xs uppercase font-bold tracking-wider">{item.title}</CardTitle>
                 </div>
-                <CardDescription className="text-[10px] leading-relaxed pt-1">
+                <CardDescription className="break-words text-[10px] leading-relaxed pt-1">
                   {item.description}
                 </CardDescription>
               </CardHeader>

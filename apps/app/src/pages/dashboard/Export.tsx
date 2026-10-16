@@ -161,11 +161,12 @@ function CircleExportContent() {
   return (
     <DashboardLayout title={circleName || "サークルダッシュボード"} subtitle="データエクスポート" type="circle">
       <div className="space-y-6">
-        <div className="flex items-center justify-between border-b-thick border-border pb-3">
+        {/* 2026-10-16: 狭い画面では説明文を見出しの下へ移し、ヘッダー内の横はみ出しを防ぐ。 */}
+        <div className="flex flex-col gap-2 border-b-thick border-border pb-3 sm:flex-row sm:items-center sm:justify-between">
           <h2 className="text-sm font-bold flex items-center gap-2 uppercase tracking-wider">
             <Download className="h-4 w-4" /> データエクスポート
           </h2>
-          <p className="text-[11px] text-muted-foreground font-mono mt-1">
+          <p className="text-[11px] text-muted-foreground font-mono sm:max-w-[60%]">
             サークル内の売上・注文履歴・商品一覧などのデータを CSV 形式でダウンロードできます。
           </p>
         </div>
@@ -175,13 +176,14 @@ function CircleExportContent() {
             const Icon = item.icon;
             const isDownloading = downloading[item.key] || false;
             return (
-              <Card key={item.key} className="rounded-none border-thick border-border shadow-none bg-background flex flex-col justify-between">
+              <Card key={item.key} className="min-w-0 rounded-none border-thick border-border shadow-none bg-background flex flex-col justify-between">
                 <CardHeader className="p-4 pb-2">
-                  <div className="flex items-center gap-2">
+                  {/* 2026-10-16: 長い日本語ラベルでもカード幅を押し広げず、枠内で折り返す。 */}
+                  <div className="flex min-w-0 items-start gap-2">
                     <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
-                    <CardTitle className="text-xs uppercase font-bold tracking-wider">{item.title}</CardTitle>
+                    <CardTitle className="min-w-0 whitespace-normal break-words text-xs uppercase font-bold tracking-wider">{item.title}</CardTitle>
                   </div>
-                  <CardDescription className="text-[10px] leading-relaxed pt-1">
+                  <CardDescription className="break-words text-[10px] leading-relaxed pt-1">
                     {item.description}
                   </CardDescription>
                 </CardHeader>
