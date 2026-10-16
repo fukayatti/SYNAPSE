@@ -1056,14 +1056,15 @@ function MenuPageContent() {
         </div>
 
         <div className="border-t-thick border-border pt-3 space-y-2">
-          {applicableCoupons.map((c) => (
+          {/* 2026-10-16: 小計上限で調整した後の実適用額を内訳にも表示する。 */}
+          {couponApplications.map(({ coupon: c, discount }) => (
             <div key={c.slug} className="flex items-center justify-between text-xs">
               <span className="flex items-center gap-1.5 font-bold">
                 <Ticket className="h-3.5 w-3.5 shrink-0" />
                 「{c.title}」
               </span>
               <span className="flex items-center gap-2">
-                <span className="font-bold text-success">-¥{potentialDiscountFor(c).toLocaleString()}</span>
+                <span className="font-bold text-success">-¥{discount.toLocaleString()}</span>
                 <button
                   type="button"
                   onClick={() => toggleCoupon(c.slug)}
