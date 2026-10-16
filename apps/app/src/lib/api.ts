@@ -328,6 +328,19 @@ export interface VisitorReviewTarget {
   review: { rating: number; comment: string | null } | null;
 }
 
+export interface VisitorReviewStoreSummary {
+  circleId: string;
+  circleName: string;
+  averageRating: number | null;
+  reviewCount: number;
+}
+
+export interface VisitorPublicReview {
+  rating: number;
+  comment: string | null;
+  createdAt: string | number | Date;
+}
+
 export interface ManagedReview {
   circleId?: string;
   circleName?: string;
@@ -337,9 +350,11 @@ export interface ManagedReview {
   displayId: number;
 }
 
-// 2026-09-27: 来場者は自分の体験先と投稿状態のみを取得し、管理側は既存の sales:read 権限で一覧を見る。
+// 2026-10-16: 投稿候補は自身の利用履歴に限定し、店舗レビューは匿名表示、管理側一覧は sales:read 権限を維持する。
 export const reviewApi = {
   mine: (code: string) => fetchApi<VisitorReviewTarget[]>(`/api/reviews/visitor/${encodeURIComponent(code)}`),
+  stores: (code: string) => fetchApi<VisitorReviewStoreSummary[]>(`/api/reviews/visitor/${encodeURIComponent(code)}/stores`),
+  storeReviews: (code: string, circleId: string) => fetchApi<VisitorPublicReview[]>(`/api/reviews/visitor/${encodeURIComponent(code)}/stores/${encodeURIComponent(circleId)}`),
   submit: (code: string, body: { circleId: string; rating: number; comment: string }) =>
     fetchApi<{ success: boolean }>(`/api/reviews/visitor/${encodeURIComponent(code)}`, { method: "POST", body }),
   circle: (circleId: string) => fetchApi<ManagedReview[]>(`/api/reviews/circle/${encodeURIComponent(circleId)}`),
