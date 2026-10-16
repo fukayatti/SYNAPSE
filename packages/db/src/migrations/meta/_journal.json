@@ -204,6 +204,20 @@
       "when": 1791455262082,
       "tag": "0028_dry_satana",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "6",
+      "when": 1792108800000,
+      "tag": "0029_topping_sort_order",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "6",
+      "when": 1792108800001,
+      "tag": "0030_coupon_cart_percentage",
+      "breakpoints": true
     }
   ]
 }

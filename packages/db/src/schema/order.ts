@@ -139,10 +139,14 @@ export const coupon = sqliteTable(
     // 割引の種類 (2026-09-16 フィードバック対応)。
     // menu_discount: 対象メニュー(couponMenu)の小計から discountAmount 円引く。
     // free_topping: 対象トッピング(couponTopping)を freeUnits 個(null=無制限)まで無料にする。
-    kind: text("kind").notNull().default("menu_discount"), // menu_discount / free_topping
+    // cart_percentage: 税・送料を含まない商品小計全体から percentage% 引く。
+    // 2026-10-16: 利用者の要望により商品/トッピング指定を伴わない全体割引を追加。
+    kind: text("kind").notNull().default("menu_discount"), // menu_discount / free_topping / cart_percentage
     // 固定額引き (円)。menu_discount のときのみ使用。free_topping ではトッピングの実価格を
     // 都度参照するため使わない (値上げ/値下げしても常に「そのトッピング分」が引かれるように)。
     discountAmount: integer("discount_amount"),
+    // cart_percentage のときのみ使用。整数1〜100。
+    discountPercent: integer("discount_percent"),
     // free_topping のときのみ使用。無料にする個数の上限。null = 対象トッピングを全部無料にする
     // (「自由度を無限にする」フィードバック対応。0円引き乱用を防ぐ上限はサークル自身が設定する)。
     freeUnits: integer("free_units"),
