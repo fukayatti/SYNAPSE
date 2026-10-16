@@ -46,6 +46,7 @@ circleRoutes.get("/", async (c) => {
       managerEmail: membership.userEmail,
     })
     .from(circle)
+    .innerJoin(event, eq(event.id, circle.eventId))
     .leftJoin(
       membership,
       and(
@@ -54,10 +55,12 @@ circleRoutes.get("/", async (c) => {
       )
     );
 
-  // 論理削除済み(deletedAt != null)は常に除外する
-  const where = eventId
-    ? and(eq(circle.eventId, eventId), isNull(circle.deletedAt))
-    : isNull(circle.deletedAt);
+  // 2026-10-15 (#128): 親イベント削除後に全件一覧や既知ID経由でサークルを選べないようにする。
+  const where = and(
+    isNull(event.deletedAt),
+    isNull(circle.deletedAt),
+    eventId ? eq(circle.eventId, eventId) : undefined
+  );
 
   const circles = await query.where(where);
 
@@ -95,6 +98,7 @@ circleRoutes.get("/:id", async (c) => {
       managerEmail: membership.userEmail,
     })
     .from(circle)
+    .innerJoin(event, eq(event.id, circle.eventId))
     .leftJoin(
       membership,
       and(
@@ -102,7 +106,7 @@ circleRoutes.get("/:id", async (c) => {
         eq(membership.role, "circle_manager")
       )
     )
-    .where(and(eq(circle.id, id), isNull(circle.deletedAt)));
+    .where(and(eq(circle.id, id), isNull(circle.deletedAt), isNull(event.deletedAt)));
 
   if (circles.length === 0) {
     apiError("NOT_FOUND", "サークルが見つかりません");
@@ -218,6 +222,15 @@ circleRoutes.post(
       eventId: z.string(),
       name: z.string().min(1, "サークル名は必須です"),
       description: z.string().optional(),
+      iconImagePath: z.string().nullable().optional(),
+      backgroundImagePath: z.string().nullable().optional(),
+      // 2026-10-16 (#127): 作成時の運用設定も同時保存し、店舗エリアはイベント共有IDで参照する。
+      settings: z.object({
+        orderFlowMode: z.enum(["pending", "preparing", "completed"]).optional(),
+        extensions: z.object({ stock: z.boolean().optional(), staff: z.boolean().optional() }).optional(),
+        acceptedPayments: z.array(z.string().trim().min(1).max(30)).max(20).optional(),
+        storeAreaId: z.string().nullable().optional(),
+      }).optional(),
       // 2026-07-12 (SaaS): サークル作成は「そのイベントの event_manager」か
       // 「サークルホスト招待 (circle_host)」のどちらかが必要。招待経由の場合はここに token を渡す。
       inviteToken: z.string().optional(),
@@ -239,6 +252,27 @@ circleRoutes.post(
       apiError("NOT_FOUND", "イベントが見つかりません");
     }
     const targetEvent = events[0]!;
+
+    const readJsonArray = (raw: string | null | undefined): unknown[] => {
+      try {
+        const value: unknown = JSON.parse(raw || "[]");
+        return Array.isArray(value) ? value : [];
+      } catch {
+        return [];
+      }
+    };
+    const availableAreaIds = new Set(readJsonArray(targetEvent.storeAreas)
+      .flatMap((area) => area && typeof area === "object" && "id" in area && typeof area.id === "string" ? [area.id] : []));
+    const selectedAreaId = input.settings?.storeAreaId ?? null;
+    if (selectedAreaId && !availableAreaIds.has(selectedAreaId)) {
+      apiError("BAD_REQUEST", "このイベントに登録されていない店舗エリアです");
+    }
+    const availablePayments = readJsonArray(targetEvent.paymentMethods)
+      .filter((method): method is string => typeof method === "string");
+    const acceptedPayments = input.settings?.acceptedPayments ?? [];
+    if (acceptedPayments.some((method) => !availablePayments.includes(method))) {
+      apiError("BAD_REQUEST", "イベントに登録されていない支払い方法が含まれています");
+    }
 
     // 2026-07-12 (SaaS): サークル作成の認可。
     // - そのイベントの event_manager (主催者) は招待不要で作成できる (イベント管理画面からの追加)。
@@ -339,6 +373,17 @@ circleRoutes.post(
       eventId: input.eventId,
       name: input.name,
       description: input.description,
+      iconImagePath: input.iconImagePath ?? null,
+      backgroundImagePath: input.backgroundImagePath ?? null,
+      settings: JSON.stringify({
+        orderFlowMode: input.settings?.orderFlowMode ?? "pending",
+        extensions: {
+          stock: input.settings?.extensions?.stock ?? false,
+          staff: input.settings?.extensions?.staff ?? false,
+        },
+        acceptedPayments,
+        storeAreaId: selectedAreaId,
+      }),
       // 招待経由なら、どの circle_host 招待から作られたかを記録する (2026-07-14 P2-5 使用内訳)。
       createdFromInviteId: hostInvite?.id ?? null,
     });
@@ -444,7 +489,7 @@ circleRoutes.delete("/:id", async (c) => {
   }
 
   // 物理削除せず deletedAt に時刻を書き込む (論理削除)
-  await db.update(circle).set({ deletedAt: new Date() }).where(eq(circle.id, id));
+  await db.update(circle).set({ deletedAt: new Date(), deletedWithEventId: null }).where(eq(circle.id, id));
   return c.json({ success: true });
 });
 
@@ -471,9 +516,38 @@ circleRoutes.patch(
       apiError("NOT_FOUND", "サークルが見つかりません");
     }
 
+    // 2026-10-16 (#127): 店舗エリアIDは親イベントの定義に限り、既存の拡張設定は更新時も保持する。
+    if (Object.prototype.hasOwnProperty.call(settings, "storeAreaId")) {
+      const storeAreaId = settings.storeAreaId;
+      if (storeAreaId !== null && typeof storeAreaId !== "string") {
+        apiError("BAD_REQUEST", "店舗エリアの指定が正しくありません");
+      }
+      if (typeof storeAreaId === "string") {
+        const parentEvent = await db.select({ storeAreas: event.storeAreas }).from(event).where(eq(event.id, existingCircle[0]!.eventId));
+        let areas: unknown[] = [];
+        try {
+          const parsed: unknown = JSON.parse(parentEvent[0]?.storeAreas || "[]");
+          if (Array.isArray(parsed)) areas = parsed;
+        } catch {
+          areas = [];
+        }
+        if (!areas.some((area) => area && typeof area === "object" && "id" in area && area.id === storeAreaId)) {
+          apiError("BAD_REQUEST", "このイベントに登録されていない店舗エリアです");
+        }
+      }
+    }
+
+    let oldSettings: Record<string, unknown> = {};
+    try {
+      const parsed: unknown = JSON.parse(existingCircle[0]!.settings || "{}");
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) oldSettings = parsed as Record<string, unknown>;
+    } catch {
+      oldSettings = {};
+    }
+
     await db
       .update(circle)
-      .set({ settings: JSON.stringify(settings) })
+      .set({ settings: JSON.stringify({ ...oldSettings, ...settings }) })
       .where(eq(circle.id, id));
 
     return c.json({ success: true });

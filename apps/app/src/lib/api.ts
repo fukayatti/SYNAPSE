@@ -1,6 +1,7 @@
 import { apiErrorFromResponse, networkApiError } from "./api-error";
 import { readAuthContext } from "./auth-context";
 import type { RoleType } from "@fesflow/config";
+import type { JapaneseAllergen } from "@fesflow/config/allergens";
 import { createOrderResultSchema, type CreateOrderInput, type CreateOrderResult, type OrderStatus } from "@fesflow/config/order-contract";
 export type { CreateOrderInput, CreateOrderResult, OrderStatus } from "@fesflow/config/order-contract";
 
@@ -126,6 +127,11 @@ export const eventApi = {
     fetchApi<{ success: boolean; paymentMethods: string[] }>(`/api/festivals/${id}/payment-methods`, {
       method: "PUT",
       body: { paymentMethods },
+    }),
+  setStoreAreas: (id: string, storeAreas: EventStoreArea[]) =>
+    fetchApi<{ success: boolean; storeAreas: EventStoreArea[] }>(`/api/festivals/${id}/store-areas`, {
+      method: "PUT",
+      body: { storeAreas },
     }),
   // 進行中注文モニタ (全サークル横断)。event_manager (order:read) 権限が必要。
   liveOrders: (id: string) => fetchApi<LiveOrder[]>(`/api/festivals/${id}/orders/live`),
@@ -486,6 +492,7 @@ export const uploadImage = async (
 // Types
 export interface EventTheme {
   logoUrl?: string | null;
+  officialWebsiteUrl?: string | null;
   fontFamily?: string;
   customFontUrl?: string | null;
   primaryColor?: string;
@@ -510,6 +517,8 @@ export interface Event extends EventTheme {
   hasPhysicalWristband: boolean;
   // 利用可能な支払い方法 (JSON 文字列配列)。parseEventPaymentMethods でパースする。
   paymentMethods?: string;
+  // 店舗の位置カテゴリはイベント共通のID付きJSON一覧。
+  storeAreas?: string;
   // 抽選機能(イベント単位)の有効化フラグ (2026-07-12)。
   lotteryEnabled?: boolean;
   // イベント別スタンプラリー設定 (JSON文字列)。
@@ -526,28 +535,99 @@ export interface PublicEventSummary {
   id: string;
   eventName: string;
   description: string | null;
+  officialWebsiteUrl: string | null;
   logoUrl: string | null;
+}
+
+export interface EventStoreArea {
+  id: string;
+  name: string;
+}
+
+export function parseStoreAreas(raw?: string | null): EventStoreArea[] {
+  if (!raw) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.flatMap((value): EventStoreArea[] => {
+      if (!value || typeof value !== "object") return [];
+      const area = value as Partial<EventStoreArea>;
+      return typeof area.id === "string" && typeof area.name === "string" && area.id.trim() && area.name.trim()
+        ? [{ id: area.id.trim(), name: area.name.trim() }]
+        : [];
+    });
+  } catch {
+    return [];
+  }
 }
 
 export interface StampRallyArea {
   id: string;
   name: string;
-  requiredCount: number;
-  circleIds: string[];
-  rewardTitle: string;
-  rewardDescription: string;
+  requiredCount: number | null;
+  circles: StampRallyCircle[];
 }
 
 export interface StampRallySettings {
   enabled: boolean;
-  areas: StampRallyArea[];
+  targetAreaIds: string[];
+  requiredCount: number;
+  rewardTitle: string;
+  redemptionLocation: string;
+  rulesUrl: string;
 }
 
-export interface VisitorStampRallyArea extends StampRallyArea {
-  circles: (Circle & { stamped: boolean })[];
+export interface StampRallyCircle {
+  id: string;
+  name: string;
+  iconImagePath: string | null;
+  stamped: boolean;
+  orders: StampRallyOrder[];
+}
+
+export interface StampRallyOrder {
+  orderNumber: string;
+  completedAt: string | null;
+  createdAt: string;
+  items: Array<{
+    menuName: string;
+    quantity: number;
+    toppings: string[];
+  }>;
 }
 
 export interface VisitorStampRally {
+  enabled: boolean;
+  legacy: boolean;
+  stampedCircleIds: string[];
+  stampedCount: number;
+  targetCircleCount: number;
+  requiredCount: number;
+  eligible: boolean;
+  rewardTitle: string;
+  redemptionLocation: string;
+  rulesUrl: string;
+  redeemedAt: string | null;
+  areas: StampRallyArea[];
+}
+
+export interface StaffStampRallyLookup {
+  visitor: { id: string; eventId: string; displayId: number; nickname: string | null };
+  progress: VisitorStampRally;
+}
+
+export interface StampRallyRedemption {
+  id: string;
+  createdAt: string;
+  staffId: string;
+  eventUserId: string;
+  displayId: number;
+  nickname: string | null;
+}
+
+export interface VisitorStampRallyArea extends StampRallyArea {}
+
+export interface LegacyVisitorStampRally {
   enabled: boolean;
   stampedCircleIds: string[];
   areas: VisitorStampRallyArea[];
@@ -556,6 +636,15 @@ export interface VisitorStampRally {
 export const stampRallyApi = {
   visitor: (code: string) =>
     fetchApi<VisitorStampRally>(`/api/stamps/visitor/${encodeURIComponent(code)}`),
+  lookup: (eventId: string, code: string) =>
+    fetchApi<StaffStampRallyLookup>(`/api/stamps/event/${encodeURIComponent(eventId)}/lookup/${encodeURIComponent(code)}`),
+  redeem: (eventId: string, code: string) =>
+    fetchApi<{ success: boolean; redemption: { id: string; createdAt: string } }>(`/api/stamps/event/${encodeURIComponent(eventId)}/redeem`, {
+      method: "POST",
+      body: { code },
+    }),
+  redemptions: (eventId: string) =>
+    fetchApi<StampRallyRedemption[]>(`/api/stamps/event/${encodeURIComponent(eventId)}/redemptions`),
 };
 
 export type EventLifecycleStatus = "upcoming" | "live" | "ended" | "archived";
@@ -781,6 +870,8 @@ export interface CircleSettings {
   // このサークルが対応する支払い方法 (2026-07-12)。イベントの paymentMethods の部分集合。
   // 空=イベントの全方法に対応とみなす。1つだけならレジで選択させず自動採用する。
   acceptedPayments: string[];
+  // 2026-10-16 (#126): event.storeAreas のどの位置に出店するかを参照するID。
+  storeAreaId: string | null;
 }
 
 // settings JSON をパースし、未設定キーを既定値で補完する
@@ -789,6 +880,7 @@ export function parseCircleSettings(raw?: string | null): CircleSettings {
     orderFlowMode: "pending",
     extensions: { stock: false, staff: false },
     acceptedPayments: [],
+    storeAreaId: null,
   };
   if (!raw) return defaults;
   try {
@@ -806,6 +898,7 @@ export function parseCircleSettings(raw?: string | null): CircleSettings {
       acceptedPayments: Array.isArray(parsed?.acceptedPayments)
         ? parsed.acceptedPayments.filter((x: unknown) => typeof x === "string")
         : [],
+      storeAreaId: typeof parsed?.storeAreaId === "string" ? parsed.storeAreaId : null,
     };
   } catch {
     return defaults;
@@ -819,6 +912,8 @@ export interface Menu {
   category: string;
   price: number;
   description: string | null;
+  /** null=未登録、JSON配列の空文字列は明示的な「なし」。 */
+  allergens: string | null;
   imagePath: string | null;
   stockQuantity: number | null;
   inventoryEnabled: boolean;
@@ -837,6 +932,7 @@ export interface Topping {
   category: string;
   price: number;
   description: string | null;
+  allergens: string | null;
   imagePath: string | null;
   soldOut: boolean;
   stockQuantity: number;
@@ -982,8 +1078,20 @@ export interface InviteToken {
 export interface CreateEventInput {
   eventName: string;
   description?: string;
+  officialWebsiteUrl?: string | null;
+  logoUrl?: string | null;
   startDate?: string;
   endDate?: string;
+  hasPhysicalWristband?: boolean;
+  fontFamily?: "mono" | "sans" | "serif";
+  primaryColor?: string;
+  primaryTextColor?: string;
+  accentColor?: string;
+  accentTextColor?: string;
+  backgroundColor?: string;
+  textColor?: string;
+  paymentMethods?: string[];
+  storeAreas?: EventStoreArea[];
 }
 
 // 2026-07-07 (Phase 3a/3b): サークル作成はセルフサービス化。better-auth ログイン
@@ -993,6 +1101,9 @@ export interface CreateCircleInput {
   eventId: string;
   name: string;
   description?: string;
+  iconImagePath?: string | null;
+  backgroundImagePath?: string | null;
+  settings?: CircleSettings;
   // 2026-07-12 (SaaS): 非主催者が circle_host 招待でサークルを作る場合に渡す。
   inviteToken?: string;
 }
@@ -1011,6 +1122,7 @@ export interface CreateMenuInput {
   category?: string;
   price: number;
   description?: string;
+  allergens: JapaneseAllergen[];
   imagePath?: string;
   imageUrl?: string;
   stockQuantity?: number;
@@ -1030,6 +1142,7 @@ export interface UpdateMenuInput {
   category?: string;
   price?: number;
   description?: string;
+  allergens?: JapaneseAllergen[];
   imagePath?: string | null;
   imageUrl?: string;
   stockQuantity?: number | null;
@@ -1050,6 +1163,7 @@ export interface CreateToppingInput {
   category?: string;
   price: number;
   description?: string;
+  allergens: JapaneseAllergen[];
   imagePath?: string;
   soldOut?: boolean;
   stockQuantity?: number;
@@ -1060,6 +1174,7 @@ export interface UpdateToppingInput {
   category?: string;
   price?: number;
   description?: string | null;
+  allergens?: JapaneseAllergen[];
   imagePath?: string | null;
   soldOut?: boolean;
   stockQuantity?: number;
@@ -1099,7 +1214,7 @@ export interface CreateInviteInput {
   eventId?: string;
   role: Role;
   expiresInHours?: number;
-  maxUses?: number;
+  maxUses?: number | null;
   // 2026-07-15: バックエンドでセッションから自動設定されるようになったためオプショナルに変更
   createdBy?: string;
   targetEmail?: string;
@@ -1154,6 +1269,7 @@ export interface WristbandLookupResult {
     favoriteDate?: string | null;
     birthdayMonthDay?: string | null;
     age?: number | null;
+    allergies?: string | null;
     onboardedAt?: string | null;
   };
   wristband: {
@@ -1161,7 +1277,22 @@ export interface WristbandLookupResult {
     userId: string;
     status: string;
     assignedAt: string;
+    nickname?: string | null;
+    birthdayMonthDay?: string | null;
+    age?: number | null;
+    onboardedAt?: string | null;
   } | null;
+  familyWristbands: Array<{
+    id: string;
+    userId: string;
+    status: string;
+    assignedAt: string;
+    nickname: string | null;
+    birthdayMonthDay: string | null;
+    age: number | null;
+    onboardedAt: string | null;
+  }>;
+  familyBandCount: number;
 }
 
 export type WristbandBatchSource = "generated" | "csv";
@@ -1219,6 +1350,16 @@ export const wristbandApi = {
       method: "POST",
       body: { userId, wristbandId },
     }),
+  addFamilyMember: (data: {
+    userId: string;
+    wristbandId: string;
+    nickname: string;
+    birthdayMonthDay: string;
+    age: number;
+  }) => fetchApi<{ success: boolean; familyBandCount: number }>("/api/wristbands/family-member", {
+    method: "POST",
+    body: data,
+  }),
   // 既存の未紐付けユーザーにスマホ用デジタルID(sp_)を発行する (2026-07-14)
   issueSmartphone: (userId: string) =>
     fetchApi<{ success: boolean; wristbandId: string }>("/api/wristbands/issue-smartphone", {
@@ -1276,12 +1417,14 @@ export interface VisitorProfile {
   favoriteDate: string | null;
   birthdayMonthDay: string | null;
   age: number | null;
+  allergies?: string | null;
   onboardedAt: string | null;
 }
 
 export const visitorApi = {
   onboard: (data: {
     userId: string;
+    wristbandId?: string | null;
     nickname: string;
     favoriteDate?: string;
     birthdayMonthDay?: string;
@@ -1290,6 +1433,11 @@ export const visitorApi = {
     fetchApi<VisitorProfile>("/api/wristbands/onboard", {
       method: "POST",
       body: data,
+    }),
+  updateAllergies: (userId: string, allergies: JapaneseAllergen[]) =>
+    fetchApi<{ success: boolean; allergies: JapaneseAllergen[] }>("/api/wristbands/allergies", {
+      method: "POST",
+      body: { userId, allergies },
     }),
 };
 
@@ -1542,6 +1690,8 @@ export const adminApi = {
     fetchApi<{ success: boolean }>(`/api/admin/events/${id}`, { method: "PATCH", body: data }),
   deleteEvent: (id: string) =>
     fetchApi<{ success: boolean }>(`/api/admin/events/${id}`, { method: "DELETE" }),
+  restoreEvent: (id: string) =>
+    fetchApi<{ success: boolean }>(`/api/admin/events/${id}/restore`, { method: "POST" }),
   // 契約入金履歴 (2026-07-15)
   listPayments: (eventId: string) =>
     fetchApi<ContractPayment[]>(`/api/admin/events/${eventId}/payments`),
@@ -1636,6 +1786,7 @@ export type BillingStatus = "active" | "trial" | "suspended" | "unpaid";
 export interface AdminEvent {
   id: string;
   eventName: string;
+  deletedAt: string | null;
   ownerEmail: string | null;
   plan: string;
   billingStatus: BillingStatus;

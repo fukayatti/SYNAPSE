@@ -27,6 +27,7 @@ import {
   numberedTicket,
   review,
   userStamp,
+  stampRallyRedemption,
 } from "./visitor";
 import { lottery, lotteryPrize, lotteryEntry, lotteryWinner } from "./lottery";
 
@@ -262,6 +263,17 @@ export const userStampRelations = relations(userStamp, ({ one }) => ({
   circle: one(circle, {
     fields: [userStamp.circleId],
     references: [circle.id],
+  }),
+}));
+
+export const stampRallyRedemptionRelations = relations(stampRallyRedemption, ({ one }) => ({
+  event: one(event, {
+    fields: [stampRallyRedemption.eventId],
+    references: [event.id],
+  }),
+  eventUser: one(eventUser, {
+    fields: [stampRallyRedemption.eventUserId],
+    references: [eventUser.id],
   }),
 }));
 

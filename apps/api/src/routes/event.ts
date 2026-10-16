@@ -24,6 +24,26 @@ import type { AppEnv } from "../types";
 
 const eventRoutes = new Hono<AppEnv>();
 
+// 2026-10-16 (#126): 店舗エリアはイベント共有の安定IDで管理し、サークル設定から参照する。
+const storeAreasSchema = z.array(z.object({
+  id: z.string().trim().min(1).max(64),
+  name: z.string().trim().min(1).max(60),
+})).max(50).superRefine((areas, ctx) => {
+  const ids = new Set<string>();
+  const names = new Set<string>();
+  areas.forEach((area, index) => {
+    const normalizedName = area.name.toLowerCase();
+    if (ids.has(area.id)) {
+      ctx.addIssue({ code: "custom", path: [index, "id"], message: "店舗エリアIDが重複しています" });
+    }
+    if (names.has(normalizedName)) {
+      ctx.addIssue({ code: "custom", path: [index, "name"], message: "店舗エリア名が重複しています" });
+    }
+    ids.add(area.id);
+    names.add(normalizedName);
+  });
+});
+
 // イベント一覧取得 (2026-07-04 SaaSマルチテナント制限)
 eventRoutes.get("/", async (c) => {
   const db = c.get("db");
@@ -78,6 +98,7 @@ eventRoutes.get("/public", async (c) => {
       id: event.id,
       eventName: event.eventName,
       description: event.description,
+      officialWebsiteUrl: event.officialWebsiteUrl,
       logoUrl: event.logoUrl,
     })
     .from(event)
@@ -98,8 +119,10 @@ eventRoutes.get("/:id", async (c) => {
       id: event.id,
       eventName: event.eventName,
       description: event.description,
+      officialWebsiteUrl: event.officialWebsiteUrl,
       startDate: event.startDate,
       endDate: event.endDate,
+      storeAreas: event.storeAreas,
       lifecycleStatus: event.lifecycleStatus,
       paymentMethods: event.paymentMethods,
       stampRallySettings: event.stampRallySettings,
@@ -126,14 +149,19 @@ eventRoutes.get("/:id", async (c) => {
   return c.json(events[0]);
 });
 
-// 2026-10-07: エリアをまたぐスタンプラリーはイベント管理者が明示設定する。
-// 各サークルは一つのエリアにだけ割り当て、複数の実エリアをまとめる場合は
-// 同じ論理エリアへ登録することで、同じ購入が景品条件へ重複加算されるのを防ぐ。
+// 2026-10-15 (#123): 会場エリアとサークルの場所から対象店舗を算出し、
+// 選択エリア全体で異なる店舗数を数える。旧 areas[].circleIds 形式も読込互換のため受け付ける。
 eventRoutes.put(
   "/:id/stamp-rally-settings",
   zBody(z.object({
     settings: z.object({
       enabled: z.boolean(),
+      targetAreaIds: z.array(z.string().min(1).max(64)).max(50).optional(),
+      requiredCount: z.number().int().min(1).max(100).optional(),
+      rewardTitle: z.string().trim().max(100).optional(),
+      redemptionLocation: z.string().trim().max(500).optional(),
+      rulesUrl: z.string().trim().max(2048).optional(),
+      // 旧保存形式。新しい画面は targetAreaIds / requiredCount を送る。
       areas: z.array(z.object({
         id: z.string().min(1).max(64),
         name: z.string().trim().min(1).max(60),
@@ -152,30 +180,104 @@ eventRoutes.put(
     }
 
     const { settings } = c.req.valid("json");
-    if (settings.enabled && (
-      settings.areas.length === 0 || settings.areas.some((area) =>
-        area.circleIds.length === 0 || area.requiredCount > area.circleIds.length
-      )
-    )) {
-      apiError("BAD_REQUEST", "有効な各エリアに必要数以上の対象店舗を登録してください");
-    }
-    const assignedIds = settings.areas.flatMap((area) => area.circleIds);
-    if (new Set(assignedIds).size !== assignedIds.length) {
-      apiError("BAD_REQUEST", "サークルは複数のエリアへ重複登録できません");
-    }
-    if (assignedIds.length > 0) {
-      const assignedCircles = await db.select({ id: circle.id }).from(circle).where(and(
-        eq(circle.eventId, eventId),
-        isNull(circle.deletedAt),
-        inArray(circle.id, assignedIds),
-      ));
-      if (assignedCircles.length !== assignedIds.length) {
-        apiError("BAD_REQUEST", "対象外または削除済みのサークルが含まれています");
+    const eventRows = await db.select({ storeAreas: event.storeAreas }).from(event)
+      .where(and(eq(event.id, eventId), isNull(event.deletedAt))).limit(1);
+    if (!eventRows[0]) apiError("NOT_FOUND", "イベントが見つかりません");
+    if (settings.rulesUrl) {
+      let parsedRulesUrl: URL | null = null;
+      try { parsedRulesUrl = new URL(settings.rulesUrl); } catch { /* validation below returns a field error */ }
+      if (!parsedRulesUrl || (parsedRulesUrl.protocol !== "http:" && parsedRulesUrl.protocol !== "https:")) {
+        apiError("BAD_REQUEST", "ルールURLには http または https のURLを入力してください");
       }
     }
 
-    await db.update(event)
-      .set({ stampRallySettings: JSON.stringify(settings) })
+    let normalized: Record<string, unknown>;
+    if (settings.targetAreaIds !== undefined) {
+      const targetAreaIds = settings.targetAreaIds;
+      if (new Set(targetAreaIds).size !== targetAreaIds.length) {
+        apiError("BAD_REQUEST", "対象エリアを重複して選択できません");
+      }
+      let storeAreas: Array<{ id: string }> = [];
+      try {
+        const parsed: unknown = JSON.parse(eventRows[0]!.storeAreas || "[]");
+        if (Array.isArray(parsed)) {
+          storeAreas = parsed.filter((area): area is { id: string } =>
+            !!area && typeof area === "object" && typeof area.id === "string"
+          );
+        }
+      } catch {
+        storeAreas = [];
+      }
+      const validAreaIds = new Set(storeAreas.map((area) => area.id));
+      if (targetAreaIds.some((id) => !validAreaIds.has(id))) {
+        apiError("BAD_REQUEST", "イベントに登録されていない会場エリアが含まれています");
+      }
+
+      const eventCircles = await db.select({ id: circle.id, settings: circle.settings }).from(circle).where(and(
+        eq(circle.eventId, eventId),
+        isNull(circle.deletedAt),
+      ));
+      const targetCircleCount = eventCircles.filter((row) => {
+        try {
+          const circleSettings = JSON.parse(row.settings || "{}") as { storeAreaId?: unknown };
+          return typeof circleSettings.storeAreaId === "string" && targetAreaIds.includes(circleSettings.storeAreaId);
+        } catch {
+          return false;
+        }
+      }).length;
+      const requiredCount = settings.requiredCount ?? 3;
+      if (settings.enabled && (targetAreaIds.length === 0 || targetCircleCount < requiredCount)) {
+        apiError("BAD_REQUEST", "有効化するには対象エリアと必要数以上の店舗を指定してください");
+      }
+      if (settings.enabled && !settings.redemptionLocation?.trim()) {
+        apiError("BAD_REQUEST", "スタンプラリーを有効にするには景品交換場所を入力してください");
+      }
+      normalized = {
+        enabled: settings.enabled,
+        targetAreaIds,
+        requiredCount,
+        rewardTitle: settings.rewardTitle || "景品交換",
+        redemptionLocation: settings.redemptionLocation || "",
+        rulesUrl: settings.rulesUrl || "",
+      };
+    } else if (settings.areas) {
+      // 旧形式の更新を互換で受け付ける。既存管理画面・保存データの移行を急がせない。
+      if (settings.enabled && (
+        settings.areas.length === 0 || settings.areas.some((area) =>
+          area.circleIds.length === 0 || area.requiredCount > area.circleIds.length
+        )
+      )) {
+        apiError("BAD_REQUEST", "有効な各エリアに必要数以上の対象店舗を登録してください");
+      }
+      const assignedIds = settings.areas.flatMap((area) => area.circleIds);
+      if (new Set(assignedIds).size !== assignedIds.length) {
+        apiError("BAD_REQUEST", "サークルは複数のエリアへ重複登録できません");
+      }
+      if (assignedIds.length > 0) {
+        const assignedCircles = await db.select({ id: circle.id }).from(circle).where(and(
+          eq(circle.eventId, eventId),
+          isNull(circle.deletedAt),
+          inArray(circle.id, assignedIds),
+        ));
+        if (assignedCircles.length !== assignedIds.length) {
+          apiError("BAD_REQUEST", "対象外または削除済みのサークルが含まれています");
+        }
+      }
+      normalized = settings;
+    } else if (!settings.enabled) {
+      normalized = {
+        enabled: false,
+        targetAreaIds: [],
+        requiredCount: settings.requiredCount ?? 3,
+        rewardTitle: settings.rewardTitle || "景品交換",
+        redemptionLocation: settings.redemptionLocation || "",
+        rulesUrl: settings.rulesUrl || "",
+      };
+    } else {
+      apiError("BAD_REQUEST", "対象エリアを指定してください");
+    }
+
+    await db.update(event).set({ stampRallySettings: JSON.stringify(normalized) })
       .where(and(eq(event.id, eventId), isNull(event.deletedAt)));
     return c.json({ success: true });
   },
@@ -421,6 +523,72 @@ eventRoutes.put(
       .set({ paymentMethods: JSON.stringify(cleaned) })
       .where(eq(event.id, eventId));
     return c.json({ success: true, paymentMethods: cleaned });
+  }
+);
+
+// 2026-10-16 (#126): イベント共通の店舗エリア名を保存し、各サークルの位置選択肢に使う。
+eventRoutes.put(
+  "/:id/store-areas",
+  zBody(z.object({ storeAreas: storeAreasSchema })),
+  async (c) => {
+    const db = c.get("db");
+    const eventId = c.req.param("id");
+    if (!(await hasPermission(c, null, "event:write", eventId))) {
+      apiError("FORBIDDEN", "店舗エリアを設定する権限がありません");
+    }
+    const { storeAreas } = c.req.valid("json");
+    const [currentEvent] = await db.select({
+      storeAreas: event.storeAreas,
+      stampRallySettings: event.stampRallySettings,
+    }).from(event).where(and(eq(event.id, eventId), isNull(event.deletedAt))).limit(1);
+    if (!currentEvent) apiError("NOT_FOUND", "イベントが見つかりません");
+
+    const nextAreaIds = new Set(storeAreas.map((area) => area.id));
+    let removedAreaIds: string[] = [];
+    try {
+      const parsed: unknown = JSON.parse(currentEvent.storeAreas || "[]");
+      if (Array.isArray(parsed)) {
+        removedAreaIds = parsed
+          .filter((area): area is { id: string } => !!area && typeof area === "object" && typeof area.id === "string")
+          .map((area) => area.id)
+          .filter((id) => !nextAreaIds.has(id));
+      }
+    } catch {
+      removedAreaIds = [];
+    }
+
+    if (removedAreaIds.length > 0) {
+      let activeTargetAreaIds: string[] = [];
+      try {
+        const settings = JSON.parse(currentEvent.stampRallySettings || "{}") as { enabled?: unknown; targetAreaIds?: unknown };
+        if (settings.enabled === true && Array.isArray(settings.targetAreaIds)) {
+          activeTargetAreaIds = settings.targetAreaIds.filter((id): id is string => typeof id === "string");
+        }
+      } catch {
+        activeTargetAreaIds = [];
+      }
+      const removesActiveTarget = removedAreaIds.some((id) => activeTargetAreaIds.includes(id));
+      const activeCircles = await db.select({ settings: circle.settings }).from(circle).where(and(
+        eq(circle.eventId, eventId),
+        isNull(circle.deletedAt),
+      ));
+      const removesCircleLocation = activeCircles.some((row) => {
+        try {
+          const settings = JSON.parse(row.settings || "{}") as { storeAreaId?: unknown };
+          return typeof settings.storeAreaId === "string" && removedAreaIds.includes(settings.storeAreaId);
+        } catch {
+          return false;
+        }
+      });
+      if (removesActiveTarget || removesCircleLocation) {
+        apiError("CONFLICT", "スタンプラリー対象または出店場所で使用中のエリアです。先に設定を変更してください");
+      }
+    }
+
+    await db.update(event)
+      .set({ storeAreas: JSON.stringify(storeAreas) })
+      .where(and(eq(event.id, eventId), isNull(event.deletedAt)));
+    return c.json({ success: true, storeAreas });
   }
 );
 
@@ -1048,9 +1216,20 @@ eventRoutes.post(
     z.object({
       eventName: z.string().min(1, "イベント名は必須です"),
       description: z.string().optional(),
+      officialWebsiteUrl: z.string().url().refine((value) => /^https?:\/\//i.test(value), "公式サイトURLはhttpまたはhttpsで入力してください").nullable().optional(),
+      logoUrl: z.string().nullable().optional(),
       startDate: z.string().optional(),
       endDate: z.string().optional(),
       hasPhysicalWristband: z.boolean().optional(),
+      fontFamily: z.enum(["mono", "sans", "serif"]).optional(),
+      primaryColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
+      primaryTextColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
+      accentColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
+      accentTextColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
+      backgroundColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
+      textColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
+      paymentMethods: z.array(z.string().trim().min(1).max(30)).min(1).max(20).default(["現金"]),
+      storeAreas: storeAreasSchema.default([]),
     })
   ),
   async (c) => {
@@ -1067,10 +1246,21 @@ eventRoutes.post(
     await db.insert(event).values({
       id,
       eventName: input.eventName,
-      description: input.description,
+      description: input.description?.trim() || null,
+      officialWebsiteUrl: input.officialWebsiteUrl?.trim() || null,
+      logoUrl: input.logoUrl || null,
       startDate: input.startDate ? new Date(input.startDate) : undefined,
       endDate: input.endDate ? new Date(input.endDate) : undefined,
       hasPhysicalWristband: input.hasPhysicalWristband ?? true,
+      fontFamily: input.fontFamily ?? "mono",
+      primaryColor: input.primaryColor ?? "#000000",
+      primaryTextColor: input.primaryTextColor ?? "#FFFFFF",
+      accentColor: input.accentColor ?? "#0000FF",
+      accentTextColor: input.accentTextColor ?? "#FFFFFF",
+      backgroundColor: input.backgroundColor ?? "#FFFFFF",
+      textColor: input.textColor ?? "#000000",
+      paymentMethods: JSON.stringify(Array.from(new Set(input.paymentMethods.map((method) => method.trim())))),
+      storeAreas: JSON.stringify(input.storeAreas),
       // 無料枠の既定値。plan/billingStatus/maxCircles はスキーマ default と同値だが、
       // 意図 (無料枠で有効化) を明示するため作成時に書き込む。
       plan: "free",
@@ -1103,8 +1293,19 @@ eventRoutes.delete("/:id", async (c) => {
   }
 
   const id = c.req.param("id");
-  // 物理削除せず deletedAt に時刻を書き込む (論理削除)
-  await db.update(event).set({ deletedAt: new Date() }).where(eq(event.id, id));
+  const existing = await db
+    .select({ deletedAt: event.deletedAt })
+    .from(event)
+    .where(eq(event.id, id));
+  if (!existing[0]) apiError("NOT_FOUND", "イベントが見つかりません");
+  // 2026-10-15 (#128): 子サークルにもイベントIDを記録し、後からイベントごと復元できるようにする。
+  await c.env.DB.batch([
+    c.env.DB.prepare("UPDATE event SET deleted_at=COALESCE(deleted_at, ?) WHERE id=?")
+      .bind(Date.now(), id),
+    c.env.DB.prepare(`UPDATE circle SET deleted_at=(SELECT deleted_at FROM event WHERE id=?), deleted_with_event_id=?
+      WHERE event_id=? AND deleted_at IS NULL`)
+      .bind(id, id, id),
+  ]);
   return c.json({ success: true });
 });
 
@@ -1124,6 +1325,7 @@ eventRoutes.put(
       textColor: z.string().optional(),
       eventName: z.string().optional(),
       description: z.string().nullable().optional(),
+      officialWebsiteUrl: z.string().url().refine((value) => /^https?:\/\//i.test(value), "公式サイトURLはhttpまたはhttpsで入力してください").nullable().optional(),
       startDate: z.string().nullable().optional(),
       endDate: z.string().nullable().optional(),
       hasPhysicalWristband: z.boolean().optional(),
@@ -1131,12 +1333,11 @@ eventRoutes.put(
   ),
   async (c) => {
     const db = c.get("db");
-    const session = await getAdminSession(c);
-    if (!session) {
-      apiError("FORBIDDEN", "管理者権限が必要です");
-    }
-
     const id = c.req.param("id");
+    // 2026-10-16 (#126): 作成者の event_manager が設定画面から更新できるよう、イベント権限で認可する。
+    if (!(await hasPermission(c, null, "event:write", id))) {
+      apiError("FORBIDDEN", "このイベントの設定を変更する権限がありません");
+    }
     const input = c.req.valid("json");
 
     const updateData: any = { ...input };

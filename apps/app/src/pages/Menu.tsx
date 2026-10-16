@@ -23,6 +23,7 @@ import { ErrorState } from "@/components/ui/ErrorState";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { toast } from "sonner";
 import { EventTheme } from "@/components/EventTheme";
+import { ApiError } from "@/lib/api-error";
 import { ShoppingCart, Plus, Minus, CheckCircle, UtensilsCrossed, Ticket, X, QrCode } from "lucide-react";
 import { resolveAssetUrl } from "@/lib/asset-url";
 import { QRCodeSVG } from "qrcode.react";
@@ -34,6 +35,8 @@ import type { CreateOrderInput } from "@fesflow/config/order-contract";
 import { ToppingSelection, parseToppingCategoryMaximums, parseToppingCategoryMinimums } from "@/components/menu/ToppingSelection";
 import { MenuCategoryFilter, menuCategoryKey } from "@/components/menu/MenuCategoryFilter";
 import { findVisitorRouteItem } from "@/lib/visitor-route";
+import { parseJapaneseAllergens } from "@fesflow/config/allergens";
+import { getCartAllergyWarnings, OrderAllergyWarning } from "@/features/orders/allergy-check";
 
 // 2026-07-13: 来場者モバイルオーダーもトッピング対応にするため、レジ (Register.tsx) と同じく
 // カートを「行 (line)」単位で持つ。同じメニューでもトッピング構成が違えば別行になる。
@@ -247,6 +250,7 @@ function MenuPageContent() {
     enabled: visitorLoaded && !!userId,
   });
   const activeWristband = wristbandStatus?.wristband;
+  const familyAllergies = parseJapaneseAllergens(wristbandStatus?.user.allergies);
   const canDisplayMyQr = !!activeWristband && ["active", "smartphone"].includes(activeWristband.status);
   const myQrButtonLabel = isWristbandStatusLoading
     ? "入場情報を確認中…"
@@ -451,6 +455,12 @@ function MenuPageContent() {
     },
   });
   const { mutate: saveDraft } = preOrderMutation;
+  const preOrderStockError =
+    preOrderMutation.error instanceof ApiError &&
+    preOrderMutation.error.code === "BAD_REQUEST" &&
+    /在庫が不足|売り切れ/.test(preOrderMutation.error.message)
+      ? `${preOrderMutation.error.message}。数量を調整してから再度お試しください。`
+      : null;
 
   useEffect(() => {
     const waitMs = preOrderMutation.isError
@@ -564,6 +574,7 @@ function MenuPageContent() {
 
   // カート内トッピング編集用に menuId → メニュー(許可トッピング付き)を引けるようにする
   const menuMap = new Map((menus ?? []).map((m) => [m.id, m]));
+  const cartAllergyWarnings = getCartAllergyWarnings(cart, menuMap, familyAllergies);
 
   // 有効な外部モッドの一覧取得
   const getActiveMods = () => {
@@ -909,11 +920,17 @@ function MenuPageContent() {
               <div className="flex flex-wrap items-center gap-2 text-[10px] font-mono text-primary-foreground/80" role="status">
                 {preOrderMutation.isError ? (
                   <>
-                    <span>
-                      {isRetryablePreOrderSaveError(preOrderMutation.error)
-                        ? "カートを保存できませんでした。通信を確認して再試行してください。"
-                        : "カートの保存状態を確認できません。画面を再読み込みしてください。"}
-                    </span>
+                    {preOrderStockError ? (
+                      <span className="w-full font-bold text-destructive" role="alert">
+                        {preOrderStockError}
+                      </span>
+                    ) : (
+                      <span>
+                        {isRetryablePreOrderSaveError(preOrderMutation.error)
+                          ? "カートを保存できませんでした。通信を確認して再試行してください。"
+                          : "カートの保存状態を確認できません。画面を再読み込みしてください。"}
+                      </span>
+                    )}
                     {isRetryablePreOrderSaveError(preOrderMutation.error) && (
                       <Button
                         type="button"
@@ -1039,6 +1056,12 @@ function MenuPageContent() {
             );
           })}
         </div>
+
+        <OrderAllergyWarning
+          warnings={cartAllergyWarnings}
+          familyAllergies={familyAllergies}
+          enabled={!!userId && cart.length > 0}
+        />
 
         <div className="border-t-thick border-border pt-3 space-y-2">
           {applicableCoupons.map((c) => (

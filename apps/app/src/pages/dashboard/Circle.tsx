@@ -7,6 +7,7 @@ import {
   membershipApi,
   parseCircleSettings,
   parseEventPaymentMethods,
+  parseStoreAreas,
   type OrderFlowMode,
 } from "@/lib/api";
 import DashboardLayout from "@/components/DashboardLayout";
@@ -85,6 +86,7 @@ function CircleSettingsContent() {
   const [staffEnabled, setStaffEnabled] = useState(false);
   // 対応する支払い方法 (2026-07-12)。イベントの paymentMethods の部分集合。
   const [acceptedPayments, setAcceptedPayments] = useState<string[]>([]);
+  const [storeAreaId, setStoreAreaId] = useState<string | null>(null);
   // 2026-07-16: 「運用設定」(注文モード・拡張機能・支払い方法) は circleApi.updateSettings が
   // settings カラムを丸ごと上書きする1本のAPIのため、3つを分けて保存することはできない。
   // そのため見た目も1つのセクションにまとめ、この3項目分の未保存判定を1つのスナップショットで行う。
@@ -93,6 +95,7 @@ function CircleSettingsContent() {
     stockEnabled: false,
     staffEnabled: false,
     acceptedPayments: [] as string[],
+    storeAreaId: null as string | null,
   });
 
   // オーナー譲渡確認
@@ -136,11 +139,13 @@ function CircleSettingsContent() {
       setStockEnabled(s.extensions.stock);
       setStaffEnabled(s.extensions.staff);
       setAcceptedPayments(s.acceptedPayments);
+      setStoreAreaId(s.storeAreaId);
       setSettingsSnapshot({
         orderFlowMode: s.orderFlowMode,
         stockEnabled: s.extensions.stock,
         staffEnabled: s.extensions.staff,
         acceptedPayments: s.acceptedPayments,
+        storeAreaId: s.storeAreaId,
       });
     }
   }, [circle]);
@@ -152,6 +157,7 @@ function CircleSettingsContent() {
     enabled: !!circle?.eventId,
   });
   const eventPayments = parseEventPaymentMethods(eventData?.paymentMethods);
+  const eventStoreAreas = parseStoreAreas(eventData?.storeAreas);
 
   const updateCircle = useMutation({
     mutationFn: async (input: {
@@ -190,11 +196,12 @@ function CircleSettingsContent() {
         extensions: { stock: stockEnabled, staff: staffEnabled },
         // イベントに存在する方法だけ残す (イベント側で削除された方法を掃除)
         acceptedPayments: acceptedPayments.filter((p) => eventPayments.includes(p)),
+        storeAreaId,
       }),
     onSuccess: () => {
       toast.success("運用設定を保存しました");
       queryClient.invalidateQueries({ queryKey: ["circle", circleId] });
-      setSettingsSnapshot({ orderFlowMode, stockEnabled, staffEnabled, acceptedPayments });
+      setSettingsSnapshot({ orderFlowMode, stockEnabled, staffEnabled, acceptedPayments, storeAreaId });
     },
     onError: (error: any) => toast.error(error.message || "設定の保存に失敗しました"),
   });
@@ -244,7 +251,7 @@ function CircleSettingsContent() {
   // 未保存の変更があるかどうか (セクション単位)。変更が無ければ保存ボタンを disabled にする。
   const isFormDirty = JSON.stringify(form) !== JSON.stringify(formSnapshot);
   const isSettingsDirty =
-    JSON.stringify({ orderFlowMode, stockEnabled, staffEnabled, acceptedPayments }) !==
+    JSON.stringify({ orderFlowMode, stockEnabled, staffEnabled, acceptedPayments, storeAreaId }) !==
     JSON.stringify(settingsSnapshot);
 
   // 上位管理者(オーナー/イベント管理者/システム管理者)のみオーナー譲渡を実行できる
@@ -446,6 +453,24 @@ function CircleSettingsContent() {
                   })
                 )}
               </div>
+            </div>
+
+            {/* 2026-10-16 (#127): エリアIDはイベント共通の一覧を参照し、来場者表示とスタンプラリーで使い回す。 */}
+            <div className="space-y-2 border-t-thin border-border pt-4">
+              <Label htmlFor="circleStoreArea" className="text-xs font-bold uppercase">店舗エリア</Label>
+              <select
+                id="circleStoreArea"
+                className="w-full border-thick border-border bg-background p-3 font-mono text-sm"
+                value={storeAreaId ?? ""}
+                onChange={(e) => setStoreAreaId(e.target.value || null)}
+              >
+                <option value="">未設定</option>
+                {storeAreaId && !eventStoreAreas.some((area) => area.id === storeAreaId) && (
+                  <option value={storeAreaId}>削除済みエリア（別のエリアを選択）</option>
+                )}
+                {eventStoreAreas.map((area) => <option key={area.id} value={area.id}>{area.name}</option>)}
+              </select>
+              <p className="text-[11px] text-muted-foreground">イベントが登録した店舗エリアを選択します。</p>
             </div>
 
             {/* 運用設定 (注文モード + 拡張機能 + 支払い方法) の保存。3項目を常にまとめて送る。 */}

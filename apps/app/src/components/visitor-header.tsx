@@ -10,14 +10,17 @@ import { useVisitor } from "@/hooks/useVisitor";
  */
 export default function VisitorHeader() {
   const pathname = useLocation().pathname;
+  const normalizedPathname = pathname.replace(/\/+$/, "") || "/";
   const { isEntered, session } = useVisitor();
+  // 2026-10-15 (#129): 来場者トップからは出店一覧へ誘導せず、共有URLからの閲覧は維持する。
+  const isVisitorHome = normalizedPathname === "/visitor";
 
   // 2026-07-11: 来場者パスは /visitor 配下に集約。「メニュー」は出店未選択の案内が出る
   // /visitor/menu ではなく、実際に出店を選べる /visitor/events (出店ブラウズ) へ直結。
   const links = [
     { to: "/visitor/events", label: "メニュー", icon: UtensilsCrossed, match: ["/visitor/events", "/visitor/menu"] },
     { to: "/visitor/mypage", label: "マイQR", icon: QrCode, match: ["/visitor/mypage"] },
-    { to: "/visitor/stamps", label: "利用実績", icon: Ticket, match: ["/visitor/stamps"] },
+    { to: "/visitor/stamps", label: "スタンプ", icon: Ticket, match: ["/visitor/stamps"] },
     { to: "/visitor/orders", label: "注文履歴", icon: Receipt, match: ["/visitor/orders"] },
   ];
 
@@ -38,20 +41,22 @@ export default function VisitorHeader() {
         </Link>
 
         <nav className="flex items-center gap-1 font-headline text-[12px] uppercase tracking-[1px] shrink-0">
-          {links.map(({ to, label, icon: Icon, match }) => (
-            <Link
-              key={to}
-              to={to}
-              className={`px-2 sm:px-2.5 py-1 sm:py-1.5 border-[2px] border-border transition-all whitespace-nowrap flex items-center gap-1 ${
-                isActive(match)
-                  ? "bg-primary text-primary-foreground font-bold"
-                  : "bg-background text-foreground hover:bg-muted"
-              }`}
-            >
-              <Icon className="h-3.5 w-3.5" />
-              <span className="hidden sm:inline">{label}</span>
-            </Link>
-          ))}
+          {links
+            .filter(({ to }) => !(isVisitorHome && to === "/visitor/events"))
+            .map(({ to, label, icon: Icon, match }) => (
+              <Link
+                key={to}
+                to={to}
+                className={`px-2 sm:px-2.5 py-1 sm:py-1.5 border-[2px] border-border transition-all whitespace-nowrap flex items-center gap-1 ${
+                  isActive(match)
+                    ? "bg-primary text-primary-foreground font-bold"
+                    : "bg-background text-foreground hover:bg-muted"
+                }`}
+              >
+                <Icon className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">{label}</span>
+              </Link>
+            ))}
           {isEntered && session?.displayId != null && (
             <span className="ml-0.5 sm:ml-1 px-1.5 sm:px-2 py-1 border-[2px] border-border bg-muted text-[10px] sm:text-[11px] font-black">
               #{session.displayId}

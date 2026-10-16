@@ -73,6 +73,7 @@ describe("認証・認可境界", () => {
 			id: eventId,
 			eventName: "公開イベント",
 			description: "来場者向け説明",
+			officialWebsiteUrl: "https://example.invalid/event",
 			logoUrl: "/uploads/event-logo.png",
 			ownerEmail: "private-owner@example.invalid",
 			contractNotes: "非公開の運営メモ",
@@ -91,6 +92,7 @@ describe("認証・認可境界", () => {
 			id: eventId,
 			eventName: "公開イベント",
 			description: "来場者向け説明",
+			officialWebsiteUrl: "https://example.invalid/event",
 			logoUrl: "/uploads/event-logo.png",
 		});
 		expect(JSON.stringify(rows)).not.toContain("private-owner@example.invalid");

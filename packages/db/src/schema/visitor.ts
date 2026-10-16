@@ -30,6 +30,8 @@ export const eventUser = sqliteTable(
     // 2026-10-08: 入場時点の年齢と、年を含めない誕生日（月日）を別々に保持する。
     birthdayMonthDay: text("birthday_month_day"), // MM-DD
     age: integer("age"),
+    // 2026-10-15 (#124): 家族全員の申告をまとめたJSON配列。null=未登録、[]=該当なし。
+    allergies: text("allergies"),
     onboardedAt: integer("onboarded_at", { mode: "timestamp_ms" }), // 初回入力完了時刻
     createdAt: integer("created_at", { mode: "timestamp_ms" })
       .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
@@ -57,6 +59,12 @@ export const wristband = sqliteTable(
       .notNull()
       .references(() => eventUser.id, { onDelete: "cascade" }),
     status: text("status").notNull().default("active"), // active / lost / replaced / revoked
+    // 2026-10-15 (#125): 家族の来場記録は eventUser を共有しつつ、受付表示に必要な
+    // ニックネーム・誕生日・年齢は物理/デジタルバンド単位で保持する。
+    nickname: text("nickname"),
+    birthdayMonthDay: text("birthday_month_day"), // MM-DD
+    age: integer("age"),
+    onboardedAt: integer("onboarded_at", { mode: "timestamp_ms" }),
     assignedAt: integer("assigned_at", { mode: "timestamp_ms" })
       .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
       .notNull(),
@@ -230,5 +238,29 @@ export const rewardRedemption = sqliteTable(
   },
   (table) => [
     index("reward_redemption_userId_idx").on(table.userId),
+  ]
+);
+
+// 2026-10-15 (#123): 通常のスタンプラリー景品交換はイベント来場者単位で記録する。
+// 旧 reward_redemption は userId のみでイベントをまたいで一回に制限していたため、
+// 後方互換用に残しつつ、新しい交換記録は (eventId,eventUserId) で一意に管理する。
+export const stampRallyRedemption = sqliteTable(
+  "stamp_rally_redemption",
+  {
+    id: text("id").primaryKey().$defaultFn(() => ulid()),
+    eventId: text("event_id")
+      .notNull()
+      .references(() => event.id, { onDelete: "cascade" }),
+    eventUserId: text("event_user_id")
+      .notNull()
+      .references(() => eventUser.id, { onDelete: "cascade" }),
+    staffId: text("staff_id").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+      .notNull(),
+  },
+  (table) => [
+    index("stamp_rally_redemption_event_created_idx").on(table.eventId, table.createdAt),
+    uniqueIndex("stamp_rally_redemption_event_user_unique").on(table.eventId, table.eventUserId),
   ]
 );

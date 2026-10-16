@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import { circleApi, activeWaitTimeReport, recentWaitTimeReports } from "@/lib/api";
+import { circleApi, activeWaitTimeReport, recentWaitTimeReports, type Event } from "@/lib/api";
 import { Card, CardTitle, CardContent, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -12,6 +12,7 @@ import { toast } from "sonner";
 
 // モーダル
 import { CircleFormModal } from "./CircleFormModal";
+import { CircleCreateWizard } from "@/components/circle/CircleCreateWizard";
 import { CircleCreateLinkModal } from "./CircleCreateLinkModal";
 import { CircleManageModal } from "./CircleManageModal";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
@@ -19,6 +20,7 @@ import { getAuthInfo, saveAuthInfo, useAuth } from "@/hooks/useCircleAuth";
 
 interface CirclesTabProps {
   eventId: string;
+  eventData?: Event;
   circles: any[] | undefined;
   circlesLoading: boolean;
   /** サークル一覧取得の isError (省略時はエラー分岐を表示しない) */
@@ -29,6 +31,7 @@ interface CirclesTabProps {
 
 export function CirclesTab({
   eventId,
+  eventData,
   circles,
   circlesLoading,
   circlesError,
@@ -40,6 +43,7 @@ export function CirclesTab({
   const { role: effectiveRole, eventId: effectiveEventId } = useAuth();
 
   const [isFormOpen, setIsFormOpen] = useState(false);
+  const [isCreateWizardOpen, setIsCreateWizardOpen] = useState(false);
   const [selectedCircle, setSelectedCircle] = useState<any | null>(null);
   const [isCreateLinkOpen, setIsCreateLinkOpen] = useState(false);
 
@@ -64,8 +68,12 @@ export function CirclesTab({
   });
 
   const handleOpenAdd = () => {
+    if (!eventData) {
+      toast.error("イベント情報の読み込み後にもう一度お試しください");
+      return;
+    }
     setSelectedCircle(null);
-    setIsFormOpen(true);
+    setIsCreateWizardOpen(true);
   };
 
   const handleOpenEdit = (circle: any) => {
@@ -92,6 +100,26 @@ export function CirclesTab({
   const uniqueCircles = circles
     ? Array.from(new Map(circles.map(c => [c.id, c])).values())
     : undefined;
+
+  if (isCreateWizardOpen && eventData) {
+    return (
+      <div className="space-y-5 p-2 sm:p-5">
+        <CircleCreateWizard
+          event={eventData}
+          onCancel={() => setIsCreateWizardOpen(false)}
+          onCreated={(id, name) => {
+            queryClient.invalidateQueries({ queryKey: ["circles", eventId] });
+            const authInfo = getAuthInfo();
+            if (authInfo && effectiveRole === "event_manager" && effectiveEventId === eventId) {
+              saveAuthInfo({ ...authInfo, circleId: id, circleName: name, eventId });
+              window.sessionStorage.setItem("circleName", name);
+            }
+            navigate("/circle/dashboard/menu", { replace: true });
+          }}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6 font-mono text-foreground">

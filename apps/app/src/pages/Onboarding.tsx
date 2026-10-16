@@ -1,12 +1,14 @@
 import { useState, useEffect } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { visitorApi, eventApi, wristbandApi } from "@/lib/api";
 import { getVisitor, saveVisitor, useVisitor } from "@/hooks/useVisitor";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { resolveAssetUrl } from "@/lib/asset-url";
+import { AllergenSelector } from "@/components/menu/AllergenSelector";
+import { parseJapaneseAllergens, type JapaneseAllergen } from "@fesflow/config/allergens";
 
 /**
  * 来場者オンボーディング / プロフィール編集 (2026-07-04, 2026-07-15 編集モード追加)。
@@ -19,12 +21,16 @@ export default function Onboarding() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const isEdit = searchParams.get("edit") === "1";
+  const isAllergyEdit = searchParams.get("allergies") === "1";
   const { isLoaded, isEntered, session, userId } = useVisitor();
   const [nickname, setNickname] = useState("");
   const [favoriteDate, setFavoriteDate] = useState("");
   const [birthdayMonth, setBirthdayMonth] = useState("");
   const [birthdayDay, setBirthdayDay] = useState("");
   const [age, setAge] = useState("");
+  const [showAllergyStep, setShowAllergyStep] = useState(isAllergyEdit);
+  const [allergies, setAllergies] = useState<JapaneseAllergen[] | null>(null);
+  const queryClient = useQueryClient();
 
   // 入場前(セッション無し)に直接来たら入場を促す
   useEffect(() => {
@@ -38,7 +44,7 @@ export default function Onboarding() {
   const { data: profile } = useQuery({
     queryKey: ["visitorProfile", userId],
     queryFn: () => wristbandApi.lookup(userId!),
-    enabled: isEdit && !!userId,
+    enabled: (isEdit || isAllergyEdit) && !!userId,
   });
 
   useEffect(() => {
@@ -56,6 +62,12 @@ export default function Onboarding() {
     if (day) setBirthdayDay(String(Number(day)));
     if (profile?.user.age != null) setAge(String(profile.user.age));
   }, [profile?.user.birthdayMonthDay, profile?.user.age]);
+
+  useEffect(() => {
+    if (profile?.user.allergies !== undefined) {
+      setAllergies(parseJapaneseAllergens(profile.user.allergies));
+    }
+  }, [profile?.user.allergies]);
 
   // 2026-10-08: 生年を集めない要件のため月日を別選択にし、2月29日も選べるよううるう年で日数を出す。
   const daysInBirthdayMonth = birthdayMonth
@@ -76,6 +88,7 @@ export default function Onboarding() {
       if (!v?.userId) throw new Error("セッションが見つかりません");
       return visitorApi.onboard({
         userId: v.userId,
+        wristbandId: v.wristbandId,
         nickname: nickname.trim(),
         favoriteDate: favoriteDate || undefined,
         birthdayMonthDay: hasBirthday ? birthdayMonthDay : undefined,
@@ -91,10 +104,32 @@ export default function Onboarding() {
           onboarded: !!result.onboardedAt,
         });
       }
-      toast.success(isEdit ? "プロフィールを保存しました" : "ようこそ！マイページを開きます");
-      navigate("/visitor/mypage", { replace: true });
+      if (isEdit) {
+        toast.success("プロフィールを保存しました");
+        navigate("/visitor/mypage", { replace: true });
+      } else {
+        // 2026-10-15 (#124): 家族を後から追加した場合は MyPage で再申告を促す前提で、
+        // 入場時にも代表者のアレルギーを明示選択してから完了させる。
+        toast.success("続けて家族のアレルギーを登録してください");
+        setShowAllergyStep(true);
+      }
     },
     onError: (e: any) => toast.error(e?.message || (isEdit ? "保存に失敗しました" : "登録に失敗しました")),
+  });
+
+  const allergiesMutation = useMutation({
+    mutationFn: () => {
+      const visitor = getVisitor();
+      if (!visitor?.userId) throw new Error("セッションが見つかりません");
+      if (allergies === null) throw new Error("アレルゲンまたは『なし』を選択してください");
+      return visitorApi.updateAllergies(visitor.userId, allergies);
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["userWristbandStatus", userId] });
+      toast.success(isAllergyEdit ? "家族のアレルギーを保存しました" : "入場登録が完了しました");
+      navigate("/visitor/mypage", { replace: true });
+    },
+    onError: (e: any) => toast.error(e?.message || "アレルギーを保存できませんでした"),
   });
 
   const v = getVisitor();
@@ -121,6 +156,37 @@ export default function Onboarding() {
         </div>
       )}
       <div className="border-[3px] border-border p-6 space-y-6">
+        {showAllergyStep ? (
+          <>
+            {isAllergyEdit && (
+              <button
+                onClick={() => navigate("/visitor/mypage")}
+                className="text-xs uppercase tracking-widest underline hover:text-info"
+              >
+                ← マイページに戻る
+              </button>
+            )}
+            <div className="space-y-1">
+              <h1 className="text-2xl font-black uppercase tracking-wider">家族のアレルギー登録</h1>
+              <p className="text-sm text-muted-foreground">
+                ご家族の中に一人でも当てはまる品目があれば選んでください。家族全員の情報として登録し、注文時にメニュー・トッピングと照合して警告します。
+              </p>
+            </div>
+            <AllergenSelector
+              value={allergies}
+              onChange={setAllergies}
+              helpText="28品目から家族のどなたかに該当するものをすべて選択してください。該当する品目がない場合も「アレルゲンなし」を選んでください。"
+            />
+            <Button
+              className="w-full h-12 rounded-none border-[2px] uppercase font-black"
+              onClick={() => allergiesMutation.mutate()}
+              disabled={allergies === null || allergiesMutation.isPending}
+            >
+              {allergiesMutation.isPending ? "保存中..." : isAllergyEdit ? "家族のアレルギーを保存" : "アレルギーを登録して入場"}
+            </Button>
+          </>
+        ) : (
+          <>
         {isEdit && (
           <button
             onClick={() => navigate("/visitor/mypage")}
@@ -245,6 +311,8 @@ export default function Onboarding() {
         >
           {mutation.isPending ? "保存中..." : isEdit ? "保存する" : "はじめる"}
         </Button>
+          </>
+        )}
       </div>
     </div>
   );

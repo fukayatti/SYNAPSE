@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { eventApi, circleApi, orderApi, membershipApi } from "@/lib/api";
 import { EventAdminGuard, useAuth } from "@/hooks/useCircleAuth";
@@ -23,12 +24,14 @@ import { StaffTab } from "@/components/event/StaffTab";
 import { SettingsTab } from "@/components/event/SettingsTab";
 import { ContractTab } from "@/components/event/ContractTab";
 import { WristbandsTab } from "@/components/event/WristbandsTab";
+import { StampRedemptionsTab } from "@/components/event/StampRedemptionsTab";
 import { ExportTab } from "@/components/event/ExportTab";
 import { EventReviewsTab } from "@/pages/dashboard/Reviews";
 
 export default function EventDashboard() {
   const { eventId } = useAuth();
-  const [activeTab, setActiveTab] = useState<string>("circles");
+  const [searchParams] = useSearchParams();
+  const [activeTab, setActiveTab] = useState<string>(() => searchParams.get("tab") || "circles");
   const [eventName, setEventName] = useState<string>("イベントダッシュボード");
 
   // イベント情報取得
@@ -153,6 +156,7 @@ export default function EventDashboard() {
           {activeTab === "circles" && (
             <CirclesTab
               eventId={eventId}
+              eventData={eventData}
               circles={circles}
               circlesLoading={circlesLoading}
               circlesError={circlesError}
@@ -199,6 +203,9 @@ export default function EventDashboard() {
               eventId={eventId}
             />
           )}
+
+          {/* TAB 6: スタンプラリー景品交換 */}
+          {activeTab === "stamp-redemptions" && <StampRedemptionsTab eventId={eventId} />}
         </div>
       </DashboardLayout>
     </EventAdminGuard>

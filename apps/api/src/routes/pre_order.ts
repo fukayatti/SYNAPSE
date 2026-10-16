@@ -329,7 +329,9 @@ preOrderRoutes.post(
         }
 
         // 2026-07-05: 売り切れメニューの事前オーダーをハードゲートで拒否する
-        if (m.soldOut) {
+        if (m.soldOut && !isStaleDraftWrite) {
+          // #120: 失われた応答の同一payload再送は後段で保存済みsnapshotと照合する。
+          // 保存済み注文の再送に、後から変わった売切状態を適用しない。
           apiError("BAD_REQUEST", `${m.name}は売り切れです`);
         }
 
@@ -344,7 +346,7 @@ preOrderRoutes.post(
           if (t.circleId !== circleId) {
             apiError("BAD_REQUEST", `トッピング ${t.name} は指定サークルに属していません`);
           }
-          if (t.soldOut) {
+          if (t.soldOut && !isStaleDraftWrite) {
             apiError("BAD_REQUEST", `${t.name}は売り切れです`);
           }
           const isLinked = menuToppingLinks.some(
@@ -425,6 +427,26 @@ preOrderRoutes.post(
           return c.json({ id: preOrderId, totalPrice: sameDraft.totalPrice, updatedAt: sameDraft.updatedAt }, 200);
         }
         apiError("CONFLICT", "カートが更新または確定されました。画面を再読み込みしてください");
+      }
+
+      // 2026-10-15 Issue #120: 事前注文の保存時にも在庫不足を知らせる。保存済み内容の再送は
+      // 直前の一致確認で完了するため再検証せず、ここでは在庫を予約・減算しない。
+      // 他注文との競合はレジ確定時の原子的な在庫チェックで最終判定する。
+      const requestedMenuQuantities = new Map<string, number>();
+      for (const item of items) {
+        requestedMenuQuantities.set(
+          item.menuId,
+          (requestedMenuQuantities.get(item.menuId) ?? 0) + item.quantity,
+        );
+      }
+      for (const [menuId, requestedQuantity] of requestedMenuQuantities) {
+        const requestedMenu = menus.find((menuItem) => menuItem.id === menuId);
+        if (requestedMenu?.inventoryEnabled && requestedMenu.stockQuantity < requestedQuantity) {
+          apiError(
+            "BAD_REQUEST",
+            `${requestedMenu.name}の在庫が不足しています（残り${requestedMenu.stockQuantity}個 / 必要${requestedQuantity}個）`,
+          );
+        }
       }
 
       const discountAmount = validatedCoupons.reduce((sum, item) => sum + item.discount, 0);

@@ -437,7 +437,8 @@ adminRoutes.get("/overview", async (c) => {
 // 全イベント一覧 (契約状態・サークル数・オーナー付き)。テナント横断の運営ビュー。
 adminRoutes.get("/events", async (c) => {
   const db = c.get("db");
-  const events = await db.select().from(event).where(isNull(event.deletedAt)).orderBy(desc(event.createdAt));
+  // 2026-10-15 (#128): 削除済みイベントも運営画面に出し、期間制限なしの復元を可能にする。
+  const events = await db.select().from(event).orderBy(desc(event.createdAt));
   const circles = await db.select({ id: circle.id, eventId: circle.eventId }).from(circle).where(isNull(circle.deletedAt));
   const circleCount = new Map<string, number>();
   for (const c2 of circles) circleCount.set(c2.eventId, (circleCount.get(c2.eventId) ?? 0) + 1);
@@ -457,6 +458,7 @@ adminRoutes.get("/events", async (c) => {
     events.map((e) => ({
       id: e.id,
       eventName: e.eventName,
+      deletedAt: e.deletedAt,
       ownerEmail: e.ownerEmail,
       plan: e.plan,
       billingStatus: e.billingStatus,
@@ -523,7 +525,42 @@ adminRoutes.patch(
 adminRoutes.delete("/events/:id", async (c) => {
   const db = c.get("db");
   const id = c.req.param("id");
-  await db.update(event).set({ deletedAt: new Date() }).where(eq(event.id, id));
+  const existing = await db
+    .select({ deletedAt: event.deletedAt })
+    .from(event)
+    .where(eq(event.id, id));
+  if (!existing[0]) apiError("NOT_FOUND", "イベントが見つかりません");
+  // 2026-10-15 (#128): 子サークルにイベントIDを記録し、復元対象を明示する。
+  await c.env.DB.batch([
+    c.env.DB.prepare("UPDATE event SET deleted_at=COALESCE(deleted_at, ?) WHERE id=?")
+      .bind(Date.now(), id),
+    c.env.DB.prepare(`UPDATE circle SET deleted_at=(SELECT deleted_at FROM event WHERE id=?), deleted_with_event_id=?
+      WHERE event_id=? AND deleted_at IS NULL`)
+      .bind(id, id, id),
+  ]);
+  return c.json({ success: true });
+});
+
+// 2026-10-15 (#128): 論理削除したイベントは運営が期間制限なく復元できる。
+adminRoutes.post("/events/:id/restore", async (c) => {
+  const db = c.get("db");
+  const id = c.req.param("id");
+  const rows = await db
+    .select({ deletedAt: event.deletedAt })
+    .from(event)
+    .where(eq(event.id, id));
+  if (!rows[0]) apiError("NOT_FOUND", "イベントが見つかりません");
+  const deletedAt = rows[0].deletedAt;
+  if (!deletedAt) return c.json({ success: true });
+
+  // 2026-10-15 (#128): イベント削除と同時に隠したサークルだけを戻し、個別削除を維持する。
+  await c.env.DB.batch([
+    c.env.DB.prepare(`UPDATE circle SET deleted_at=NULL, deleted_with_event_id=NULL
+      WHERE event_id=? AND deleted_with_event_id=?`)
+      .bind(id, id),
+    c.env.DB.prepare("UPDATE event SET deleted_at=NULL WHERE id=?")
+      .bind(id),
+  ]);
   return c.json({ success: true });
 });
 

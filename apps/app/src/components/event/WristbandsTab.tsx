@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { wristbandApi, type WristbandBatch } from "@/lib/api";
+import { wristbandApi, type WristbandBatch, type WristbandLookupResult } from "@/lib/api";
 import { extractIdFromCode } from "@/lib/utils";
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -92,7 +92,7 @@ export function WristbandsTab({ eventId }: WristbandsTabProps) {
   const [lookupCode, setLookupCode] = useState("");
 
   // 詳細編集モーダル用の状態
-  const [selectedUser, setSelectedUser] = useState<any | null>(null);
+  const [selectedUser, setSelectedUser] = useState<WristbandLookupResult | null>(null);
   const [editNickname, setEditNickname] = useState("");
   const [editFavoriteDate, setEditFavoriteDate] = useState("");
   const [editDisplayId, setEditDisplayId] = useState<number | "">("");
@@ -423,7 +423,7 @@ export function WristbandsTab({ eventId }: WristbandsTabProps) {
   };
 
   // 2026-10-01: 登録来場者一覧の先頭列からプロフィール編集を開けるようにする。
-  const handleOpenVisitorDetails = (visitor: any) => {
+  const handleOpenVisitorDetails = (visitor: WristbandLookupResult) => {
     setIsVisitorTableOpen(false);
     setSelectedUser(visitor);
     setIsDetailsModalOpen(true);
@@ -446,6 +446,7 @@ export function WristbandsTab({ eventId }: WristbandsTabProps) {
   const getVisitorLink = (userId: string) => {
     return visitorUrl(`/w/${userId}`);
   };
+  const selectedWristband = selectedUser?.wristband;
   // 2026-09-27 Issue #56: QRの内容を表示中の発行URLと同じ MyPage 発行アクションに揃える。
   const selfIssueUrl = digitalQrIssueUrl(window.location.origin, eventId);
 
@@ -982,7 +983,10 @@ export function WristbandsTab({ eventId }: WristbandsTabProps) {
                           {res.user.status === "available" ? "利用可能" : "BAN"}
                         </Badge>
                       </td>
-                      <td className="p-3 font-mono text-[11px] select-all">{res.wristband?.id || <span className="text-muted-foreground text-[10px]">なし</span>}</td>
+                      <td className="p-3 font-mono text-[11px] select-all">
+                        {res.wristband?.id || <span className="text-muted-foreground text-[10px]">なし</span>}
+                        {(res.familyBandCount ?? 0) > 1 && <span className="ml-2 text-[9px] text-muted-foreground">家族 {res.familyBandCount}人</span>}
+                      </td>
                       <td className="p-3">
                         {res.wristband ? (
                           <Badge
@@ -1286,13 +1290,25 @@ export function WristbandsTab({ eventId }: WristbandsTabProps) {
                   [紐付く物理リストバンド管理]
                 </h3>
 
-                {selectedUser.wristband ? (
+                {(selectedUser.familyWristbands?.length ?? 0) > 1 && (
+                  <div className="space-y-1 border border-border bg-muted/10 p-2 text-[10px]">
+                    <p className="font-bold">家族の登録人数: {selectedUser.familyBandCount}人</p>
+                    {selectedUser.familyWristbands.map((band) => (
+                      <p key={band.id} className="flex justify-between gap-2">
+                        <span className="truncate">{band.nickname || "ニックネーム未設定"} · {band.age == null ? "年齢未設定" : `${band.age}歳`}</span>
+                        <span className="shrink-0 text-muted-foreground">{band.birthdayMonthDay || "誕生日未設定"}</span>
+                      </p>
+                    ))}
+                  </div>
+                )}
+
+                {selectedWristband ? (
                   <div className="space-y-4 text-xs">
                     <div className="bg-muted/20 p-3 border border-border space-y-2 font-mono">
                       <p className="flex justify-between items-center">
-                        <span>バンドID: <span className="font-bold select-all">{selectedUser.wristband.id}</span></span>
+                        <span>バンドID: <span className="font-bold select-all">{selectedWristband.id}</span></span>
                         <Button
-                          onClick={() => copyToClipboard(selectedUser.wristband.id)}
+                          onClick={() => copyToClipboard(selectedWristband.id)}
                           variant="ghost"
                           size="sm"
                           className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground"
@@ -1306,26 +1322,26 @@ export function WristbandsTab({ eventId }: WristbandsTabProps) {
                         <Badge
                           variant="default"
                           className={`rounded-none text-[8px] font-mono border-thick border-border uppercase ${
-                            selectedUser.wristband.status === "active"
+                            selectedWristband.status === "active"
                               ? "bg-success/10 text-success border-success"
-                              : selectedUser.wristband.status === "smartphone"
+                              : selectedWristband.status === "smartphone"
                               ? "bg-info/10 text-info border-info"
                               : "bg-error/10 text-error border-error"
                           }`}
                         >
-                          {selectedUser.wristband.status === "active"
+                          {selectedWristband.status === "active"
                             ? "有効 (Active)"
-                            : selectedUser.wristband.status === "smartphone"
+                            : selectedWristband.status === "smartphone"
                             ? "スマホ専用 (Smartphone)"
-                            : selectedUser.wristband.status === "lost"
+                            : selectedWristband.status === "lost"
                             ? "紛失 (Lost)"
-                            : selectedUser.wristband.status === "replaced"
+                            : selectedWristband.status === "replaced"
                             ? "再発行済 (Replaced)"
                             : "無効化 (Revoked)"}
                         </Badge>
                       </div>
                       <p className="text-[10px] text-muted-foreground">
-                        割当日時: {new Date(selectedUser.wristband.assignedAt).toLocaleString("ja-JP")}
+                        割当日時: {new Date(selectedWristband.assignedAt).toLocaleString("ja-JP")}
                       </p>
                     </div>
 
@@ -1333,8 +1349,8 @@ export function WristbandsTab({ eventId }: WristbandsTabProps) {
                       <div className="flex items-center justify-between gap-2">
                         <span className="font-bold text-[10px] uppercase text-muted-foreground">ステータス手動変更:</span>
                         <select
-                          value={selectedUser.wristband.status}
-                          onChange={(e) => updateWristbandMutation.mutate({ id: selectedUser.wristband.id, status: e.target.value })}
+                          value={selectedWristband.status}
+                          onChange={(e) => updateWristbandMutation.mutate({ id: selectedWristband.id, status: e.target.value })}
                           disabled={updateWristbandMutation.isPending}
                           className="border-thick border-border bg-background p-1.5 text-xs font-bold font-mono rounded-none"
                         >
@@ -1349,7 +1365,7 @@ export function WristbandsTab({ eventId }: WristbandsTabProps) {
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => handleUnlinkWristband(selectedUser.wristband.id)}
+                        onClick={() => handleUnlinkWristband(selectedWristband.id)}
                         disabled={updateWristbandMutation.isPending}
                         className="w-full rounded-none text-[10px] font-bold h-8 uppercase shadow-none border-thick border-border hover:bg-destructive hover:text-white mt-1"
                       >

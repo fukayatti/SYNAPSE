@@ -61,7 +61,7 @@ describe("sudo + なりすまし + 内容分離", () => {
 			isActive: true,
 		});
 
-		const menuBody = () => JSON.stringify({ circleId, name: uid("メニュー"), price: 300 });
+		const menuBody = () => JSON.stringify({ circleId, name: uid("メニュー"), price: 300, allergens: [] });
 
 		// (1) 内容分離: super_admin が super_admin スペースで menu:write → 403
 		const isolated = await request("/api/menus", {
