@@ -185,7 +185,8 @@ export default function Onboarding() {
       )}
       <div className="border-[3px] border-border p-6 space-y-6">
         {isAdmissionWizard && (
-          <ol aria-label="入場登録の進行状況" className="grid grid-cols-3 border-thin border-border text-center text-[10px] font-bold sm:text-xs">
+          /* 2026-10-16: イベント作成ウィザードと揃え、各工程の下線と現在地の反転で進捗を示す。 */
+          <ol aria-label="入場登録の進行状況" className="flex items-center justify-between gap-2 text-center text-[10px] font-bold sm:text-xs">
             {([
               ["profile", "本人情報"],
               ["family", "家族の登録"],
@@ -198,9 +199,9 @@ export default function Onboarding() {
                 <li
                   key={stepId}
                   aria-current={isActive ? "step" : undefined}
-                  className={`border-r-thin border-border px-1 py-2 last:border-r-0 ${isActive ? "bg-primary text-primary-foreground" : isComplete ? "bg-muted text-foreground" : "text-muted-foreground"}`}
+                  className={`min-w-0 flex-1 border-b-thick pb-2 ${isActive ? "border-primary text-foreground" : "border-border text-muted-foreground"}`}
                 >
-                  <span className="mr-1">{isComplete ? "✓" : index + 1}</span>{label}
+                  <span className={`mr-1 ${isActive ? "text-foreground" : "text-muted-foreground"}`}>{isComplete ? "✓" : index + 1}</span>{label}
                 </li>
               );
             })}
