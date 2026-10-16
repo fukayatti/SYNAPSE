@@ -20,13 +20,14 @@ import { Ticket, Plus, Copy, Ban } from "lucide-react";
 // 「知り合い限定」で使える割引を、サークルが自分たちで作れるようにする画面。
 // URL(slug)は推測不能なランダム文字列、合言葉は口頭ではなくテキストで一緒に伝える運用を
 // 想定しているため、共有用の文面(URL+合言葉)をまとめてコピーできるボタンを用意している。
-// kind (2026-09-16 フィードバック対応): 金額引き(対象メニュー限定) / トッピング無料 の2種類。
+// kind (2026-10-16): 金額引き(対象メニュー限定) / トッピング無料 / カート全体の率引き。
 
 const initialForm = {
   kind: "menu_discount" as CouponKind,
   title: "",
   passphrase: "",
   discountAmount: 100,
+  discountPercent: 10,
   // 空欄 = 使用回数無制限 (2026-09-16 フィードバック対応)。
   maxRedemptions: 5 as number | "",
   menuIds: [] as string[],
@@ -71,7 +72,7 @@ function CouponsContent() {
   const toppingName = (toppingId: string) => toppings?.find((t) => t.id === toppingId)?.name ?? toppingId;
 
   // トッピングはメニューに紐付いていないと、客側の注文画面に選択肢として出てこない
-  // (メニュー管理の「トッピング対応設定」で紐付けが必要)。紐付いていないトッピングを対象にした
+  // (メニュー編集画面の「対応トッピング」で紐付けが必要)。紐付いていないトッピングを対象にした
   // free_topping クーポンは誰にも使われずに終わるため、作成前に気付けるよう警告する。
   const reachableToppingIds = new Set((menus ?? []).flatMap((m) => m.toppings ?? []).map((t) => t.id));
 
@@ -100,12 +101,14 @@ function CouponsContent() {
       const input: CreateCouponInput =
         form.kind === "menu_discount"
           ? { kind: "menu_discount", ...base, discountAmount: Math.max(1, form.discountAmount), menuIds: form.menuIds }
-          : {
+          : form.kind === "free_topping"
+            ? {
               kind: "free_topping",
               ...base,
               freeUnits: form.freeUnits === "" ? undefined : form.freeUnits,
               toppingIds: form.toppingIds,
-            };
+            }
+            : { kind: "cart_percentage", ...base, discountPercent: Math.min(100, Math.max(1, form.discountPercent)) };
       return couponApi.create(circleId, input);
     },
     onSuccess: () => {
@@ -145,7 +148,9 @@ function CouponsContent() {
     !!form.passphrase.trim() &&
     (form.kind === "menu_discount"
       ? form.discountAmount >= 1 && form.menuIds.length > 0
-      : form.toppingIds.length > 0);
+      : form.kind === "free_topping"
+        ? form.toppingIds.length > 0
+        : form.discountPercent >= 1 && form.discountPercent <= 100);
 
   if (isLoading) {
     return (
@@ -220,9 +225,11 @@ function CouponsContent() {
                   <CardContent className="space-y-2 text-xs">
                     <div className="flex flex-wrap gap-x-6 gap-y-1 text-muted-foreground">
                       <span>
-                        種類: <span className="text-foreground font-bold">{c.kind === "free_topping" ? "トッピング無料" : "金額引き"}</span>
+                        種類: <span className="text-foreground font-bold">{c.kind === "free_topping" ? "トッピング無料" : c.kind === "cart_percentage" ? "カート全体の割引" : "金額引き"}</span>
                       </span>
-                      {c.kind === "menu_discount" ? (
+                      {c.kind === "cart_percentage" ? (
+                        <span>割引率: <span className="text-foreground font-bold">{c.discountPercent}%</span></span>
+                      ) : c.kind === "menu_discount" ? (
                         <span>割引額: <span className="text-foreground font-bold">¥{c.discountAmount?.toLocaleString()}</span></span>
                       ) : (
                         <span>無料個数: <span className="text-foreground font-bold">{c.freeUnits ?? "無制限"}</span></span>
@@ -230,19 +237,19 @@ function CouponsContent() {
                       <span>使用状況: <span className="text-foreground font-bold">{c.redeemedCount} / {c.maxRedemptions ?? "無制限"}</span></span>
                       {c.expiresAt && <span>期限: {new Date(c.expiresAt).toLocaleString("ja-JP")}</span>}
                     </div>
-                    <p className="text-muted-foreground">
+                    {c.kind !== "cart_percentage" && <p className="text-muted-foreground">
                       対象{c.kind === "free_topping" ? "トッピング" : "メニュー"}:{" "}
                       <span className="text-foreground font-bold">
                         {c.kind === "free_topping" ? c.toppingIds.map(toppingName).join("、") : c.menuIds.map(menuName).join("、")}
                       </span>
-                    </p>
+                    </p>}
                     {c.kind === "free_topping" && c.toppingIds.some((id) => !reachableToppingIds.has(id)) && (
                       <p className="text-warning">
                         対象トッピングがどのメニューにも紐付いていないため、お客様は選べず使えません。
                         <Link to="/circle/dashboard/menu" className="underline hover:text-foreground">
                           メニュー管理
                         </Link>
-                        の「トッピング対応設定」で紐付けてください。
+                        から対象メニューを編集し、「対応トッピング」で紐付けてください。
                       </p>
                     )}
                     <div className="flex flex-wrap items-center gap-2 pt-1">
@@ -290,6 +297,7 @@ function CouponsContent() {
               [
                 ["menu_discount", "金額引き"],
                 ["free_topping", "トッピング無料"],
+                ["cart_percentage", "カート全体％引き"],
               ] as [CouponKind, string][]
             ).map(([kind, label]) => (
               <button
@@ -338,7 +346,7 @@ function CouponsContent() {
                 setForm({ ...form, discountAmount: Number.isNaN(n) ? 0 : Math.max(0, n) });
               }}
             />
-          ) : (
+          ) : form.kind === "free_topping" ? (
             <FormField
               id="coupon-free-units"
               label="無料にする個数 (空欄=無制限)"
@@ -354,6 +362,19 @@ function CouponsContent() {
                 }
                 const n = parseInt(raw);
                 setForm({ ...form, freeUnits: Number.isNaN(n) ? "" : Math.max(1, n) });
+              }}
+            />
+          ) : (
+            <FormField
+              id="coupon-discount-percent"
+              label="割引率 (%)"
+              type="number"
+              min={1}
+              max={100}
+              value={form.discountPercent}
+              onChange={(e) => {
+                const n = parseInt(e.target.value);
+                setForm({ ...form, discountPercent: Number.isNaN(n) ? 0 : Math.min(100, Math.max(0, n)) });
               }}
             />
           )}
@@ -414,7 +435,7 @@ function CouponsContent() {
               </div>
             )}
           </div>
-        ) : (
+        ) : form.kind === "free_topping" ? (
           <div className="space-y-1.5">
             <p className="text-xs font-bold uppercase">対象トッピング *</p>
             <p className="text-[11px] text-muted-foreground">
@@ -436,7 +457,7 @@ function CouponsContent() {
                 <Link to="/circle/dashboard/menu" className="underline hover:text-foreground">
                   メニュー管理
                 </Link>
-                の「トッピング対応設定」で紐付けてから作成してください。
+                から対象メニューを編集し、「対応トッピング」で紐付けてから作成してください。
               </p>
             ) : (
               <div className="flex flex-wrap gap-1.5">
@@ -462,6 +483,10 @@ function CouponsContent() {
                   })}
               </div>
             )}
+          </div>
+        ) : (
+          <div className="border-thick border-border bg-muted/20 p-3 text-xs leading-relaxed">
+            カートに含まれる商品小計全体から割引します。税・送料は対象外です。
           </div>
         )}
 
