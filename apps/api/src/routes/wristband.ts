@@ -6,7 +6,6 @@ import { nanoid } from "nanoid";
 import { hasPermission } from "../utils/auth";
 import { zBody, zQuery } from "../z-validator";
 import { apiError } from "../http-error";
-import { audit } from "../utils/sudo";
 import type { AppEnv } from "../types";
 import { JAPANESE_ALLERGENS_28 } from "@fesflow/config/allergens";
 
@@ -614,16 +613,7 @@ wristbandRoutes.patch(
 
     await db.update(wristband).set(patch).where(eq(wristband.id, id));
 
-    // 監査ログ
-    const auth = c.get("auth");
-    const session = await auth.api.getSession({ headers: c.req.raw.headers });
-    if (session && session.user) {
-      await audit(c, {
-        actorEmail: session.user.email,
-        action: "impersonated_write",
-        summary: `Updated wristband ${id} status to ${status} and userId to ${userId || "unchanged"}`,
-      });
-    }
+    // 2026-10-16: 監査記録は認証済み変更を共通ミドルウェアで記録し、対象IDを含む個別ログを廃止する。
 
     return c.json({ success: true });
   }
@@ -685,16 +675,7 @@ wristbandRoutes.patch(
 
     await db.update(eventUser).set(patch).where(eq(eventUser.id, userId));
 
-    // 監査ログ
-    const auth = c.get("auth");
-    const session = await auth.api.getSession({ headers: c.req.raw.headers });
-    if (session && session.user) {
-      await audit(c, {
-        actorEmail: session.user.email,
-        action: "impersonated_write",
-        summary: `Updated visitor user profile for user ID ${userId}`,
-      });
-    }
+    // 2026-10-16: 監査記録は認証済み変更を共通ミドルウェアで一元化する。
 
     return c.json({ success: true });
   }

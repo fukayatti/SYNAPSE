@@ -5,7 +5,7 @@ import { Context } from "hono";
 import { ROLE_PERMISSIONS, type Permission } from "@fesflow/db";
 import { effectiveCircleRole } from "@fesflow/config";
 import type { AppEnv } from "../types";
-import { getImpersonation, betterAuthSessionId, audit } from "./sudo";
+import { getImpersonation, betterAuthSessionId } from "./sudo";
 
 // 2026-07-08 (Phase5): db/auth はモジュール Proxy ではなく、index.ts の middleware で
 // c.set("db"/"auth", ...) された実体を c.get() で明示的に受け取る (ALS+Proxy 撤去)。
@@ -196,19 +196,7 @@ export async function hasPermission(
     } else if (imp.role === "circle_manager" || imp.role === "circle_admin" || imp.role === "circle_staff") {
       allowed = !!imp.circleId && (!circleId || imp.circleId === circleId);
     }
-    // なりすまし中の変更操作 (write/delete) は監査ログに記録する。
-    if (allowed && /:(write|delete)$/.test(requiredPermission)) {
-      await audit(c, {
-        actorEmail: session.user.email.toLowerCase(),
-        action: "impersonated_write",
-        asRole: imp.role,
-        eventId: imp.eventId,
-        circleId: imp.circleId,
-        method: c.req.method,
-        path: new URL(c.req.url).pathname,
-        summary: requiredPermission,
-      });
-    }
+    // 2026-10-16: 権限判定と記録を分け、API共通ミドルウェアで成功した変更だけを一度記録する。
     return allowed;
   }
 

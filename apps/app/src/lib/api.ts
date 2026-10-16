@@ -1726,7 +1726,10 @@ export const adminApi = {
   impersonate: (data: { role: "event_manager" | "circle_manager" | "circle_staff"; eventId?: string; circleId?: string; label?: string }) =>
     fetchApi<ImpersonationStatus>("/api/admin/impersonate", { method: "POST", body: data }),
   impersonateStop: () => fetchApi<{ success: boolean }>("/api/admin/impersonate/stop", { method: "POST" }),
-  listAudit: () => fetchApi<AuditEntry[]>("/api/admin/audit"),
+  listAudit: (params: { limit?: number; offset?: number } = {}) => {
+    const query = new URLSearchParams({ limit: String(params.limit ?? 50), offset: String(params.offset ?? 0) });
+    return fetchApi<{ rows: AuditEntry[]; total: number; limit: number; offset: number }>(`/api/admin/audit?${query}`);
+  },
 };
 
 // 抽選 (2026-07-12)

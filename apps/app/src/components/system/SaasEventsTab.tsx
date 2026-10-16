@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { adminApi, type AdminEvent, type BillingStatus } from "@/lib/api";
@@ -14,7 +14,7 @@ import { FormField, FormSelect, FormSubmitButton } from "@/components/ui/FormFie
 import { Label } from "@/components/ui/label";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { toast } from "sonner";
-import { Calendar, Trash2, Settings2, Save, Eye, Search, Coins, Plus, RotateCcw } from "lucide-react";
+import { Calendar, Trash2, Settings2, Save, Eye, Search, Coins, Plus, RotateCcw, ChevronLeft, ChevronRight } from "lucide-react";
 
 // SaaS 運営: イベント/契約管理 (2026-07-12 Phase C / 2026-07-15 契約金額・入金履歴で拡充)。
 // 全テナント(イベント)の契約状態・サークル上限・契約金額・入金履歴を手動で管理する
@@ -26,6 +26,7 @@ const STATUS_LABELS: Record<BillingStatus, string> = {
   unpaid: "未払い",
 };
 const STATUS_FILTERS: ("all" | BillingStatus)[] = ["all", "active", "trial", "unpaid", "suspended"];
+const PAGE_SIZE = 20;
 
 const yen = (n: number) => `¥${(n ?? 0).toLocaleString()}`;
 const toDateInput = (iso: string | null) => (iso ? iso.slice(0, 10) : "");
@@ -35,7 +36,9 @@ export function SaasEventsTab() {
   const navigate = useNavigate();
   const [editing, setEditing] = useState<AdminEvent | null>(null);
   const [pendingDelete, setPendingDelete] = useState<AdminEvent | null>(null);
+  const [pendingPaymentDelete, setPendingPaymentDelete] = useState<string | null>(null);
   const [form, setForm] = useState({
+    eventName: "",
     plan: "free",
     maxCircles: 1,
     billingStatus: "active" as BillingStatus,
@@ -45,11 +48,14 @@ export function SaasEventsTab() {
   });
   const [impersonatingId, setImpersonatingId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const [page, setPage] = useState(0);
   const [statusFilter, setStatusFilter] = useState<"all" | BillingStatus>("all");
   const [deletionFilter, setDeletionFilter] = useState<"active" | "deleted">("active");
 
   // 入金の追加フォーム (編集中テナント向け)
   const [pay, setPay] = useState({ amount: 0, method: "銀行振込", date: "", note: "" });
+
+  useEffect(() => setPage(0), [search, statusFilter, deletionFilter]);
 
   // 「このイベントとして表示」= 昇格(sudo)を確保してから event_manager になりすまし、
   // イベント管理画面へ遷移する。これが super_admin がテナント内容を見る唯一の経路 (Phase E)。
@@ -150,12 +156,14 @@ export function SaasEventsTab() {
       queryClient.invalidateQueries({ queryKey: ["contractPayments", editing?.id] });
       queryClient.invalidateQueries({ queryKey: ["adminEvents"] });
       toast.success("入金記録を削除しました");
+      setPendingPaymentDelete(null);
     },
     onError: (e: any) => toast.error(e.message || "削除に失敗しました"),
   });
 
   const openEdit = (e: AdminEvent) => {
     setForm({
+      eventName: e.eventName,
       plan: e.plan,
       maxCircles: e.maxCircles,
       billingStatus: e.billingStatus,
@@ -168,10 +176,11 @@ export function SaasEventsTab() {
   };
 
   const saveContract = () => {
-    if (!editing) return;
+    if (!editing || !form.eventName.trim()) return;
     update.mutate({
       id: editing.id,
       data: {
+        eventName: form.eventName.trim(),
         plan: form.plan,
         maxCircles: form.maxCircles,
         billingStatus: form.billingStatus,
@@ -204,6 +213,8 @@ export function SaasEventsTab() {
     },
     { contracted: 0, received: 0, attention: 0 },
   );
+  // 2026-10-16: 絞り込み結果の集計は全件を維持し、表示行だけをページ分割する。
+  const pageEvents = shown.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
 
   if (isLoading) {
     return (
@@ -224,15 +235,15 @@ export function SaasEventsTab() {
           契約管理 ({shown.length})
         </h2>
         <p className="text-[11px] text-muted-foreground font-mono mt-1">
-          テナント横断の契約管理。プラン・上限・状態・契約金額・入金履歴を手動で管理します(内容は開けません)。
+          テナント横断の契約管理。契約金額は登録額の合計、入金合計は入金台帳の累計です。請求周期は現状管理していません。
         </p>
       </div>
 
       {/* サマリ */}
       <div className="grid grid-cols-3 gap-2">
         {[
-          { label: "契約金額 (表示中)", value: yen(summary.contracted), cls: "" },
-          { label: "入金合計 (表示中)", value: yen(summary.received), cls: "" },
+          { label: "登録契約額合計 (表示中)", value: yen(summary.contracted), cls: "" },
+          { label: "入金台帳累計 (表示中)", value: yen(summary.received), cls: "" },
           { label: "要対応 (未払い/停止)", value: `${summary.attention}`, cls: summary.attention > 0 ? "text-error" : "" },
         ].map((s) => (
           <div key={s.label} className="border-thick border-border bg-background p-3">
@@ -285,7 +296,7 @@ export function SaasEventsTab() {
         <EmptyState icon={Calendar} message="該当するテナントがありません" />
       ) : (
         <div className="space-y-2">
-          {shown.map((e) => (
+          {pageEvents.map((e) => (
             <div
               key={e.id}
               className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-3 border-thick border-border bg-background text-[12px] font-mono"
@@ -312,9 +323,9 @@ export function SaasEventsTab() {
                   <span className="border-thin border-border px-1.5 py-0.5">
                     {e.circleCount}/{e.maxCircles} サークル
                   </span>
-                  {e.billingAmount > 0 && (
-                    <span className="border-thin border-border px-1.5 py-0.5" title="契約金額 / 入金合計">
-                      {yen(e.paidTotal)} / {yen(e.billingAmount)}
+                  {(e.billingAmount > 0 || e.paidTotal > 0) && (
+                    <span className="border-thin border-border px-1.5 py-0.5" title="入金台帳の累計 / 登録済み契約金額">
+                      入金 {yen(e.paidTotal)} / 契約 {yen(e.billingAmount)}
                     </span>
                   )}
                   {e.nextBillingAt && (
@@ -363,14 +374,30 @@ export function SaasEventsTab() {
         </div>
       )}
 
+      {shown.length > PAGE_SIZE && (
+        <div className="flex items-center justify-between gap-3">
+          <Button variant="outline" size="sm" disabled={page === 0} onClick={() => setPage((p) => Math.max(0, p - 1))}><ChevronLeft className="mr-1 h-4 w-4" />前へ</Button>
+          <span className="font-mono text-[10px] text-muted-foreground">{page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, shown.length)} / {shown.length} 件</span>
+          <Button variant="outline" size="sm" disabled={(page + 1) * PAGE_SIZE >= shown.length} onClick={() => setPage((p) => p + 1)}>次へ<ChevronRight className="ml-1 h-4 w-4" /></Button>
+        </div>
+      )}
+
       {/* 契約編集モーダル */}
       <Modal
         isOpen={!!editing}
         onClose={() => setEditing(null)}
         title={editing ? `[契約管理: ${editing.eventName}]` : ""}
-        subtitle="プラン・上限・状態・契約金額・入金履歴を手動で管理します。"
+        subtitle="イベント名・プラン・上限・契約・入金履歴を管理します。"
       >
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <FormField
+            id="eventName"
+            label="イベント名"
+            value={form.eventName}
+            onChange={(e) => setForm({ ...form, eventName: e.target.value })}
+            required
+            maxLength={120}
+          />
           <FormField
             id="plan"
             label="プラン"
@@ -398,7 +425,7 @@ export function SaasEventsTab() {
           </FormSelect>
           <FormField
             id="billingAmount"
-            label="契約金額 (円)"
+            label="契約金額 (円・契約単位)"
             type="number"
             value={String(form.billingAmount)}
             onChange={(e) => setForm({ ...form, billingAmount: Math.max(0, Number(e.target.value) || 0) })}
@@ -425,7 +452,7 @@ export function SaasEventsTab() {
           />
         </div>
 
-        <FormSubmitButton onClick={saveContract} isPending={update.isPending} icon={Save}>
+        <FormSubmitButton onClick={saveContract} disabled={!form.eventName.trim()} isPending={update.isPending} icon={Save}>
           契約を更新
         </FormSubmitButton>
 
@@ -502,7 +529,8 @@ export function SaasEventsTab() {
                   <button
                     className="p-1 text-destructive hover:bg-muted shrink-0"
                     title="この入金記録を削除"
-                    onClick={() => removePayment.mutate(p.id)}
+                    aria-label={`${yen(p.amount)}の入金記録を削除`}
+                    onClick={() => setPendingPaymentDelete(p.id)}
                   >
                     <Trash2 className="h-3.5 w-3.5" />
                   </button>
@@ -522,6 +550,15 @@ export function SaasEventsTab() {
         confirmLabel="削除する"
         onConfirm={() => pendingDelete && del.mutate(pendingDelete.id)}
         onCancel={() => setPendingDelete(null)}
+      />
+      <ConfirmDialog
+        isOpen={!!pendingPaymentDelete}
+        title="入金記録を削除しますか?"
+        description="選択した入金記録を台帳から削除します。監査ログには削除操作が残ります。"
+        confirmLabel="記録を削除"
+        isPending={removePayment.isPending}
+        onConfirm={() => pendingPaymentDelete && removePayment.mutate(pendingPaymentDelete)}
+        onCancel={() => setPendingPaymentDelete(null)}
       />
     </div>
   );
