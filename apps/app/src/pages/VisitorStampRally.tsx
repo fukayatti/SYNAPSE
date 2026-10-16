@@ -53,11 +53,11 @@ export default function VisitorStampRallyPage() {
 
   return (
     <main className="max-w-2xl mx-auto p-4 pb-24 space-y-4">
-      <button onClick={() => navigate("/visitor/mypage")} className="text-xs uppercase underline flex items-center gap-1">
-        <ArrowLeft className="h-4 w-4" />マイページに戻る
+      <button onClick={() => navigate("/visitor/mypage")} className="min-h-11 inline-flex items-center gap-1 text-xs font-bold underline underline-offset-2 hover:text-info">
+        <ArrowLeft className="h-4 w-4" aria-hidden="true" />マイQRに戻る
       </button>
       <header className="border-b-thick border-border pb-3">
-        <h1 className="text-xl font-black uppercase flex items-center gap-2"><Ticket className="h-5 w-5" />スタンプラリー</h1>
+        <h1 className="text-xl font-black uppercase flex items-center gap-2"><Ticket className="h-5 w-5" aria-hidden="true" />スタンプラリー</h1>
         <p className="text-xs text-muted-foreground mt-1">注文を受け取ると店舗にスタンプが付き、条件を達成すると景品と交換できます。</p>
       </header>
 

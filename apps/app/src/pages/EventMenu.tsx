@@ -160,7 +160,7 @@ function EventMenuContent({
             <div className="text-[10px] font-black uppercase tracking-widest opacity-80">
               出店メニュー
             </div>
-            <h1 className="font-headline text-2xl sm:text-3xl font-black uppercase tracking-tight truncate">
+            <h1 className="break-words font-headline text-2xl leading-tight sm:text-3xl font-black uppercase tracking-tight">
               {eventLoading ? "読み込み中…" : event?.eventName || "イベント"}
             </h1>
             {event?.description && (
@@ -280,7 +280,7 @@ function EventMenuContent({
               to="/visitor/mypage"
               className="inline-flex items-center gap-1 text-[11px] font-black uppercase tracking-wider underline hover:text-accent"
             >
-              マイページ (注文履歴・スタンプ)
+              マイQRを見る
               <ChevronRight className="h-3.5 w-3.5" />
             </Link>
           </div>

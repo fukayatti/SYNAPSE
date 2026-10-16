@@ -5,7 +5,7 @@ import { PRODUCT_NAME } from "@fesflow/config";
 import { useVisitor } from "@/hooks/useVisitor";
 
 /**
- * トップ / 入口ポータル (2026-07-11 来場者ファーストに再構成)。
+ * トップ / 入口ポータル (2026-10-16 来場者の主要操作を最初に選べるよう整理)。
  * apex ドメインのトップ。従来は来場者・スタッフ・イベント管理の3入口を対等に並べていたが、
  * 実際の主対象は来場者なので、来場者導線 (メニュー閲覧 / マイページ) と「初めての方へ」ガイドを
  * 主役にし、スタッフ・管理者の入口は末尾に控えめに置く。
@@ -16,46 +16,51 @@ export default function Home() {
   const { isEntered } = useVisitor();
 
   return (
-    <div className="mx-auto max-w-2xl px-4 py-10 sm:py-12 font-mono">
-      <div className="space-y-2 mb-6">
+    <div className="mx-auto max-w-2xl space-y-7 px-4 py-8 font-mono sm:py-10">
+      <div className="space-y-2">
         <span className="text-[11px] font-black uppercase tracking-widest text-muted-foreground">
           {PRODUCT_NAME.toUpperCase()}
         </span>
         <h1 className="font-headline text-2xl sm:text-3xl md:text-4xl font-black uppercase tracking-tight leading-tight">
-          FesFlow へようこそ
+          文化祭を楽しもう
         </h1>
         <p className="text-sm text-muted-foreground leading-relaxed">
-          学園祭の模擬店メニューを見て、事前注文やマイQRが使えるモバイルサービスです。
+          お店のメニューを見たり、注文や来場用QRを確認できます。
         </p>
       </div>
 
-      {/* 初めての方へ: 3ステップで使い方を提示する (初見でも操作イメージが湧くように) */}
-      <div className="border-[3px] border-border bg-muted/30 p-4 sm:p-5 mb-6">
-        <div className="text-[11px] font-black uppercase tracking-[2px] text-muted-foreground mb-3">
-          初めての方へ / HOW IT WORKS
-        </div>
-        <ol className="grid gap-3 sm:grid-cols-3">
-          <GuideStep n={1} icon={UtensilsCrossed} title="メニューを見る" desc="スタッフから案内されたモバイルオーダーURLで閲覧できます。" />
-          <GuideStep n={2} icon={QrCode} title="入場する" desc="受付でリストバンドを受け取るか、お持ちのQRを読み取って入場。" />
-          <GuideStep n={3} icon={ShoppingBag} title="事前注文・マイQR" desc="入場すると事前注文やマイQRの提示が使えます。" />
-        </ol>
-      </div>
-
-      {/* 来場者の主導線 */}
-      <div className="grid gap-4">
+      {/* 2026-10-16: ホームの説明文に埋もれていた出店一覧を最初の操作として明示する。 */}
+      <section aria-label="来場者メニュー" className="grid gap-3">
+        <PortalCard
+          icon={UtensilsCrossed}
+          title="お店を探す"
+          desc="出店一覧からメニューを見て、事前注文できます。"
+          cta="出店一覧を見る"
+          onClick={() => navigate("/visitor/events")}
+          primary
+        />
         <PortalCard
           icon={QrCode}
-          title="マイページ / マイQR"
+          title="マイQR"
           desc={isEntered
-            ? "あなたのマイQR・リストバンド状態・注文履歴を確認します。"
-            : "入場済みの方向け。マイQRの提示や注文履歴の確認ができます。"}
-          cta={isEntered ? "マイページを開く" : "マイページへ"}
+            ? "来場者番号と、受付や注文で提示するQRを確認します。"
+            : "リストバンドを登録した後、来場用QRを確認できます。"}
+          cta="マイQRを開く"
           onClick={() => navigate("/visitor/mypage")}
         />
-      </div>
+      </section>
+
+      <section aria-labelledby="how-it-works-title" className="space-y-3 border-t-thin border-border pt-4">
+        <h2 id="how-it-works-title" className="text-xs font-black uppercase tracking-widest text-muted-foreground">はじめての方へ</h2>
+        <ol className="grid gap-3 sm:grid-cols-3">
+          <GuideStep n={1} icon={UtensilsCrossed} title="お店を探す" desc="出店一覧からメニューを確認します。" />
+          <GuideStep n={2} icon={QrCode} title="受付で登録" desc="リストバンドを受け取り、QRを読み取ります。" />
+          <GuideStep n={3} icon={ShoppingBag} title="注文・受け取り" desc="注文後、呼び出し番号を確認して受け取ります。" />
+        </ol>
+      </section>
 
       {/* スタッフ・管理者の入口 (来場者導線と分離して末尾に控えめに配置) */}
-      <div className="mt-8 border-t-[3px] border-border pt-4">
+      <div className="border-t-thick border-border pt-4">
         <div className="text-[10px] font-black uppercase tracking-[2px] text-muted-foreground mb-2">
           スタッフ・管理者の方
         </div>

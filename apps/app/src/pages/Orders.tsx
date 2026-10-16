@@ -126,7 +126,7 @@ export default function OrdersPage() {
     <div className="max-w-3xl mx-auto p-3 sm:p-4 space-y-4 sm:space-y-6 pb-24 font-mono">
       <button
         onClick={() => navigate("/visitor/mypage")}
-        className="text-xs uppercase tracking-widest underline hover:text-info flex items-center gap-1"
+        className="min-h-11 inline-flex items-center gap-1 text-xs font-bold underline underline-offset-2 hover:text-info"
       >
         <ArrowLeft className="h-4 w-4" />
         マイQRに戻る
@@ -135,7 +135,7 @@ export default function OrdersPage() {
       <div className="border-b-thick border-border pb-4">
         <h1 className="text-xl sm:text-2xl md:text-3xl font-black uppercase tracking-tight leading-tight flex items-center gap-2">
           <Receipt className="h-6 w-6 shrink-0" />
-          [注文履歴]
+          注文履歴
         </h1>
         <p className="text-[10px] sm:text-xs uppercase tracking-widest text-muted-foreground mt-1">
           過去の注文と、受取待ちの事前注文を確認できます
