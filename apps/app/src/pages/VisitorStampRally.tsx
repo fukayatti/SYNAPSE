@@ -64,24 +64,38 @@ export default function VisitorStampRallyPage() {
 
       {!query.isError && data?.enabled && data.areas.length > 0 && (
         <>
-          <section className={`border-heavy border-border p-3 space-y-2 ${data.eligible ? "bg-primary text-primary-foreground" : "bg-muted"}`} aria-live="polite">
+          <section className={`border-heavy border-border p-3 space-y-2 ${data.eligible && data.remainingCount > 0 ? "bg-primary text-primary-foreground" : "bg-muted"}`} aria-live="polite">
             <div className="flex items-center justify-between gap-3">
               <div className="min-w-0">
-                <h2 className="text-sm font-black">{data.redeemedAt ? "景品交換済み" : data.eligible ? "景品交換できます" : "景品交換まであと少し"}</h2>
-                <p className={`text-xs mt-1 ${data.eligible ? "text-primary-foreground/85" : "text-muted-foreground"}`}>
+                <h2 className="text-sm font-black">
+                  {data.familyMemberCount === 0
+                    ? "リストバンドを登録してください"
+                    : data.remainingCount === 0
+                      ? "家族の交換枠を利用済み"
+                      : data.eligible
+                        ? "景品交換できます"
+                        : "景品交換まであと少し"}
+                </h2>
+                <p className={`text-xs mt-1 ${data.eligible && data.remainingCount > 0 ? "text-primary-foreground/85" : "text-muted-foreground"}`}>
                   {data.legacy ? "エリアごとの条件で達成判定" : `利用店舗 ${stampedCount} / ${requiredCount} 店舗`}
                 </p>
               </div>
               <span className="text-xl font-black tabular-nums shrink-0">{data.legacy ? (data.eligible ? "達成" : "—") : <>{Math.min(stampedCount, requiredCount)}<span className="text-xs"> / {requiredCount}</span></>}</span>
             </div>
-            {data.eligible && (
+            <div className="grid grid-cols-3 gap-2 border-t-thin border-current/40 pt-2 text-center">
+              <div><p className="text-[10px] opacity-80">家族</p><p className="font-black tabular-nums">{data.familyMemberCount}人</p></div>
+              <div><p className="text-[10px] opacity-80">交換済み</p><p className="font-black tabular-nums">{data.redeemedCount}個</p></div>
+              <div><p className="text-[10px] opacity-80">あと交換できる数</p><p className="font-black tabular-nums">{data.remainingCount}個</p></div>
+            </div>
+            {data.eligible && data.remainingCount > 0 && (
               <div className="border-t-thin border-current/40 pt-2 space-y-1">
-                <p className="font-bold text-sm">{data.rewardTitle || "景品交換"}</p>
+                <p className="font-bold text-sm">交換できる景品</p>
+                <p className="text-xs">{data.rewards.map((reward) => reward.name).join("・")}</p>
                 {data.redemptionLocation && <p className="text-xs leading-relaxed whitespace-pre-wrap">{data.redemptionLocation}</p>}
-                <p className="text-[10px] opacity-80">景品交換場所でこの画面を提示してください。</p>
-                {data.redeemedAt && <p className="text-[10px]">交換記録: {dateLabel(data.redeemedAt)}</p>}
+                <p className="text-[10px] opacity-80">景品交換所でこの画面を提示してください。</p>
               </div>
             )}
+            {data.redeemedAt && <p className="border-t-thin border-current/40 pt-2 text-[10px]">最終交換記録: {dateLabel(data.redeemedAt)}</p>}
             {rulesUrl && (
               <a href={rulesUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-[11px] underline underline-offset-2">
                 ルールを確認 <ExternalLink className="h-3 w-3" />

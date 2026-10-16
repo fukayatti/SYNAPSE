@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { z } from "zod";
-import { and, eq, inArray, isNull, ne, or } from "drizzle-orm";
+import { and, avg, count, desc, eq, inArray, isNull, ne, or } from "drizzle-orm";
 import { circle, circleVisit, eventUser, order, review, wristband, type DB } from "@fesflow/db";
 import { zBody } from "../z-validator";
 import { apiError } from "../http-error";
@@ -25,7 +25,7 @@ async function resolveVisitor(db: DB, code: string) {
   return users[0] ?? null;
 }
 
-// 2026-09-27: 来場者には自分の利用先と投稿状態だけを返す。レビュー本文一覧は管理APIに限定する。
+// 2026-10-16: 利用候補と自身の投稿状態はこのAPIで返し、店舗集計と匿名レビュー一覧は別APIに分ける。
 reviewRoutes.get("/visitor/:code", async (c) => {
   const db = c.get("db");
   const visitor = await resolveVisitor(db, c.req.param("code"));
@@ -53,6 +53,48 @@ reviewRoutes.get("/visitor/:code", async (c) => {
     circleName: item.name,
     review: reviewByCircle.get(item.id) ?? null,
   })));
+});
+
+// 2026-10-16: 店舗別の比較用に、来場者のイベント内にある有効店舗だけを平均評価と件数で返す。
+reviewRoutes.get("/visitor/:code/stores", async (c) => {
+  const db = c.get("db");
+  const visitor = await resolveVisitor(db, c.req.param("code"));
+  if (!visitor) return c.json([]);
+
+  const rows = await db.select({
+    circleId: circle.id,
+    circleName: circle.name,
+    averageRating: avg(review.rating),
+    reviewCount: count(review.id),
+  })
+    .from(circle)
+    .leftJoin(review, eq(review.circleId, circle.id))
+    .where(and(eq(circle.eventId, visitor.eventId), isNull(circle.deletedAt)))
+    .groupBy(circle.id)
+    .orderBy(circle.name);
+
+  return c.json(rows.map((row) => ({
+    ...row,
+    averageRating: row.averageRating == null ? null : Number(row.averageRating),
+  })));
+});
+
+reviewRoutes.get("/visitor/:code/stores/:circleId", async (c) => {
+  const db = c.get("db");
+  const visitor = await resolveVisitor(db, c.req.param("code"));
+  if (!visitor) return c.json([]);
+  const circleId = c.req.param("circleId");
+  const store = await db.select({ id: circle.id }).from(circle).where(and(
+    eq(circle.id, circleId), eq(circle.eventId, visitor.eventId), isNull(circle.deletedAt),
+  ));
+  if (!store[0]) return c.json([]);
+
+  // 2026-10-16: 店舗選択後は来場者同士で参考にできるレビューを匿名表示し、来場者IDや表示IDを公開しない。
+  const rows = await db.select({ rating: review.rating, comment: review.comment, createdAt: review.createdAt })
+    .from(review)
+    .where(eq(review.circleId, circleId))
+    .orderBy(desc(review.createdAt));
+  return c.json(rows);
 });
 
 reviewRoutes.post("/visitor/:code", zBody(z.object({

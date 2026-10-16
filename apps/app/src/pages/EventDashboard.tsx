@@ -233,6 +233,7 @@ export default function EventDashboard() {
           {activeTab === "wristbands" && (
             <WristbandsTab
               eventId={eventId}
+              hasPhysicalWristband={eventData?.hasPhysicalWristband}
             />
           )}
 

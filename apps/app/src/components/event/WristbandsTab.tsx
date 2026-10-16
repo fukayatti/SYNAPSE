@@ -25,6 +25,7 @@ import {
   FileUp,
 } from "lucide-react";
 import { toast } from "sonner";
+import { useUnsavedChanges } from "@/components/UnsavedNavigationGuard";
 import { QrScannerModal } from "@/components/pos/qr-scanner-modal";
 import { Modal } from "@/components/ui/Modal";
 import { QRCodeSVG } from "qrcode.react";
@@ -35,6 +36,7 @@ import { WristbandBatchHistory } from "@/components/event/WristbandBatchHistory"
 
 interface WristbandsTabProps {
   eventId: string;
+  hasPhysicalWristband?: boolean;
 }
 
 type VisitorFilters = {
@@ -58,7 +60,7 @@ const VISITOR_SORT_COLUMNS: { label: string; field: Exclude<VisitorSortField, "c
   { label: "バンド状態", field: "bandStatus" },
 ];
 
-export function WristbandsTab({ eventId }: WristbandsTabProps) {
+export function WristbandsTab({ eventId, hasPhysicalWristband = true }: WristbandsTabProps) {
   const queryClient = useQueryClient();
 
   // 検索・表示関連の状態
@@ -413,6 +415,34 @@ export function WristbandsTab({ eventId }: WristbandsTabProps) {
       String(editDisplayId) !== String(selectedUser.user.displayId ?? "") ||
       editUserStatus !== (selectedUser.user.status || "available"));
 
+  const saveProfile = async () => {
+    if (!selectedUser?.user) return;
+    if (editDisplayId === "") throw new Error("呼出IDを入力してください。");
+    await updateProfileMutation.mutateAsync({
+      userId: selectedUser.user.id,
+      nickname: editNickname.trim() || null,
+      favoriteDate: editFavoriteDate.trim() || null,
+      displayId: Number(editDisplayId),
+      status: editUserStatus,
+    });
+  };
+
+  // 2026-10-16: 来場者プロフィールの編集も画面遷移前に同じ保存処理へ接続する。
+  useUnsavedChanges({
+    isDirty: isDetailsModalOpen && isProfileDirty,
+    onSave: saveProfile,
+    onDiscard: () => {
+      if (selectedUser?.user) {
+        setEditNickname(selectedUser.user.nickname || "");
+        setEditFavoriteDate(selectedUser.user.favoriteDate || "");
+        setEditDisplayId(selectedUser.user.displayId ?? "");
+        setEditUserStatus(selectedUser.user.status || "available");
+      }
+      setIsDetailsModalOpen(false);
+      setSelectedUser(null);
+    },
+  });
+
   // 詳細編集モーダルを閉じる。未保存の変更があれば確認を挟み、破棄を選んだ場合のみ閉じる。
   const closeDetailsModal = () => {
     if (isProfileDirty && !window.confirm("保存していないプロフィールの変更があります。破棄して閉じますか？")) {
@@ -490,13 +520,25 @@ export function WristbandsTab({ eventId }: WristbandsTabProps) {
         </div>
       </div>
 
-      {/* 2026-10-02: 発行方法を先に二つの独立した領域で示し、スマホ発行と物理バンド取込を迷わず選べるようにする。 */}
+      {/* 2026-10-16: イベント設定を運用の基準にし、使わない物理バンド手順を隠して受付準備の迷いを減らす。 */}
       <section aria-labelledby="wristband-provisioning-title" className="space-y-3">
-        <h3 id="wristband-provisioning-title" className="text-xs font-bold uppercase tracking-wider">
-          来場者の登録方法を選択
-        </h3>
+        <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <h3 id="wristband-provisioning-title" className="text-xs font-bold uppercase tracking-wider">
+              来場者の登録・受付準備
+            </h3>
+            <p className="mt-1 text-[10px] text-muted-foreground">
+              {hasPhysicalWristband
+                ? "物理バンドを配布するか、スマートフォンで登録するかを選べます。"
+                : "このイベントはスマートフォンで受付します。セルフ登録QRを掲示するか、スタッフが個別発行してください。"}
+            </p>
+          </div>
+          <Badge variant="default" className="w-fit rounded-none border-thick border-border text-[10px] font-bold">
+            {hasPhysicalWristband ? "物理バンド利用あり" : "スマートフォン受付"}
+          </Badge>
+        </div>
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-          <Card className="rounded-none bg-background shadow-none border-thick border-border">
+          <Card className={`rounded-none bg-background shadow-none border-thick border-border ${hasPhysicalWristband ? "order-2" : "order-1 xl:col-span-2"}`}>
             <CardHeader className="p-4 border-b-thin border-border bg-info/5">
               <CardTitle className="flex items-center gap-2 text-xs font-bold uppercase">
                 <Smartphone className="h-4 w-4" />
@@ -539,7 +581,7 @@ export function WristbandsTab({ eventId }: WristbandsTabProps) {
             </CardContent>
           </Card>
 
-          <Card className="rounded-none bg-background shadow-none border-thick border-border">
+          {hasPhysicalWristband && <Card className="order-1 rounded-none bg-background shadow-none border-thick border-border">
             <CardHeader className="p-4 border-b-thin border-border bg-success/5">
               <CardTitle className="flex items-center gap-2 text-xs font-bold uppercase">
                 <IdCard className="h-4 w-4" />
@@ -593,7 +635,7 @@ export function WristbandsTab({ eventId }: WristbandsTabProps) {
                 onResume={(batch) => batchOperationMutation.mutate({ mode: "resume", batchId: batch.id })}
               />
             </CardContent>
-          </Card>
+          </Card>}
         </div>
       </section>
 
@@ -1448,19 +1490,7 @@ export function WristbandsTab({ eventId }: WristbandsTabProps) {
             {/* フッター: プロフィール保存を閉じるの隣に配置。保存せず離脱したい場合は「閉じる」で破棄して閉じる (2026-07-14) */}
             <div className="flex justify-end gap-2 pt-4 border-t border-border">
               <Button
-                onClick={() => {
-                  if (editDisplayId === "") {
-                    toast.error("呼出IDを入力してください");
-                    return;
-                  }
-                  updateProfileMutation.mutate({
-                    userId: selectedUser.user.id,
-                    nickname: editNickname.trim() || null,
-                    favoriteDate: editFavoriteDate.trim() || null,
-                    displayId: Number(editDisplayId),
-                    status: editUserStatus,
-                  });
-                }}
+                onClick={() => void saveProfile().catch(() => undefined)}
                 disabled={updateProfileMutation.isPending}
                 className="border-thick border-primary bg-primary text-primary-foreground hover:bg-background hover:text-foreground h-9 text-xs font-bold rounded-none shadow-none px-5 flex items-center justify-center gap-1"
               >

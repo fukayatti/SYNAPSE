@@ -1,6 +1,7 @@
 import { Ticket } from "lucide-react";
 import type { Event } from "@/lib/api";
 import { StampRallySettingsCard } from "@/components/event/StampRallySettingsCard";
+import { StampRallyUsageDashboard } from "@/components/event/StampRallyUsageDashboard";
 
 export function StampRallyTab({ eventId, event }: { eventId: string; event: Event }) {
   return (
@@ -14,6 +15,7 @@ export function StampRallyTab({ eventId, event }: { eventId: string; event: Even
         </p>
       </header>
       <StampRallySettingsCard eventId={eventId} event={event} />
+      <StampRallyUsageDashboard eventId={eventId} />
     </div>
   );
 }

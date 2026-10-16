@@ -11,6 +11,11 @@ interface UnsavedChangesDialogProps {
   onConfirm: () => void; // 保存して閉じる等のアクション
   onDiscard: () => void; // 破棄して閉じる
   onCancel: () => void;  // 編集に戻る
+  confirmLabel?: string;
+  discardLabel?: string;
+  cancelLabel?: string;
+  isPending?: boolean;
+  errorMessage?: string | null;
 }
 
 export function UnsavedChangesDialog({
@@ -19,7 +24,12 @@ export function UnsavedChangesDialog({
   description,
   onConfirm,
   onDiscard,
-  onCancel
+  onCancel,
+  confirmLabel = "保存して閉じる",
+  discardLabel = "保存せず閉じる",
+  cancelLabel = "入力を続ける",
+  isPending = false,
+  errorMessage,
 }: UnsavedChangesDialogProps) {
   // Escape は「編集に戻る」扱い (処理は useFocusTrap 側に統合)
   const focusTrapRef = useFocusTrap<HTMLDivElement>(isOpen, { onEscape: onCancel });
@@ -46,28 +56,32 @@ export function UnsavedChangesDialog({
           <p className="text-xs text-muted-foreground leading-[1.6]">
             {description}
           </p>
+          {errorMessage && <p className="text-xs text-destructive" role="alert">{errorMessage}</p>}
         </div>
 
         <div className="flex flex-col gap-2 pt-2">
           <Button
             onClick={onConfirm}
+            disabled={isPending}
             className="flex-1 h-10 border-thick border-primary bg-primary text-primary-foreground font-bold text-xs uppercase rounded-none hover:bg-background hover:text-foreground"
           >
-            [保存して閉じる]
+            [{confirmLabel}]
           </Button>
           <Button
             onClick={onDiscard}
+            disabled={isPending}
             variant="outline"
             className="flex-1 h-10 border-thick border-destructive bg-destructive text-destructive-foreground font-bold text-xs uppercase rounded-none hover:bg-background hover:text-destructive"
           >
-            [保存せず閉じる]
+            [{discardLabel}]
           </Button>
           <Button
             onClick={onCancel}
+            disabled={isPending}
             variant="outline"
             className="flex-1 h-10 border-thick border-border bg-background text-foreground font-bold text-xs uppercase rounded-none hover:bg-primary hover:text-primary-foreground"
           >
-            [入力を続ける]
+            [{cancelLabel}]
           </Button>
         </div>
       </div>

@@ -1,8 +1,9 @@
-import { useState, useEffect, type Dispatch, type SetStateAction } from "react";
+import { useState, useEffect, useRef, type Dispatch, type SetStateAction } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import type { SaveStatus } from "@/components/ui/FormField";
 import { handleApiErrorToast } from "@/lib/api-error";
+import { useUnsavedChanges } from "@/components/UnsavedNavigationGuard";
 
 // 2026-07-04: Circle/Menu/Topping/Staff/EventStaff の各 FormModal が
 // 「新規=作成 / 編集=onBlur 自動保存 / 未保存入力ありなら閉じる前に確認」という
@@ -52,10 +53,14 @@ export function useEntityForm<TForm extends Record<string, unknown>, TEntity>(
   // "saved"/"error" は次の自動保存が始まるまで表示を維持したいため、
   // updateMutation の isPending/isSuccess/isError だけでなく独自 state で保持する。
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
+  const lastSavedFormRef = useRef<TForm | null>(null);
+  const pendingUpdateRef = useRef<Promise<unknown> | null>(null);
 
   // モーダルを開くたび・対象エンティティが変わるたびにフォームを初期化する
   useEffect(() => {
-    setForm(entity && toForm ? toForm(entity) : emptyForm);
+    const initialForm = entity && toForm ? toForm(entity) : emptyForm;
+    setForm(initialForm);
+    lastSavedFormRef.current = entity ? initialForm : null;
     setIsConfirmOpen(false);
     // emptyForm はリテラルで毎回生成されるため依存に入れない
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -82,9 +87,10 @@ export function useEntityForm<TForm extends Record<string, unknown>, TEntity>(
       if (!entity || !update) throw new Error("No entity/updater for edit");
       return update(entity, data);
     },
-    onSuccess: () => {
+    onSuccess: (_result, variables) => {
       toast.success(messages.updateSuccess, { id: toastId });
       invalidate();
+      lastSavedFormRef.current = variables;
       setSaveStatus("saved");
     },
     onError: (err: any) => {
@@ -101,8 +107,20 @@ export function useEntityForm<TForm extends Record<string, unknown>, TEntity>(
   });
 
   const defaultHasChanged = () =>
-    entity && toForm ? JSON.stringify(form) !== JSON.stringify(toForm(entity)) : false;
+    entity && toForm
+      ? JSON.stringify(form) !== JSON.stringify(lastSavedFormRef.current ?? toForm(entity))
+      : false;
   const defaultHasInput = () => JSON.stringify(form) !== JSON.stringify(emptyForm);
+
+  const persistUpdate = async (data: TForm) => {
+    const pending = updateMutation.mutateAsync(data);
+    pendingUpdateRef.current = pending;
+    try {
+      await pending;
+    } finally {
+      if (pendingUpdateRef.current === pending) pendingUpdateRef.current = null;
+    }
+  };
 
   // onBlur で呼ぶ自動保存
   const triggerAutoSave = () => {
@@ -111,7 +129,7 @@ export function useEntityForm<TForm extends Record<string, unknown>, TEntity>(
     if (!changed) return;
     toast.loading("自動保存中...", { id: toastId });
     setSaveStatus("saving");
-    updateMutation.mutate(form);
+    void persistUpdate(form).catch(() => undefined);
     onAfterAutoSave?.(setForm);
   };
 
@@ -120,8 +138,39 @@ export function useEntityForm<TForm extends Record<string, unknown>, TEntity>(
     if (!isEdit || !update || !entity) return;
     toast.loading("自動保存中...", { id: toastId });
     setSaveStatus("saving");
-    updateMutation.mutate(next ?? form);
+    return persistUpdate(next ?? form);
   };
+
+  // 2026-10-16: フォームモーダルもルート遷移ガードへ登録し、未保存入力の保存操作を共通化する。
+  const isUnsaved = isOpen && (isEdit
+    ? !!update && !!entity && (hasChanged ? hasChanged(form, entity) : defaultHasChanged())
+    : (hasInput ? hasInput(form) : defaultHasInput()));
+  const saveBeforeNavigation = async () => {
+    if (isEdit) {
+      if (!update || !entity) return;
+      if (pendingUpdateRef.current) await pendingUpdateRef.current;
+      const changed = hasChanged ? hasChanged(form, entity) : defaultHasChanged();
+      if (!changed) return;
+      const validationError = validate?.(form);
+      if (validationError) throw new Error(validationError);
+      toast.loading("保存中...", { id: toastId });
+      setSaveStatus("saving");
+      await persistUpdate(form);
+      return;
+    }
+
+    const dirty = hasInput ? hasInput(form) : defaultHasInput();
+    if (!dirty) return;
+    const validationError = validate?.(form);
+    if (validationError) throw new Error(validationError);
+    await createMutation.mutateAsync(form);
+  };
+  const discardBeforeNavigation = () => {
+    setForm(entity && toForm ? toForm(entity) : emptyForm);
+    setIsConfirmOpen(false);
+    onClose();
+  };
+  useUnsavedChanges({ isDirty: isUnsaved, onSave: saveBeforeNavigation, onDiscard: discardBeforeNavigation });
 
   const handleOverlayClose = () => {
     if (isEdit) {

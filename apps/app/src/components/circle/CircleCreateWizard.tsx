@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { circleApi, parseEventPaymentMethods, parseStoreAreas, uploadImage, type Event, type EventStoreArea, type OrderFlowMode } from "@/lib/api";
 import { resolveAssetUrl } from "@/lib/asset-url";
+import { useUnsavedChanges } from "@/components/UnsavedNavigationGuard";
 
 const STEPS = ["基本情報", "画像", "運用設定", "確認"];
 
@@ -38,6 +39,7 @@ export function CircleCreateWizard({
   const [acceptedPayments, setAcceptedPayments] = useState<string[]>(() => parseEventPaymentMethods(event.paymentMethods));
   const [storeAreaId, setStoreAreaId] = useState("");
   const [creating, setCreating] = useState(false);
+  const hasCreatedRef = useRef(false);
 
   const storeAreas: EventStoreArea[] = parseStoreAreas(event.storeAreas);
   const eventPayments = parseEventPaymentMethods(event.paymentMethods);
@@ -58,12 +60,13 @@ export function CircleCreateWizard({
   };
 
   const create = async () => {
-    if (!name.trim()) return;
+    if (!name.trim()) throw new Error("サークル名を入力してください。");
     if (!acceptedPayments.length) {
       toast.error("対応する支払い方法を1つ以上選択してください");
       setStep(2);
-      return;
+      throw new Error("対応する支払い方法を1つ以上選択してください。");
     }
+    if (uploading) throw new Error("画像のアップロードが完了してから保存してください。");
     setCreating(true);
     const settings: CreatedCircleSettings = {
       orderFlowMode,
@@ -82,13 +85,26 @@ export function CircleCreateWizard({
         inviteToken,
       });
       toast.success("サークルを作成しました");
+      hasCreatedRef.current = true;
       onCreated(result.id, name.trim());
     } catch (error: any) {
       toast.error(error?.message || "サークルの作成に失敗しました");
+      throw error instanceof Error ? error : new Error("サークルの作成に失敗しました。");
     } finally {
       setCreating(false);
     }
   };
+
+  // 2026-10-16: サークル作成前のウィザード入力を遷移確認の保存/破棄対象にする。
+  useUnsavedChanges({
+    isDirty: () => !hasCreatedRef.current && (
+      !!name.trim() || !!description.trim() || !!iconImagePath || !!backgroundImagePath ||
+      orderFlowMode !== "pending" || stockEnabled || staffEnabled ||
+      JSON.stringify(acceptedPayments) !== JSON.stringify(parseEventPaymentMethods(event.paymentMethods)) || !!storeAreaId
+    ),
+    onSave: create,
+    onDiscard: onCancel,
+  });
 
   return (
     <section className="mx-auto w-full max-w-3xl space-y-5 border-thick border-border bg-background p-4 sm:p-6" aria-label="サークル作成ウィザード">
@@ -133,7 +149,7 @@ export function CircleCreateWizard({
 
       <div className="flex gap-2">
         <Button type="button" variant="outline" disabled={creating} onClick={step === 0 ? onCancel : () => setStep((current) => current - 1)}>{step === 0 ? "キャンセル" : "前へ"}</Button>
-        {step < STEPS.length - 1 ? <Button type="button" className="flex-1" disabled={!name.trim() && step === 0 || !!uploading} onClick={() => setStep((current) => current + 1)}>次へ</Button> : <Button type="button" className="flex-1" disabled={creating || !acceptedPayments.length} onClick={() => void create()}>{creating ? "作成中…" : "作成してメニュー管理へ"}</Button>}
+        {step < STEPS.length - 1 ? <Button type="button" className="flex-1" disabled={!name.trim() && step === 0 || !!uploading} onClick={() => setStep((current) => current + 1)}>次へ</Button> : <Button type="button" className="flex-1" disabled={creating || !acceptedPayments.length} onClick={() => void create().catch(() => undefined)}>{creating ? "作成中…" : "作成してメニュー管理へ"}</Button>}
       </div>
     </section>
   );

@@ -442,13 +442,6 @@ circleRoutes.put(
     if (!allowed) {
       apiError("FORBIDDEN", "権限がありません");
     }
-    // 名前/説明/アイコンは来場者に見える表示なので、一般スタッフには開放せずオーナーに限る (2026-10-05)。
-    if (!(await isCircleOwner(c, id))) {
-      apiError("FORBIDDEN", "サークルの基本情報はオーナーのみ変更できます");
-    }
-
-    const input = c.req.valid("json");
-
     // 対象サークルの存在確認
     const existingCircle = await db
       .select()
@@ -457,6 +450,14 @@ circleRoutes.put(
     if (existingCircle.length === 0) {
       apiError("NOT_FOUND", "サークルが見つかりません");
     }
+
+    // 2026-10-16: イベント運営者は出店者の表示情報を代理修正できる一方、circle:write を持つ一般スタッフには従来どおり開放しない。
+    const canManageEventCircle = await hasPermission(c, id, "circle:delete");
+    if (!(await isCircleOwner(c, id)) && !canManageEventCircle) {
+      apiError("FORBIDDEN", "サークルの基本情報を変更する権限がありません");
+    }
+
+    const input = c.req.valid("json");
 
     const updates: Partial<typeof circle.$inferSelect> = {};
 
@@ -516,25 +517,56 @@ circleRoutes.patch(
       apiError("NOT_FOUND", "サークルが見つかりません");
     }
 
-    // 2026-10-16 (#127): 店舗エリアIDは親イベントの定義に限り、既存の拡張設定は更新時も保持する。
-    if (Object.prototype.hasOwnProperty.call(settings, "storeAreaId")) {
-      const storeAreaId = settings.storeAreaId;
-      if (storeAreaId !== null && typeof storeAreaId !== "string") {
-        apiError("BAD_REQUEST", "店舗エリアの指定が正しくありません");
-      }
-      if (typeof storeAreaId === "string") {
-        const parentEvent = await db.select({ storeAreas: event.storeAreas }).from(event).where(eq(event.id, existingCircle[0]!.eventId));
-        let areas: unknown[] = [];
+    // 2026-10-16 (#127): 店舗エリアと支払方法は親イベントの定義に限定し、運営画面からの変更も作成時と同じ制約で検証する。
+    if (
+      Object.prototype.hasOwnProperty.call(settings, "storeAreaId") ||
+      Object.prototype.hasOwnProperty.call(settings, "acceptedPayments")
+    ) {
+      const parentEvent = await db
+        .select({ storeAreas: event.storeAreas, paymentMethods: event.paymentMethods })
+        .from(event)
+        .where(eq(event.id, existingCircle[0]!.eventId));
+      const parseArray = (raw: string | null | undefined): unknown[] => {
         try {
-          const parsed: unknown = JSON.parse(parentEvent[0]?.storeAreas || "[]");
-          if (Array.isArray(parsed)) areas = parsed;
+          const parsed: unknown = JSON.parse(raw || "[]");
+          return Array.isArray(parsed) ? parsed : [];
         } catch {
-          areas = [];
+          return [];
         }
-        if (!areas.some((area) => area && typeof area === "object" && "id" in area && area.id === storeAreaId)) {
-          apiError("BAD_REQUEST", "このイベントに登録されていない店舗エリアです");
+      };
+
+      if (Object.prototype.hasOwnProperty.call(settings, "storeAreaId")) {
+        const storeAreaId = settings.storeAreaId;
+        if (storeAreaId !== null && typeof storeAreaId !== "string") {
+          apiError("BAD_REQUEST", "店舗エリアの指定が正しくありません");
+        }
+        if (typeof storeAreaId === "string") {
+          const areas = parseArray(parentEvent[0]?.storeAreas);
+          if (!areas.some((area) => area && typeof area === "object" && "id" in area && area.id === storeAreaId)) {
+            apiError("BAD_REQUEST", "このイベントに登録されていない店舗エリアです");
+          }
         }
       }
+
+      if (Object.prototype.hasOwnProperty.call(settings, "acceptedPayments")) {
+        const acceptedPayments = settings.acceptedPayments;
+        if (!Array.isArray(acceptedPayments) || acceptedPayments.some((method) => typeof method !== "string")) {
+          apiError("BAD_REQUEST", "支払い方法の指定が正しくありません");
+        }
+        const availablePayments = parseArray(parentEvent[0]?.paymentMethods);
+        if (acceptedPayments.some((method) => !availablePayments.includes(method))) {
+          apiError("BAD_REQUEST", "イベントに登録されていない支払い方法が含まれています");
+        }
+      }
+    }
+
+    if (
+      Object.prototype.hasOwnProperty.call(settings, "orderFlowMode") &&
+      settings.orderFlowMode !== "pending" &&
+      settings.orderFlowMode !== "preparing" &&
+      settings.orderFlowMode !== "completed"
+    ) {
+      apiError("BAD_REQUEST", "注文モードの指定が正しくありません");
     }
 
     let oldSettings: Record<string, unknown> = {};

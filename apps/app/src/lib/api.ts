@@ -328,6 +328,19 @@ export interface VisitorReviewTarget {
   review: { rating: number; comment: string | null } | null;
 }
 
+export interface VisitorReviewStoreSummary {
+  circleId: string;
+  circleName: string;
+  averageRating: number | null;
+  reviewCount: number;
+}
+
+export interface VisitorPublicReview {
+  rating: number;
+  comment: string | null;
+  createdAt: string | number | Date;
+}
+
 export interface ManagedReview {
   circleId?: string;
   circleName?: string;
@@ -337,9 +350,11 @@ export interface ManagedReview {
   displayId: number;
 }
 
-// 2026-09-27: 来場者は自分の体験先と投稿状態のみを取得し、管理側は既存の sales:read 権限で一覧を見る。
+// 2026-10-16: 投稿候補は自身の利用履歴に限定し、店舗レビューは匿名表示、管理側一覧は sales:read 権限を維持する。
 export const reviewApi = {
   mine: (code: string) => fetchApi<VisitorReviewTarget[]>(`/api/reviews/visitor/${encodeURIComponent(code)}`),
+  stores: (code: string) => fetchApi<VisitorReviewStoreSummary[]>(`/api/reviews/visitor/${encodeURIComponent(code)}/stores`),
+  storeReviews: (code: string, circleId: string) => fetchApi<VisitorPublicReview[]>(`/api/reviews/visitor/${encodeURIComponent(code)}/stores/${encodeURIComponent(circleId)}`),
   submit: (code: string, body: { circleId: string; rating: number; comment: string }) =>
     fetchApi<{ success: boolean }>(`/api/reviews/visitor/${encodeURIComponent(code)}`, { method: "POST", body }),
   circle: (circleId: string) => fetchApi<ManagedReview[]>(`/api/reviews/circle/${encodeURIComponent(circleId)}`),
@@ -578,8 +593,15 @@ export interface StampRallySettings {
   targetAreaIds: string[];
   requiredCount: number;
   rewardTitle: string;
+  rewards?: StampRallyReward[];
   redemptionLocation: string;
   rulesUrl: string;
+}
+
+export interface StampRallyReward {
+  id: string;
+  name: string;
+  stockQuantity: number | null;
 }
 
 export interface StampRallyCircle {
@@ -610,6 +632,10 @@ export interface VisitorStampRally {
   requiredCount: number;
   eligible: boolean;
   rewardTitle: string;
+  familyMemberCount: number;
+  redeemedCount: number;
+  remainingCount: number;
+  rewards: StampRallyReward[];
   redemptionLocation: string;
   rulesUrl: string;
   redeemedAt: string | null;
@@ -628,6 +654,59 @@ export interface StampRallyRedemption {
   eventUserId: string;
   displayId: number;
   nickname: string | null;
+  rewardId: string;
+  rewardName: string;
+  quantity: number;
+}
+
+export interface StampRallyRedemptionHistory {
+  rewards: StampRallyReward[];
+  totalQuantity: number;
+  summary: Array<{ rewardId: string; rewardName: string; quantity: number }>;
+  history: StampRallyRedemption[];
+}
+
+// 2026-10-16: 来場者アカウント・完了注文・匿名注文を分けて返し、物理バンド本数に依存しない実績表示にする。
+export interface StampRallyUsageStore {
+  circleId: string;
+  name: string;
+  storeAreaId: string | null;
+  storeAreaName: string | null;
+  isStampTarget: boolean;
+  completedOrderCount: number;
+  visitorAccountCount: number;
+  unlinkedOrderCount: number;
+  orderTotal: number;
+  lastUsedAt: string | null;
+}
+
+export interface StampRallyUsageSummary {
+  enabled: boolean;
+  targetStoreCount: number;
+  requiredCount: number;
+  participantAccountCount: number;
+  qualifiedAccountCount: number;
+  redeemedAccountCount: number;
+  qualifiedRedeemedAccountCount: number;
+  redeemedQuantity: number;
+  rewards: Array<StampRallyReward & { redeemedQuantity: number; remainingQuantity: number | null }>;
+  stores: StampRallyUsageStore[];
+}
+
+export interface StampRallyStoreVisitor {
+  displayId: number;
+  nickname: string | null;
+  orderCount: number;
+  orderTotal: number;
+  lastUsedAt: string | null;
+}
+
+export interface StampRallyStoreVisitorsPage {
+  store: { id: string; name: string };
+  page: number;
+  pageSize: number;
+  total: number;
+  visitors: StampRallyStoreVisitor[];
 }
 
 export interface VisitorStampRallyArea extends StampRallyArea {}
@@ -643,13 +722,22 @@ export const stampRallyApi = {
     fetchApi<VisitorStampRally>(`/api/stamps/visitor/${encodeURIComponent(code)}`),
   lookup: (eventId: string, code: string) =>
     fetchApi<StaffStampRallyLookup>(`/api/stamps/event/${encodeURIComponent(eventId)}/lookup/${encodeURIComponent(code)}`),
-  redeem: (eventId: string, code: string) =>
+  redeem: (eventId: string, input: { code: string; rewardId: string; quantity: number }) =>
     fetchApi<{ success: boolean; redemption: { id: string; createdAt: string } }>(`/api/stamps/event/${encodeURIComponent(eventId)}/redeem`, {
       method: "POST",
-      body: { code },
+      body: input,
     }),
   redemptions: (eventId: string) =>
-    fetchApi<StampRallyRedemption[]>(`/api/stamps/event/${encodeURIComponent(eventId)}/redemptions`),
+    fetchApi<StampRallyRedemptionHistory>(`/api/stamps/event/${encodeURIComponent(eventId)}/redemptions`),
+  usage: (eventId: string) =>
+    fetchApi<StampRallyUsageSummary>(`/api/stamps/event/${encodeURIComponent(eventId)}/usage`),
+  storeVisitors: (eventId: string, circleId: string, page = 1, query = "") => {
+    const params = new URLSearchParams({ page: String(page) });
+    if (query.trim()) params.set("q", query.trim());
+    return fetchApi<StampRallyStoreVisitorsPage>(
+      `/api/stamps/event/${encodeURIComponent(eventId)}/stores/${encodeURIComponent(circleId)}?${params.toString()}`,
+    );
+  },
 };
 
 export type EventLifecycleStatus = "upcoming" | "live" | "ended" | "archived";
@@ -699,6 +787,7 @@ export function parseEventPaymentMethods(raw?: string | null): string[] {
 export interface EventAnalytics {
   totals: {
     visitors: number;
+    visitorProfiles: number;
     onboarded: number;
     onboardedRate: number;
     orders: number;
@@ -790,6 +879,12 @@ export interface LiveOrder {
   totalPrice: number;
   estimatedTime: number | null;
   createdAt: string;
+  items: {
+    name: string;
+    quantity: number;
+    unitPrice: number;
+    toppings: { name: string; unitPrice: number }[];
+  }[];
 }
 
 // 在庫一覧の1件 (GET /api/festivals/:id/inventory)

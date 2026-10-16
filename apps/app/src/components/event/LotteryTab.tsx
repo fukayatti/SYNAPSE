@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Ticket, Gift, Trophy, Trash2, Dices, Save, Check } from "lucide-react";
+import { useUnsavedChanges } from "@/components/UnsavedNavigationGuard";
 
 // イベント単位の抽選管理 (2026-07-12)
 // 主催者が景品と口数(当選確率)の重みを設定し、応募者から重み付き抽選する。
@@ -26,27 +27,36 @@ export function LotteryTab({ eventId }: { eventId: string }) {
   const [name, setName] = useState("お楽しみ抽選会");
   const [drawAt, setDrawAt] = useState("");
   const [cfg, setCfg] = useState<LotteryEntryConfig>({ base: 1, perStamp: 0, perReview: 0 });
+  const [savedDraft, setSavedDraft] = useState({ name: "お楽しみ抽選会", drawAt: "", cfg: { base: 1, perStamp: 0, perReview: 0 } as LotteryEntryConfig });
   const [prizeName, setPrizeName] = useState("");
   const [prizeQty, setPrizeQty] = useState(1);
   const [confirmDraw, setConfirmDraw] = useState(false);
 
   useEffect(() => {
     if (data?.lottery) {
-      setName(data.lottery.name);
-      setDrawAt(data.lottery.drawAt ? String(data.lottery.drawAt).slice(0, 16) : "");
-      setCfg(data.lottery.entryConfig);
+      const nextDraft = {
+        name: data.lottery.name,
+        drawAt: data.lottery.drawAt ? String(data.lottery.drawAt).slice(0, 16) : "",
+        cfg: data.lottery.entryConfig,
+      };
+      setName(nextDraft.name);
+      setDrawAt(nextDraft.drawAt);
+      setCfg(nextDraft.cfg);
+      setSavedDraft(nextDraft);
     }
   }, [data?.lottery]);
 
+  const lotteryDraft = { name, drawAt, cfg };
+  const settingsDirty = JSON.stringify(lotteryDraft) !== JSON.stringify(savedDraft);
   const save = useMutation({
-    mutationFn: () =>
-      lotteryApi.upsert({ eventId, name: name.trim(), drawAt: drawAt || undefined, entryConfig: cfg }),
-    onSuccess: () => { toast.success("抽選を保存しました"); invalidate(); },
+    mutationFn: (draft: typeof lotteryDraft) =>
+      lotteryApi.upsert({ eventId, name: draft.name.trim(), drawAt: draft.drawAt || undefined, entryConfig: draft.cfg }),
+    onSuccess: (_result, draft) => { setSavedDraft(draft); toast.success("抽選を保存しました"); invalidate(); },
     onError: (e: any) => toast.error(e?.message || "保存に失敗しました"),
   });
   const lot = data?.lottery;
   const addPrize = useMutation({
-    mutationFn: () => lotteryApi.addPrize(lot!.id, { name: prizeName.trim(), quantity: Math.max(1, prizeQty) }),
+    mutationFn: (draft: { lotteryId: string; name: string; quantity: number }) => lotteryApi.addPrize(draft.lotteryId, { name: draft.name, quantity: draft.quantity }),
     onSuccess: () => { toast.success("景品を追加しました"); setPrizeName(""); setPrizeQty(1); invalidate(); },
     onError: (e: any) => toast.error(e?.message || "追加に失敗しました"),
   });
@@ -64,6 +74,29 @@ export function LotteryTab({ eventId }: { eventId: string }) {
     mutationFn: (winnerId: string) => lotteryApi.claim(lot!.id, winnerId),
     onSuccess: () => invalidate(),
     onError: (e: any) => toast.error(e?.message || "受取記録に失敗しました"),
+  });
+
+  const prizeDraftDirty = !!lot && (prizeName !== "" || prizeQty !== 1);
+  // 2026-10-16: 抽選条件と景品追加フォームを離脱確認からも保存する。
+  useUnsavedChanges({
+    isDirty: settingsDirty || prizeDraftDirty,
+    onSave: async () => {
+      if (settingsDirty) {
+        if (!lotteryDraft.name.trim()) throw new Error("抽選名を入力してください。");
+        await save.mutateAsync(lotteryDraft);
+      }
+      if (prizeDraftDirty) {
+        if (!prizeName.trim() || prizeQty < 1) throw new Error("景品名と1以上の当選数を入力してください。");
+        await addPrize.mutateAsync({ lotteryId: lot!.id, name: prizeName.trim(), quantity: prizeQty });
+      }
+    },
+    onDiscard: () => {
+      setName(savedDraft.name);
+      setDrawAt(savedDraft.drawAt);
+      setCfg(savedDraft.cfg);
+      setPrizeName("");
+      setPrizeQty(1);
+    },
   });
 
   if (isLoading) return <div className="space-y-2">{Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-16" />)}</div>;
@@ -111,7 +144,7 @@ export function LotteryTab({ eventId }: { eventId: string }) {
           例: 基本1/スタンプ0/レビュー0 = 応募者全員1口の等確率。基本0/スタンプ1 = スタンプ数がそのまま口数。
         </p>
         {!drawn && (
-          <Button onClick={() => save.mutate()} disabled={save.isPending || !name.trim()}>
+          <Button onClick={() => save.mutate(lotteryDraft)} disabled={save.isPending || !name.trim()}>
             <Save className="h-4 w-4 mr-1.5" /> {lot ? "設定を保存" : "抽選を作成"}
           </Button>
         )}
@@ -149,7 +182,7 @@ export function LotteryTab({ eventId }: { eventId: string }) {
                       編集中は 0/空を許容し、確定は addPrize 側で 1 以上に丸める。 */}
                   <Input id="prize-qty" type="number" min={0} value={prizeQty} onChange={(e) => setPrizeQty(Math.max(0, Math.trunc(Number(e.target.value)) || 0))} />
                 </div>
-                <Button variant="outline" onClick={() => addPrize.mutate()} disabled={addPrize.isPending || !prizeName.trim() || prizeQty < 1}>追加</Button>
+                <Button variant="outline" onClick={() => lot && addPrize.mutate({ lotteryId: lot.id, name: prizeName.trim(), quantity: Math.max(1, prizeQty) })} disabled={addPrize.isPending || !prizeName.trim() || prizeQty < 1}>追加</Button>
               </div>
             )}
           </section>

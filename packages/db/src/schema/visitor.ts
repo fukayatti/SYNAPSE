@@ -241,9 +241,8 @@ export const rewardRedemption = sqliteTable(
   ]
 );
 
-// 2026-10-15 (#123): 通常のスタンプラリー景品交換はイベント来場者単位で記録する。
-// 旧 reward_redemption は userId のみでイベントをまたいで一回に制限していたため、
-// 後方互換用に残しつつ、新しい交換記録は (eventId,eventUserId) で一意に管理する。
+// 2026-10-16: 1アカウントが家族人数分の景品を受け取れるよう、交換ごとの数量と
+// 景品名スナップショットを記録する。重複制約を外し、来場者・景品単位で複数回記録できる。
 export const stampRallyRedemption = sqliteTable(
   "stamp_rally_redemption",
   {
@@ -255,12 +254,16 @@ export const stampRallyRedemption = sqliteTable(
       .notNull()
       .references(() => eventUser.id, { onDelete: "cascade" }),
     staffId: text("staff_id").notNull(),
+    rewardId: text("reward_id").notNull().default("default"),
+    rewardName: text("reward_name").notNull().default(""),
+    quantity: integer("quantity").notNull().default(1),
     createdAt: integer("created_at", { mode: "timestamp_ms" })
       .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
       .notNull(),
   },
   (table) => [
     index("stamp_rally_redemption_event_created_idx").on(table.eventId, table.createdAt),
-    uniqueIndex("stamp_rally_redemption_event_user_unique").on(table.eventId, table.eventUserId),
+    index("stamp_rally_redemption_event_user_idx").on(table.eventId, table.eventUserId),
+    index("stamp_rally_redemption_event_reward_idx").on(table.eventId, table.rewardId),
   ]
 );
