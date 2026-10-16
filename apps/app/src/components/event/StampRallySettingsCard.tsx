@@ -87,11 +87,26 @@ export function StampRallySettingsCard({ eventId, event }: { eventId: string; ev
   const circlesInTargets = (circlesQuery.data ?? []).filter((circle) =>
     settings.targetAreaIds.includes(getCircleStoreAreaId(circle) || "")
   );
-  const invalidSettings = settings.enabled && (
+  const invalidRequiredCount = !Number.isInteger(settings.requiredCount) || settings.requiredCount < 1 || settings.requiredCount > 100;
+  const invalidRulesUrl = (() => {
+    const raw = settings.rulesUrl.trim();
+    if (!raw) return false;
+    try {
+      const url = new URL(raw);
+      return url.protocol !== "http:" && url.protocol !== "https:";
+    } catch {
+      return true;
+    }
+  })();
+  const invalidSettings = settings.targetAreaIds.length > 50 ||
+    new Set(settings.targetAreaIds).size !== settings.targetAreaIds.length ||
+    invalidRequiredCount || settings.rewardTitle.trim().length > 100 ||
+    settings.redemptionLocation.trim().length > 500 || settings.rulesUrl.trim().length > 2048 || invalidRulesUrl ||
+    (settings.enabled && (
     settings.targetAreaIds.length === 0 ||
     settings.requiredCount > circlesInTargets.length ||
     !settings.redemptionLocation.trim()
-  );
+    ));
 
   const save = useMutation({
     mutationFn: () => {
@@ -162,7 +177,7 @@ export function StampRallySettingsCard({ eventId, event }: { eventId: string; ev
       <Modal
         isOpen={isEditorOpen}
         onClose={() => setIsEditorOpen(false)}
-        title="[スタンプラリー条件]"
+        title="スタンプラリーの条件"
         subtitle="選択した会場エリア内の異なる店舗を利用するとスタンプが付きます。"
         maxWidth="lg"
       >
@@ -190,7 +205,7 @@ export function StampRallySettingsCard({ eventId, event }: { eventId: string; ev
                         <span className="truncate">{area.name}</span>
                         <span className="text-[10px] shrink-0">{count}店舗</span>
                       </span>
-                      <span className="block text-[10px] mt-1">{selected ? "対象にする" : "対象外"}</span>
+                      <span className="block text-[10px] mt-1">{selected ? "対象エリアに含める" : "対象外"}</span>
                     </button>
                   );
                 })}
@@ -204,10 +219,12 @@ export function StampRallySettingsCard({ eventId, event }: { eventId: string; ev
               type="number"
               min={1}
               max={100}
+              step={1}
               value={settings.requiredCount}
-              onChange={(e) => setSettings((current) => ({ ...current, requiredCount: Math.max(1, Math.min(100, Number(e.target.value) || 1)) }))}
+              aria-invalid={invalidRequiredCount}
+              onChange={(e) => setSettings((current) => ({ ...current, requiredCount: e.target.value === "" ? 0 : Number(e.target.value) }))}
             />
-            <span className="block text-[10px] text-muted-foreground">対象エリア全体の異なる店舗を数えます。</span>
+            <span className="block text-[10px] text-muted-foreground">1〜100の整数を入力してください。対象エリア全体の異なる店舗を数えます。</span>
           </label>
 
           <label className="block space-y-1">
@@ -230,10 +247,11 @@ export function StampRallySettingsCard({ eventId, event }: { eventId: string; ev
           <label className="block space-y-1">
             <span className="text-xs font-bold">スタンプラリーのルールURL</span>
             <Input type="url" maxLength={2048} value={settings.rulesUrl} onChange={(e) => setSettings((current) => ({ ...current, rulesUrl: e.target.value }))} placeholder="https://example.com/rules" />
+            {invalidRulesUrl && <span className="block text-[10px] text-error" role="alert">URLは http または https で入力してください。</span>}
           </label>
 
-          {settings.enabled && settings.redemptionLocation.trim().length === 0 && <p className="text-xs text-error" role="alert">景品交換場所を入力してください。</p>}
-          {settings.enabled && (settings.targetAreaIds.length === 0 || settings.requiredCount > circlesInTargets.length) && <p className="text-xs text-error" role="alert">対象エリアの店舗数が必要数に足りません。会場エリアに店舗を割り当ててください。</p>}
+          {invalidSettings && <p className="text-xs text-error" role="alert">設定内容を確認してください。必要数は1〜100の整数、対象エリアは50件までです。スタンプラリーを有効にする場合は、必要数以上の店舗があるエリアと景品交換場所を設定してください。</p>}
+          {circlesQuery.isError && <p className="text-xs text-error" role="alert">サークルの場所を読み込めませんでした。通信状態を確認してページを再読み込みしてください。</p>}
           <div className="flex justify-end gap-2 border-t-thin border-border pt-3">
             <Button type="button" variant="outline" onClick={() => setIsEditorOpen(false)}>キャンセル</Button>
             <Button type="button" disabled={save.isPending || invalidSettings} onClick={() => save.mutate()}>

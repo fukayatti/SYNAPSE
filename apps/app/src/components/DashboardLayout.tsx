@@ -35,6 +35,7 @@ import {
   Star,
   CreditCard,
   X,
+  MapPinned,
 } from "lucide-react";
 
 interface MenuItem {
@@ -190,6 +191,7 @@ export default function DashboardLayout({
         { title: "一斉アナウンス", tab: "announce", icon: Megaphone },
         { title: "リストバンド管理", tab: "wristbands", icon: IdCard },
         { title: "景品交換受付", tab: "stamp-redemptions", icon: Ticket, permission: "event:write" },
+        { title: "スタンプラリー", tab: "stamp-rally", icon: Ticket },
       ],
     },
     {
@@ -208,6 +210,7 @@ export default function DashboardLayout({
       label: "管理",
       items: [
         { title: "サークル管理", tab: "circles", icon: Grid },
+        { title: "店舗エリア", tab: "store-areas", icon: MapPinned },
         { title: "スタッフ管理", tab: "staff", icon: Users },
         { title: "イベント設定", tab: "settings", icon: Settings },
         { title: "契約状況", tab: "contract", icon: CreditCard },

@@ -64,21 +64,21 @@ export function CircleCreateLinkModal({ eventId, isOpen, onClose }: CircleCreate
 		<Modal
 			isOpen={isOpen}
 			onClose={onClose}
-			title={createdInvite ? "[サークル作成リンクを発行しました]" : "[サークル作成リンクを作成]"}
+			title={createdInvite ? "サークル作成リンクを発行しました" : "サークル作成リンクを発行"}
 			subtitle="リンクを開いた人はログイン後、このイベントのサークル作成へ進みます。"
 			maxWidth="md"
 		>
 			{createdInvite ? (
 				<div className="space-y-4">
 					<div className="border-thick border-border bg-muted/30 p-3 space-y-2">
-						<p className="text-[10px] font-bold uppercase">[共有リンク]</p>
+						<p className="text-[10px] font-bold uppercase">共有リンク</p>
 						<p className="break-all select-all text-xs">{inviteUrl}</p>
 						<Button type="button" variant="outline" className="w-full rounded-none" onClick={() => copy(inviteUrl, "リンク")}>
 							<Copy className="h-4 w-4" /> リンクをコピー
 						</Button>
 					</div>
 					<div className="border-thick border-border p-3 space-y-2">
-						<p className="text-[10px] font-bold uppercase">[招待コード]</p>
+						<p className="text-[10px] font-bold uppercase">招待コード</p>
 						<p className="flex items-center justify-between gap-2">
 							<span className="select-all font-bold tracking-[3px]">{createdInvite.code}</span>
 							<Button type="button" variant="outline" size="sm" className="rounded-none" onClick={() => copy(createdInvite.code, "招待コード")}>

@@ -500,7 +500,7 @@ export function WristbandsTab({ eventId }: WristbandsTabProps) {
             <CardHeader className="p-4 border-b-thin border-border bg-info/5">
               <CardTitle className="flex items-center gap-2 text-xs font-bold uppercase">
                 <Smartphone className="h-4 w-4" />
-                [スマホで登録]
+                スマートフォンで登録
               </CardTitle>
               <CardDescription className="text-[10px]">
                 物理バンドを使わず、スマートフォンでQRを読み取って来場者登録します。
@@ -543,7 +543,7 @@ export function WristbandsTab({ eventId }: WristbandsTabProps) {
             <CardHeader className="p-4 border-b-thin border-border bg-success/5">
               <CardTitle className="flex items-center gap-2 text-xs font-bold uppercase">
                 <IdCard className="h-4 w-4" />
-                [物理リストバンドで登録]
+                リストバンドで登録
               </CardTitle>
               <CardDescription className="text-[10px]">
                 印刷したバンドのURLを先に取り込み、来場者がバンドのQRを読み取って登録します。
@@ -599,7 +599,7 @@ export function WristbandsTab({ eventId }: WristbandsTabProps) {
 
       <Modal
         isOpen={isImportModalOpen}
-        title="[リストバンドURL CSV取り込み]"
+        title="CSVからリストバンド情報を取り込む"
         subtitle="印刷用URL CSVを取り込むと、このイベントの来場者とリストバンドを一括登録します。"
         onClose={() => !batchOperationMutation.isPending && setIsImportModalOpen(false)}
         maxWidth="md"
@@ -669,7 +669,7 @@ export function WristbandsTab({ eventId }: WristbandsTabProps) {
 
       <Modal
         isOpen={isGenerateModalOpen}
-        title="[リストバンドIDを人数指定で生成]"
+        title="リストバンドIDをまとめて発行"
         subtitle="イベント固有IDとランダム文字列を組み合わせ、登録と印刷用CSVの作成を行います。"
         onClose={() => !batchOperationMutation.isPending && setIsGenerateModalOpen(false)}
         maxWidth="lg"
@@ -780,7 +780,7 @@ export function WristbandsTab({ eventId }: WristbandsTabProps) {
       <Card className="rounded-none bg-background shadow-none border-thick border-border">
         <CardHeader className="p-4 flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <CardTitle className="text-xs uppercase font-bold">[登録来場者一覧]</CardTitle>
+            <CardTitle className="text-xs uppercase font-bold">登録済み来場者</CardTitle>
             <CardDescription className="text-[10px]">
               {visitors.length}件読み込み済み / 全{visitorTotal}件{searchQuery ? "（検索条件あり）" : ""}
             </CardDescription>
@@ -790,7 +790,7 @@ export function WristbandsTab({ eventId }: WristbandsTabProps) {
       </Card>
 
       {/* 2026-09-27: 来場者の行が画面を押し下げないよう、検索と編集操作を表モーダルにまとめる。 */}
-      <Modal isOpen={isVisitorTableOpen} onClose={() => setIsVisitorTableOpen(false)} title="[登録来場者一覧]" subtitle={`全${visitorTotal}件`} maxWidth="full">
+      <Modal isOpen={isVisitorTableOpen} onClose={() => setIsVisitorTableOpen(false)} title="登録済み来場者" subtitle={`全${visitorTotal}件`} maxWidth="full">
       {/* 検索バー */}
       <Card className="rounded-none bg-background shadow-none border-thick border-border">
         <CardContent className="p-4">
@@ -904,7 +904,7 @@ export function WristbandsTab({ eventId }: WristbandsTabProps) {
       <Card className="rounded-none bg-background shadow-none border-thick border-border">
         <CardHeader className="p-4 pb-2 border-b-thin border-border bg-muted/20 flex flex-col items-start gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <CardTitle className="text-xs uppercase font-bold">[登録来場者一覧]</CardTitle>
+            <CardTitle className="text-xs uppercase font-bold">登録済み来場者</CardTitle>
             <CardDescription className="text-[10px]">
               {searchQuery
                 ? `検索条件「${searchQuery}」とフィルターの検索結果`
@@ -1067,7 +1067,7 @@ export function WristbandsTab({ eventId }: WristbandsTabProps) {
          ========================================== */}
       <Modal
         isOpen={isScanModalOpen}
-        title="[登録情報スキャン・照会]"
+        title="来場者情報をスキャン"
         subtitle="リストバンド物理ID（QRコード値）またはユーザーIDから、該当の来場者を照会します。"
         onClose={() => setIsScanModalOpen(false)}
         maxWidth="md"
@@ -1125,7 +1125,7 @@ export function WristbandsTab({ eventId }: WristbandsTabProps) {
          ========================================== */}
       <Modal
         isOpen={isIssueModalOpen}
-        title="[スマホ用来場者QR発行]"
+        title="スマートフォン用の来場者QRを発行"
         subtitle="物理リストバンドを使用しない、スマートフォン単体用の新規アカウントを即時発行します。"
         onClose={() => setIsIssueModalOpen(false)}
         maxWidth="md"
@@ -1206,7 +1206,7 @@ export function WristbandsTab({ eventId }: WristbandsTabProps) {
          ========================================== */}
       <Modal
         isOpen={isDetailsModalOpen}
-        title="[来場者・リストバンド詳細編集]"
+        title="来場者情報を編集"
         subtitle="来場者の基本プロフィール情報、および紐付く物理リストバンドの状態変更・再発行・紐付け解除を行います。"
         onClose={closeDetailsModal}
         maxWidth="xl"
@@ -1217,7 +1217,7 @@ export function WristbandsTab({ eventId }: WristbandsTabProps) {
               {/* 左カラム: アカウントプロフィール情報 */}
               <div className="space-y-4 border-b md:border-b-0 md:border-r border-border pb-6 md:pb-0 md:pr-6">
                 <h3 className="font-black text-xs uppercase tracking-wider text-primary border-b border-border pb-1">
-                  [アカウントプロフィール編集]
+                  アカウントプロフィール
                 </h3>
 
                 <div className="space-y-3 text-xs">
@@ -1287,7 +1287,7 @@ export function WristbandsTab({ eventId }: WristbandsTabProps) {
               {/* 右カラム: リストバンド管理 */}
               <div className="space-y-4">
                 <h3 className="font-black text-xs uppercase tracking-wider text-primary border-b border-border pb-1">
-                  [紐付く物理リストバンド管理]
+                  リストバンドの紐付け
                 </h3>
 
                 {(selectedUser.familyWristbands?.length ?? 0) > 1 && (
@@ -1400,7 +1400,7 @@ export function WristbandsTab({ eventId }: WristbandsTabProps) {
                 {/* 新しいリストバンドの登録・再発行 */}
                 <div className="border-t border-border pt-4 mt-2 space-y-2">
                   <h4 className="font-bold uppercase text-[10px] text-muted-foreground">
-                    [物理リストバンドの新規紐付け・再発行]
+                    リストバンドを新しく紐付ける・再発行する
                   </h4>
                   <p className="text-[10px] text-muted-foreground leading-normal font-sans">
                     新しいリストバンドのQR/コード値を入力して登録します。（古いリストバンドは自動的に無効化されロックされます）

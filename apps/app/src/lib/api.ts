@@ -184,6 +184,11 @@ export const circleApi = {
       method: "PATCH",
       body: { settings },
     }),
+  setStoreArea: (id: string, storeAreaId: string | null) =>
+    fetchApi<{ success: boolean }>(`/api/circles/${id}/settings`, {
+      method: "PATCH",
+      body: { settings: { storeAreaId } },
+    }),
   // 2026-10-07 (#9): POSスタッフの手動報告は専用エンドポイントで追記し、他の設定と競合させない。
   reportWaitTime: (id: string, waitMinutes: number) =>
     fetchApi<{ success: boolean; waitTimeReport: { minutes: number; reportedAt: string } }>(
@@ -1426,7 +1431,6 @@ export const visitorApi = {
     userId: string;
     wristbandId?: string | null;
     nickname: string;
-    favoriteDate?: string;
     birthdayMonthDay?: string;
     age?: number;
   }) =>
