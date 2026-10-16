@@ -6,13 +6,14 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState } from "@/components/ui/ErrorState";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { ArrowLeft, QrCode, Receipt, ChevronRight, UserCog, Pencil, Ticket } from "lucide-react";
+import { ArrowLeft, QrCode, Receipt, ChevronRight, UserCog, Pencil, Ticket, Camera } from "lucide-react";
 import { toast } from "sonner";
 import { QRCodeSVG } from "qrcode.react";
 import { resolveAssetUrl } from "@/lib/asset-url";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { AllergenSelector } from "@/components/menu/AllergenSelector";
+import { QrScannerModal } from "@/components/pos/qr-scanner-modal";
 import { parseJapaneseAllergens, type JapaneseAllergen } from "@fesflow/config/allergens";
 
 /**
@@ -38,6 +39,12 @@ export default function MyPage() {
   const [familyMonth, setFamilyMonth] = useState("");
   const [familyDay, setFamilyDay] = useState("");
   const [familyAge, setFamilyAge] = useState("");
+  const [isFamilyScannerOpen, setIsFamilyScannerOpen] = useState(false);
+  const [editingFamilyWristbandId, setEditingFamilyWristbandId] = useState<string | null>(null);
+  const [editFamilyNickname, setEditFamilyNickname] = useState("");
+  const [editFamilyMonth, setEditFamilyMonth] = useState("");
+  const [editFamilyDay, setEditFamilyDay] = useState("");
+  const [editFamilyAge, setEditFamilyAge] = useState("");
   const [familyAllergies, setFamilyAllergies] = useState<JapaneseAllergen[] | null>(null);
   const [isAllergyEditorOpen, setIsAllergyEditorOpen] = useState(false);
   const queryClient = useQueryClient();
@@ -130,6 +137,31 @@ export default function MyPage() {
     onError: (e: any) => toast.error(e?.message || "家族の追加に失敗しました"),
   });
 
+  const familyUpdateMutation = useMutation({
+    mutationFn: () => wristbandApi.updateFamilyMember({
+      userId,
+      wristbandId: editingFamilyWristbandId!,
+      nickname: editFamilyNickname.trim(),
+      birthdayMonthDay: `${editFamilyMonth.padStart(2, "0")}-${editFamilyDay.padStart(2, "0")}`,
+      age: Number(editFamilyAge),
+    }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["userWristbandStatus", userId] });
+      setEditingFamilyWristbandId(null);
+      toast.success("家族の情報を保存しました");
+    },
+    onError: (e: any) => toast.error(e?.message || "家族の情報を保存できませんでした"),
+  });
+
+  const beginFamilyEdit = (band: NonNullable<typeof userStatus>["familyWristbands"][number]) => {
+    const [month = "", day = ""] = band.birthdayMonthDay?.split("-") ?? [];
+    setEditingFamilyWristbandId(band.id);
+    setEditFamilyNickname(band.nickname ?? "");
+    setEditFamilyMonth(month ? String(Number(month)) : "");
+    setEditFamilyDay(day ? String(Number(day)) : "");
+    setEditFamilyAge(band.age == null ? "" : String(band.age));
+  };
+
   useEffect(() => {
     if (!userStatus?.user) return;
     const allergies = parseJapaneseAllergens(userStatus.user.allergies);
@@ -174,6 +206,8 @@ export default function MyPage() {
   }
 
   const activeWristband = userStatus?.familyWristbands?.find((band) => band.id === session?.wristbandId) ?? userStatus?.wristband;
+  // 2026-10-16: 家族一覧では本人のバンドを除き、各家族の情報だけを編集対象にする。
+  const familyMembers = (userStatus?.familyWristbands ?? []).filter((band) => band.id !== activeWristband?.id);
   const targetWbId = activeWristband?.id || userId;
   // 2026-07-13: 来場者の表示QRのURLを物理リストバンドのQRと同じ形式 (/w/:id) に統一する。
   // 店頭レジ側はすでに入力文字列から /w/:id や ?wb=... を解析してIDを抽出できるように修正済みのため、これで動作する。
@@ -277,25 +311,69 @@ export default function MyPage() {
       {/* 2026-10-15 (#125): 受付前の発行済みバンドだけを家族に追加する。
           登録済みアカウントや過去履歴は統合せず、追加後の注文・スタンプは代表アカウントに集約する。 */}
       <section className="border-thick border-border bg-background p-4 space-y-4">
-        <div className="flex items-baseline justify-between gap-3">
+        <div className="flex items-center justify-between gap-3">
           <h2 className="text-sm font-black uppercase tracking-wider">家族のリストバンド</h2>
-          <span className="text-xs font-bold">{userStatus?.familyBandCount ?? 0}人登録</span>
+          <span className="text-xs font-bold">{familyMembers.length}人登録</span>
         </div>
         <ul className="space-y-2">
-          {(userStatus?.familyWristbands ?? []).map((band) => (
-            <li key={band.id} className="flex items-center justify-between gap-3 border-thin border-border bg-muted/20 px-3 py-2 text-xs">
-              <span className="min-w-0">
-                <span className="block font-bold">{band.nickname || "ニックネーム未設定"} · {band.age == null ? "年齢未設定" : `${band.age}歳`}</span>
-                <span className="block truncate text-muted-foreground">{band.id}</span>
-              </span>
-              <span className="shrink-0 text-muted-foreground">{band.birthdayMonthDay || "誕生日未設定"}</span>
+          {familyMembers.map((band) => (
+            <li key={band.id} className="space-y-3 border-thin border-border bg-muted/20 px-3 py-3 text-xs">
+              <div className="flex items-start justify-between gap-3">
+                <span className="min-w-0">
+                  <span className="block font-bold">{band.nickname || "ニックネーム未設定"} · {band.age == null ? "年齢未設定" : `${band.age}歳`}</span>
+                  <span className="block truncate text-muted-foreground">{band.id}</span>
+                  <span className="block text-muted-foreground">誕生日 {band.birthdayMonthDay || "未設定"}</span>
+                </span>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-8 shrink-0 px-2 text-[10px]"
+                  aria-expanded={editingFamilyWristbandId === band.id}
+                  onClick={() => editingFamilyWristbandId === band.id ? setEditingFamilyWristbandId(null) : beginFamilyEdit(band)}
+                >
+                  <Pencil className="mr-1 h-3 w-3" />
+                  {editingFamilyWristbandId === band.id ? "閉じる" : "編集"}
+                </Button>
+              </div>
+              {editingFamilyWristbandId === band.id && (
+                <div className="space-y-2 border-t-thin border-border pt-3">
+                  <Input aria-label={`${band.nickname || "家族"}のニックネーム`} value={editFamilyNickname} onChange={(e) => setEditFamilyNickname(e.target.value)} placeholder="ニックネーム" maxLength={30} />
+                  <div className="grid grid-cols-3 gap-2">
+                    <select aria-label="家族の誕生月" value={editFamilyMonth} onChange={(e) => { setEditFamilyMonth(e.target.value); setEditFamilyDay(""); }} className="h-10 min-w-0 border-thick bg-input px-2 font-mono text-xs">
+                      <option value="">誕生月</option>
+                      {Array.from({ length: 12 }, (_, index) => String(index + 1)).map((month) => <option key={month} value={month}>{month}月</option>)}
+                    </select>
+                    <select aria-label="家族の誕生日" value={editFamilyDay} onChange={(e) => setEditFamilyDay(e.target.value)} disabled={!editFamilyMonth} className="h-10 min-w-0 border-thick bg-input px-2 font-mono text-xs disabled:opacity-50">
+                      <option value="">誕生日</option>
+                      {Array.from({ length: editFamilyMonth ? new Date(Date.UTC(2000, Number(editFamilyMonth), 0)).getUTCDate() : 0 }, (_, index) => String(index + 1)).map((day) => <option key={day} value={day}>{day}日</option>)}
+                    </select>
+                    <Input aria-label="家族の年齢" type="number" inputMode="numeric" min={0} max={120} step={1} value={editFamilyAge} onChange={(e) => setEditFamilyAge(e.target.value)} placeholder="年齢" className="h-10 px-2 text-xs" />
+                  </div>
+                  <div className="flex gap-2">
+                    <Button type="button" variant="outline" className="flex-1" onClick={() => setEditingFamilyWristbandId(null)}>キャンセル</Button>
+                    <Button
+                      type="button"
+                      className="flex-1"
+                      disabled={!editFamilyNickname.trim() || !editFamilyMonth || !editFamilyDay || editFamilyAge === "" || !Number.isInteger(Number(editFamilyAge)) || Number(editFamilyAge) < 0 || Number(editFamilyAge) > 120 || familyUpdateMutation.isPending}
+                      onClick={() => familyUpdateMutation.mutate()}
+                    >
+                      {familyUpdateMutation.isPending ? "保存中…" : "保存"}
+                    </Button>
+                  </div>
+                </div>
+              )}
             </li>
           ))}
+          {familyMembers.length === 0 && <li className="text-xs text-muted-foreground">家族のリストバンドはまだ登録されていません。</li>}
         </ul>
         <div className="space-y-2 border-t-thin border-border pt-3">
           <p className="text-[11px] leading-relaxed text-muted-foreground">
             受付前で、まだ入場登録していない家族のリストバンドを追加できます。別のアカウントや利用履歴は統合されません。
           </p>
+          <Button type="button" variant="outline" className="w-full" onClick={() => setIsFamilyScannerOpen(true)}>
+            <Camera className="mr-2 h-4 w-4" />
+            リストバンドを撮影して読み取る
+          </Button>
           <Input
             aria-label="追加する家族のリストバンドコード"
             value={familyCode}
@@ -374,6 +452,21 @@ export default function MyPage() {
           </div>
         )}
       </section>
+
+      <QrScannerModal
+        circleId={eventId ?? ""}
+        isOpen={isFamilyScannerOpen}
+        onClose={() => setIsFamilyScannerOpen(false)}
+        mode="customer"
+        onCustomerScanned={(_, wristbandId) => {
+          if (!wristbandId) {
+            toast.error("リストバンドのQRコードを読み取ってください");
+            return;
+          }
+          setFamilyCode(wristbandId);
+          toast.success("リストバンドを読み取りました");
+        }}
+      />
 
       {/* 2026-10-15 (#123): スタンプと景品条件をマイQR画面からすぐ確認できるようにする。 */}
       <button

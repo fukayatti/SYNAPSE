@@ -1365,6 +1365,21 @@ export const wristbandApi = {
     method: "POST",
     body: data,
   }),
+  updateFamilyMember: (data: {
+    userId: string;
+    wristbandId: string;
+    nickname: string;
+    birthdayMonthDay: string;
+    age: number;
+  }) => fetchApi<{ success: boolean }>(`/api/wristbands/family-member/${encodeURIComponent(data.wristbandId)}`, {
+    method: "PATCH",
+    body: {
+      userId: data.userId,
+      nickname: data.nickname,
+      birthdayMonthDay: data.birthdayMonthDay,
+      age: data.age,
+    },
+  }),
   // 既存の未紐付けユーザーにスマホ用デジタルID(sp_)を発行する (2026-07-14)
   issueSmartphone: (userId: string) =>
     fetchApi<{ success: boolean; wristbandId: string }>("/api/wristbands/issue-smartphone", {
