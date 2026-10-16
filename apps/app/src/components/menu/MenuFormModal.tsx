@@ -204,15 +204,17 @@ export function MenuFormModal({ circleId, isOpen, onClose, menu, onDelete }: Men
           />
         </div>
 
+        {/* 2026-10-16: 新カテゴリを追加したらすぐ選べるようにし、一覧へ登録されるタイミングも伝える。 */}
         <div className="space-y-2">
           <FormSelect id="menuCategory" label="メニューカテゴリ" value={form.category} onChange={(e) => { setForm({ ...form, category: e.target.value }); if (isEdit) saveNow({ ...form, category: e.target.value }); }}>
             <option value="">未分類</option>
-            {[...new Set((menus ?? []).map((item) => item.category?.trim()).filter((value): value is string => !!value))].sort((a, b) => a.localeCompare(b, "ja")).map((category) => <option key={category} value={category}>{category}</option>)}
+            {[...new Set([...(menus ?? []).map((item) => item.category?.trim()).filter((value): value is string => !!value), form.category.trim()].filter((value) => value.length > 0))].sort((a, b) => a.localeCompare(b, "ja")).map((category) => <option key={category} value={category}>{category}</option>)}
           </FormSelect>
           <div className="flex items-end gap-2">
-            <FormField id="newMenuCategory" label="新しいカテゴリ" maxLength={100} value={newCategory} onChange={(e) => setNewCategory(e.target.value)} placeholder="例: ドリンク" />
-            <Button type="button" variant="outline" disabled={!newCategory.trim()} onClick={() => { const category = newCategory.trim(); const next = { ...form, category }; setForm(next); setNewCategory(""); if (isEdit) saveNow(next); }}>追加して選択</Button>
+            <FormField id="newMenuCategory" label="新しいカテゴリ" fieldClassName="min-w-0 flex-1" maxLength={100} value={newCategory} onChange={(e) => setNewCategory(e.target.value)} placeholder="例: ドリンク" />
+            <Button type="button" variant="outline" className="shrink-0" disabled={!newCategory.trim()} onClick={() => { const category = newCategory.trim(); const next = { ...form, category }; setForm(next); setNewCategory(""); if (isEdit) saveNow(next); }}>追加して選択</Button>
           </div>
+          <p className="text-xs text-muted-foreground">新しいカテゴリはこのメニューを保存すると一覧にも追加されます。</p>
         </div>
 
         <ImageUpload
@@ -336,6 +338,7 @@ export function MenuFormModal({ circleId, isOpen, onClose, menu, onDelete }: Men
                   <button
                     key={t.id}
                     type="button"
+                    aria-pressed={selected}
                     onClick={() => {
                       const next = {
                         ...form,
@@ -371,7 +374,7 @@ export function MenuFormModal({ circleId, isOpen, onClose, menu, onDelete }: Men
             <div className="divide-y-thin divide-border border-y-thin border-border">
               {toppings.filter((t) => form.toppingIds.includes(t.id)).map((t) => {
                 const selected = form.defaultToppingIds.includes(t.id);
-                return <button key={t.id} type="button" aria-pressed={selected} onClick={() => { const next = { ...form, defaultToppingIds: selected ? form.defaultToppingIds.filter((id) => id !== t.id) : [...form.defaultToppingIds, t.id] }; setForm(next); if (isEdit) saveNow(next); }} className="flex w-full items-center gap-3 py-2 text-left text-xs font-bold"><span className="flex h-5 w-5 items-center justify-center border-thick border-border">{selected ? "✓" : ""}</span><span className="flex-1">{t.name}</span><span>¥{t.price}</span></button>;
+                return <button key={t.id} type="button" aria-pressed={selected} onClick={() => { const next = { ...form, defaultToppingIds: selected ? form.defaultToppingIds.filter((id) => id !== t.id) : [...form.defaultToppingIds, t.id] }; setForm(next); if (isEdit) saveNow(next); }} className="flex w-full items-center gap-3 py-2 text-left text-xs font-bold"><span aria-hidden="true" className="flex h-5 w-5 items-center justify-center border-thick border-border">{selected ? "✓" : ""}</span><span className="flex-1">{t.name}</span><span>¥{t.price}</span></button>;
               })}
             </div>
           </div>

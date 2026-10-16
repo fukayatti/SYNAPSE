@@ -66,11 +66,10 @@ export function ToppingSelection({
       group.push(topping);
       byCategory.set(category, group);
     }
+    // 2026-10-16: 一覧で調整した並びをカテゴリの出現順にも反映し、選択手順との食い違いをなくす。
     return [...byCategory.entries()]
-      .sort(([a], [b]) => categoryLabel(a).localeCompare(categoryLabel(b), "ja"))
       .map(([category, options]) => ({
         category,
-        // 2026-10-16: APIの管理順を維持し、注文時の選択肢にも調整済み順を反映する。
         options,
       }));
   }, [toppings]);
