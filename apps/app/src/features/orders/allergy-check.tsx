@@ -73,7 +73,6 @@ export function OrderAllergyWarning({
       {unregistered.length > 0 && (
         <p>アレルゲン情報未登録: {unregistered.join("・")}。提供元に確認してください。</p>
       )}
-      <p className="text-[10px]">この警告は注文を止めません。購入前に必ず提供元へご確認ください。</p>
     </div>
   );
 }

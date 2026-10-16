@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, CheckCircle2, ExternalLink, MapPin, Ticket } from "lucide-react";
 import { useNavigate } from "react-router-dom";
@@ -39,10 +39,6 @@ export default function VisitorStampRallyPage() {
   });
 
   const data = query.data;
-  const selectedArea = useMemo(() => {
-    if (!data?.areas.length) return null;
-    return data.areas.find((area) => area.id === selectedAreaId) ?? data.areas[0];
-  }, [data?.areas, selectedAreaId]);
   const stampedCount = data?.stampedCount ?? 0;
   const requiredCount = data?.requiredCount ?? 0;
   const rulesUrl = data?.rulesUrl ? safeHttpUrl(data.rulesUrl) : null;
@@ -94,14 +90,18 @@ export default function VisitorStampRallyPage() {
           </section>
 
           {data.areas.length > 1 && (
-            <nav className="flex gap-2 overflow-x-auto pb-1" aria-label="会場エリア">
+            <nav className="flex flex-wrap gap-2" aria-label="会場エリアへの移動">
               {data.areas.map((area) => (
                 <button
                   key={area.id}
                   type="button"
-                  aria-pressed={(selectedArea?.id ?? data.areas[0]?.id) === area.id}
-                  onClick={() => setSelectedAreaId(area.id)}
-                  className={`shrink-0 border-thick border-border px-3 py-2 text-xs font-bold ${(selectedArea?.id ?? data.areas[0]?.id) === area.id ? "bg-primary text-primary-foreground" : "bg-background"}`}
+                  aria-controls={`stamp-area-${area.id}`}
+                  aria-current={(selectedAreaId ?? data.areas[0]?.id) === area.id ? "location" : undefined}
+                  onClick={() => {
+                    setSelectedAreaId(area.id);
+                    document.getElementById(`stamp-area-${area.id}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+                  }}
+                  className={`border-thick border-border px-3 py-2 text-xs font-bold ${(selectedAreaId ?? data.areas[0]?.id) === area.id ? "bg-primary text-primary-foreground" : "bg-background"}`}
                 >
                   {area.name} <span className="opacity-75">{area.circles.filter((circle) => circle.stamped).length}/{area.requiredCount ?? area.circles.length}</span>
                 </button>
@@ -109,22 +109,24 @@ export default function VisitorStampRallyPage() {
             </nav>
           )}
 
-          {selectedArea && (
-            <section className="border-thick border-border p-3 space-y-3" aria-labelledby={`stamp-area-${selectedArea.id}`}>
-              <div className="flex items-end justify-between gap-3">
-                <div>
-                  <h2 id={`stamp-area-${selectedArea.id}`} className="text-base font-black flex items-center gap-1.5"><MapPin className="h-4 w-4" />{selectedArea.name}</h2>
-                  <p className="text-[10px] text-muted-foreground mt-0.5">スタンプをタップすると注文内容を確認できます。</p>
+          {/* 2026-10-16: 全エリアを縦に並べ、会場ボタンは一覧内への移動に使う。 */}
+          <div className="space-y-4">
+            {data.areas.map((area) => (
+              <section key={area.id} id={`stamp-area-${area.id}`} className="scroll-mt-4 border-thick border-border p-3 space-y-3" aria-labelledby={`stamp-area-heading-${area.id}`}>
+                <div className="flex items-end justify-between gap-3">
+                  <div>
+                    <h2 id={`stamp-area-heading-${area.id}`} className="text-base font-black flex items-center gap-1.5"><MapPin className="h-4 w-4" aria-hidden="true" />{area.name}</h2>
+                    <p className="text-[10px] text-muted-foreground mt-0.5">スタンプをタップすると注文内容を確認できます。</p>
+                  </div>
+                  <p className="shrink-0 text-xs font-black tabular-nums">
+                    {area.circles.filter((circle) => circle.stamped).length} / {area.requiredCount ?? area.circles.length}
+                  </p>
                 </div>
-                <p className="shrink-0 text-xs font-black tabular-nums">
-                  {selectedArea.circles.filter((circle) => circle.stamped).length} / {selectedArea.requiredCount ?? selectedArea.circles.length}
-                </p>
-              </div>
-              {selectedArea.circles.length === 0 ? (
-                <p className="text-xs text-muted-foreground">このエリアに登録された店舗はありません。</p>
-              ) : (
-                <ul className="grid grid-cols-3 sm:grid-cols-4 gap-2" aria-label={`${selectedArea.name}のスタンプ`}>
-                  {selectedArea.circles.map((circle) => (
+                {area.circles.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">このエリアに登録された店舗はありません。</p>
+                ) : (
+                  <ul className="grid grid-cols-3 sm:grid-cols-4 gap-2" aria-label={`${area.name}のスタンプ`}>
+                    {area.circles.map((circle) => (
                     <li key={circle.id} className="min-w-0">
                       <button
                         type="button"
@@ -144,11 +146,12 @@ export default function VisitorStampRallyPage() {
                         <span className="block text-[9px] uppercase text-muted-foreground">{circle.stamped ? "利用済み" : "未利用"}</span>
                       </button>
                     </li>
-                  ))}
-                </ul>
-              )}
-            </section>
-          )}
+                    ))}
+                  </ul>
+                )}
+              </section>
+            ))}
+          </div>
         </>
       )}
 

@@ -9,6 +9,7 @@ import { QrScannerModal } from "@/components/pos/qr-scanner-modal";
 import { Button } from "@/components/ui/button";
 import { ErrorState } from "@/components/ui/ErrorState";
 import { Input } from "@/components/ui/input";
+import { Modal } from "@/components/ui/Modal";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useVisitor } from "@/hooks/useVisitor";
 import { type WristbandLookupResult, visitorApi, wristbandApi } from "@/lib/api";
@@ -304,20 +305,19 @@ export default function VisitorAccountPage() {
           <p className="border-l-thick border-border bg-muted/40 px-3 py-3 text-sm">登録済みのリストバンドはありません。</p>
         )}
 
-        {!isAddingBand ? (
-          <Button type="button" variant="outline" className="w-full" onClick={() => setIsAddingBand(true)}>
-            <Plus className="mr-2 h-4 w-4" aria-hidden="true" />
-            リストバンドを追加
-          </Button>
-        ) : (
-          <form className="space-y-4 border-thick border-border p-4" onSubmit={(event) => { event.preventDefault(); addBandMutation.mutate(); }}>
-            <div className="flex items-center justify-between gap-3">
-              <h3 className="text-sm font-black">新しいバンドを登録</h3>
-              <Button type="button" variant="ghost" size="icon" aria-label="追加フォームを閉じる" onClick={() => setIsAddingBand(false)}>
-                <X className="h-4 w-4" aria-hidden="true" />
-              </Button>
-            </div>
-            <p className="text-xs leading-relaxed text-muted-foreground">受付前で、まだ登録されていないリストバンドを追加できます。</p>
+        <Button type="button" variant="outline" className="w-full" onClick={() => setIsAddingBand(true)}>
+          <Plus className="mr-2 h-4 w-4" aria-hidden="true" />
+          リストバンドを追加
+        </Button>
+        {/* 2026-10-16: 入力フォームは一覧から分け、カメラ読み取り後もそのまま入力できるモーダルにする。 */}
+        <Modal
+          isOpen={isAddingBand}
+          onClose={() => setIsAddingBand(false)}
+          title="新しいバンドを登録"
+          subtitle="受付前で、まだ登録されていないリストバンドを追加できます。"
+          maxWidth="md"
+        >
+          <form className="space-y-4" onSubmit={(event) => { event.preventDefault(); addBandMutation.mutate(); }}>
             <div className="space-y-1">
               <label htmlFor="new-band-code" className="text-xs font-bold">リストバンドのQRコード</label>
               <div className="flex gap-2">
@@ -342,7 +342,7 @@ export default function VisitorAccountPage() {
               {addBandMutation.isPending ? "登録中…" : "このバンドを登録"}
             </Button>
           </form>
-        )}
+        </Modal>
       </section>
 
       <section aria-labelledby="allergies-title" className="space-y-3 border-t-thick border-border pt-5">
@@ -351,17 +351,21 @@ export default function VisitorAccountPage() {
             <h2 id="allergies-title" className="text-base font-black">アカウントのアレルギー</h2>
             <p className="text-xs leading-relaxed text-muted-foreground">注文時のアレルギー警告に使います。アカウント内で該当する品目をすべて登録してください。</p>
           </div>
-          {!isAllergyEditorOpen && (
-            <Button type="button" variant="outline" className="shrink-0" onClick={() => setIsAllergyEditorOpen(true)}>
-              {savedAllergies === null ? "登録する" : "編集"}
-            </Button>
-          )}
+          <Button type="button" variant="outline" className="shrink-0" onClick={() => setIsAllergyEditorOpen(true)}>
+            {savedAllergies === null ? "登録する" : "編集"}
+          </Button>
         </header>
-        {!isAllergyEditorOpen ? (
-          <p className="border-l-thick border-border bg-muted/40 px-3 py-3 text-sm font-bold">
-            {savedAllergies ?? "未登録です。注文前に登録してください。"}
-          </p>
-        ) : (
+        <p className="border-l-thick border-border bg-muted/40 px-3 py-3 text-sm font-bold">
+          {savedAllergies ?? "未登録です。注文前に登録してください。"}
+        </p>
+        {/* 2026-10-16: 多い選択肢をページに展開せず、フォーカス可能な設定モーダルにまとめる。 */}
+        <Modal
+          isOpen={isAllergyEditorOpen}
+          onClose={() => { setAllergies(parseJapaneseAllergens(user?.allergies)); setIsAllergyEditorOpen(false); }}
+          title="アレルギー情報を設定"
+          subtitle="アカウント内で該当する品目をすべて登録してください。"
+          maxWidth="md"
+        >
           <div className="space-y-3">
             {addBandMutation.isSuccess && (
               <p role="status" className="border-l-thick border-warning bg-warning/10 px-3 py-2 text-xs font-bold">
@@ -380,7 +384,7 @@ export default function VisitorAccountPage() {
               </Button>
             </div>
           </div>
-        )}
+        </Modal>
       </section>
 
       <QrScannerModal
