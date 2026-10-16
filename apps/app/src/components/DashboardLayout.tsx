@@ -37,6 +37,7 @@ import {
   CreditCard,
   X,
   MapPinned,
+  Gauge,
 } from "lucide-react";
 
 interface MenuItem {
@@ -188,6 +189,7 @@ export default function DashboardLayout({
     {
       label: "運営",
       items: [
+        { title: "混雑モニター", tab: "congestion", icon: Gauge },
         { title: "注文モニタ", tab: "order-monitor", icon: MonitorCheck },
         { title: "在庫・売り切れ", tab: "inventory", icon: Boxes },
         { title: "一斉アナウンス", tab: "announce", icon: Megaphone },
@@ -201,7 +203,7 @@ export default function DashboardLayout({
       items: [
         { title: "統計・分析", tab: "analytics", icon: BarChart3 },
         { title: "レビュー", tab: "reviews", icon: Star },
-        { title: "来場者行動・混雑", tab: "behavior", icon: Activity },
+        { title: "来場者行動分析", tab: "behavior", icon: Activity },
         { title: "全体売上管理", tab: "sales", icon: TrendingUp },
         { title: "精算", tab: "settlement", icon: Calculator },
         { title: "日次締め", tab: "daily-close", icon: CalendarCheck },

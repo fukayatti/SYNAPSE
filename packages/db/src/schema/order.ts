@@ -142,6 +142,8 @@ export const coupon = sqliteTable(
     // cart_percentage: 税・送料を含まない商品小計全体から percentage% 引く。
     // 2026-10-16: 利用者の要望により商品/トッピング指定を伴わない全体割引を追加。
     kind: text("kind").notNull().default("menu_discount"), // menu_discount / free_topping / cart_percentage
+    // 2026-10-16: サークル店頭のPOS専用クーポンは来場者の事前注文経路では利用不可。
+    registerOnly: integer("register_only", { mode: "boolean" }).notNull().default(false),
     // 固定額引き (円)。menu_discount のときのみ使用。free_topping ではトッピングの実価格を
     // 都度参照するため使わない (値上げ/値下げしても常に「そのトッピング分」が引かれるように)。
     discountAmount: integer("discount_amount"),
@@ -238,6 +240,24 @@ export const couponRedemption = sqliteTable(
       table.eventUserId
     ),
   ]
+);
+
+// 2026-10-16: レジ専用クーポンは来場者のpre_orderではなく、確定したPOS注文と紐付けて
+// 使用回数・割引額を記録する。注文本体と同じD1 batchに挿入し、失敗時に回数だけ消費しない。
+export const orderCoupon = sqliteTable(
+  "order_coupon",
+  {
+    id: text("id").primaryKey().$defaultFn(() => ulid()),
+    orderId: text("order_id").notNull().references(() => order.id, { onDelete: "cascade" }),
+    couponId: text("coupon_id").notNull().references(() => coupon.id, { onDelete: "cascade" }),
+    discountApplied: integer("discount_applied").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`).notNull(),
+  },
+  (table) => [
+    uniqueIndex("order_coupon_order_unique").on(table.orderId),
+    index("order_coupon_coupon_idx").on(table.couponId),
+  ],
 );
 
 // 事前オーダーテーブル

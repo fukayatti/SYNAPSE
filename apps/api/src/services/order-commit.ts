@@ -14,6 +14,7 @@ type CommitOrderInputBase = {
   id: string; circleId: string; userId: string; cashierId?: string;
   peopleCount: number; totalPrice: number; paymentMethod?: string;
   status: "pending" | "preparing" | "completed";
+  registerCoupon?: { id: string; discountApplied: number };
   items: Line[];
 };
 // 2026-10-08 (#49): claimのCAS tokenをpreOrderIdと必ず対にし、D1へundefinedをbindできないよう型で制約する。
@@ -81,6 +82,7 @@ export async function commitOrder(db: D1, command: OrderCommand, input: CommitOr
   const toppings = needs(toppingQuantities);
   const itemJson = JSON.stringify(items);
   const toppingJson = JSON.stringify(items.flatMap((item) => item.toppings.map((top) => ({ ...top, id: ulid(), orderItemId: item.id }))));
+  const registerCoupon = input.registerCoupon ?? null;
   const statements = [
     db.prepare(`INSERT INTO order_write_guard (id, valid) SELECT ?, CASE WHEN
       EXISTS (SELECT 1 FROM circle c JOIN event e ON e.id=c.event_id JOIN event_user u ON u.event_id=e.id
@@ -95,9 +97,13 @@ export async function commitOrder(db: D1, command: OrderCommand, input: CommitOr
         OR (t.stock_quantity>0 AND t.stock_quantity<json_extract(j.value,'$.quantity')))
       AND (? IS NULL OR EXISTS (SELECT 1 FROM pre_order WHERE id=? AND circle_id=? AND user_id=?
         AND status='pending' AND updated_at=?))
+      AND (? IS NULL OR EXISTS (SELECT 1 FROM coupon cp WHERE cp.id=? AND cp.circle_id=? AND cp.register_only=1
+        AND cp.status='active' AND (cp.expires_at IS NULL OR cp.expires_at>=?)
+        AND (cp.max_redemptions IS NULL OR cp.redeemed_count<cp.max_redemptions)))
       THEN 1 ELSE 0 END`).bind(input.id, input.circleId, input.userId, now, menus, input.circleId,
         toppings, input.circleId, input.preOrderId ?? null, input.preOrderId ?? null, input.circleId, input.userId,
-        input.expectedPreOrderUpdatedAt ?? null),
+        input.expectedPreOrderUpdatedAt ?? null, registerCoupon?.id ?? null, registerCoupon?.id ?? null,
+        input.circleId, now),
     // 2026-10-03 (#81): 表示番号は店舗内の連番で十分なため、共有グローバル連番の競合書込みをなくす。
     // 年を表示に含めて店舗内の番号検索を一意に保ち、初回実行時は同じJST営業日の旧形式番号から続ける。
     db.prepare(`INSERT INTO order_sequence (scope,value)
@@ -141,6 +147,16 @@ export async function commitOrder(db: D1, command: OrderCommand, input: CommitOr
     // 2026-10-07 Issue #49: cashier は読取時の draft updated_at をCASし、後着autosaveとの順序を確定する。
     statements.push(db.prepare(`UPDATE pre_order SET status='completed',updated_at=MAX(updated_at+1,?)
       WHERE id=? AND status='pending' AND updated_at=?`).bind(now, input.preOrderId, input.expectedPreOrderUpdatedAt));
+  }
+  if (registerCoupon) {
+    // 割引回数の消費・使用履歴は注文保存と同じbatchに含め、注文失敗時は一緒にrollbackする。
+    statements.push(db.prepare(`UPDATE coupon SET redeemed_count=redeemed_count+1
+      WHERE id=? AND circle_id=? AND register_only=1 AND status='active'
+        AND (expires_at IS NULL OR expires_at>=?)
+        AND (max_redemptions IS NULL OR redeemed_count<max_redemptions)`)
+      .bind(registerCoupon.id, input.circleId, now));
+    statements.push(db.prepare(`INSERT INTO order_coupon (id,order_id,coupon_id,discount_applied)
+      VALUES (?,?,?,?)`).bind(ulid(), input.id, registerCoupon.id, registerCoupon.discountApplied));
   }
   if (input.status !== "pending") statements.push(db.prepare(`INSERT INTO user_stamp (id,user_id,circle_id)
     SELECT ?,?,? WHERE NOT EXISTS (SELECT 1 FROM user_stamp WHERE user_id=? AND circle_id=?)`)

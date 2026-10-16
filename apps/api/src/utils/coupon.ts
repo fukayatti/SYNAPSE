@@ -27,6 +27,10 @@ export async function checkCouponEligibility(
   if (params.circleId && cp.circleId !== params.circleId) {
     apiError("BAD_REQUEST", "このクーポンは指定サークルのものではありません");
   }
+  // レジ専用割引はスタッフのPOS注文でのみ消費できるため、事前注文/visitor verifyを拒否する。
+  if (cp.registerOnly) {
+    apiError("BAD_REQUEST", "このクーポンはサークルのレジでのみ利用できます");
+  }
   if (cp.status !== "active") {
     apiError("BAD_REQUEST", "このクーポンは現在利用できません");
   }

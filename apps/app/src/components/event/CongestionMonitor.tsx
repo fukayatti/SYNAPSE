@@ -87,6 +87,11 @@ export function CongestionMonitor({
   const rangeStart = rangeDuration === null ? firstHistoryAt : now - rangeDuration;
   // 2026-10-16: 過去の待ち時間は継続値ではなく報告時点のサンプルとして扱い、空白区間を線で補間しない。
   const selectedReports = allReports.filter((report) => report.timestamp >= rangeStart && report.timestamp <= now);
+  const selectedCircleHistory = circleReports.flatMap((circle) => circle.history
+    // 現在値は上の一覧ですでに表示するため、同じ報告を履歴表に重複して載せない。
+    .filter((report) => report.timestamp >= rangeStart && report.timestamp <= now && report.reportedAt !== circle.current?.reportedAt)
+    .map((report) => ({ ...report, circleId: circle.id, circleName: circle.name })))
+    .sort((a, b) => b.timestamp - a.timestamp || a.circleName.localeCompare(b.circleName, "ja"));
   const trend = useMemo<TrendBucket[]>(() => {
     const bucketCount = 12;
     const duration = Math.max(1, now - rangeStart);
@@ -261,6 +266,41 @@ export function CongestionMonitor({
               )}
             </section>
           </div>
+
+          <section aria-labelledby="circle-report-history-title" className="space-y-2">
+            <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+              <div>
+                <h3 id="circle-report-history-title" className="text-sm font-bold">サークル別の報告履歴</h3>
+                <p className="text-[10px] text-muted-foreground">選択期間内の報告時刻と待ち時間。現在値と同じ報告は一覧から除外しています。</p>
+              </div>
+              <span className="font-mono text-[10px] text-muted-foreground">{selectedCircleHistory.length.toLocaleString("ja-JP")}件</span>
+            </div>
+            {selectedCircleHistory.length === 0 ? (
+              <EmptyState icon={Clock3} message="選択期間の履歴報告はありません" />
+            ) : (
+              <div className="overflow-x-auto border-y-thin border-border">
+                <table className="w-full min-w-[480px] text-left text-xs">
+                  <thead>
+                    <tr className="border-b-thin border-border text-[10px] text-muted-foreground">
+                      <th scope="col" className="px-2 py-2 font-semibold">サークル</th>
+                      <th scope="col" className="px-2 py-2 font-semibold">報告時刻</th>
+                      <th scope="col" className="px-2 py-2 text-right font-semibold">待ち時間</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {selectedCircleHistory.map((report) => (
+                      <tr key={`${report.circleId}-${report.reportedAt}`}>
+                        <th scope="row" className="max-w-[16rem] truncate px-2 py-2 text-left font-semibold" title={report.circleName}>{report.circleName}</th>
+                        <td className="whitespace-nowrap px-2 py-2 font-mono text-muted-foreground">{formatTime(report.timestamp, withDate)}</td>
+                        <td className="whitespace-nowrap px-2 py-2 text-right font-mono font-bold tabular-nums">約{report.minutes}分</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+
           <p className="text-[10px] text-muted-foreground">
             「全履歴」は各店舗の直近500件までです。現在値は30分を過ぎると集計から外れます。
           </p>
