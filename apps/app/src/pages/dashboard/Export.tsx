@@ -161,35 +161,35 @@ function CircleExportContent() {
   return (
     <DashboardLayout title={circleName || "サークルダッシュボード"} subtitle="データエクスポート" type="circle">
       <div className="space-y-6">
-        <div className="flex items-center justify-between border-b-thick border-border pb-3">
-          <h2 className="text-sm font-bold flex items-center gap-2 uppercase tracking-wider">
-            <Download className="h-4 w-4" /> データエクスポート
+        <div className="space-y-3 border-b-thick border-border pb-6">
+          <h2 className="text-xl font-headline flex items-center gap-3 uppercase tracking-wider">
+            <Download className="h-5 w-5 shrink-0" /> データエクスポート
           </h2>
-          <p className="text-[11px] text-muted-foreground font-mono mt-1">
+          <p className="max-w-3xl text-sm leading-relaxed text-muted-foreground font-mono">
             サークル内の売上・注文履歴・商品一覧などのデータを CSV 形式でダウンロードできます。
           </p>
         </div>
 
-        <div className="grid gap-4 md:grid-cols-2">
+        <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
           {items.map((item) => {
             const Icon = item.icon;
             const isDownloading = downloading[item.key] || false;
             return (
-              <Card key={item.key} className="rounded-none border-thick border-border shadow-none bg-background flex flex-col justify-between">
-                <CardHeader className="p-4 pb-2">
-                  <div className="flex items-center gap-2">
+              <Card key={item.key} className="min-w-0 flex flex-col justify-between gap-6 p-6">
+                <CardHeader className="min-w-0 p-0">
+                  <div className="flex min-w-0 items-start gap-3">
                     <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
-                    <CardTitle className="text-xs uppercase font-bold tracking-wider">{item.title}</CardTitle>
+                    <CardTitle className="min-w-0 break-words text-sm uppercase font-bold tracking-wider">{item.title}</CardTitle>
                   </div>
-                  <CardDescription className="text-[10px] leading-relaxed pt-1">
+                  <CardDescription className="break-words pt-2 text-xs leading-relaxed">
                     {item.description}
                   </CardDescription>
                 </CardHeader>
-                <CardContent className="p-4 pt-2">
+                <CardContent className="min-w-0 p-0">
                   <Button
                     onClick={item.action}
                     disabled={isDownloading}
-                    className="w-full rounded-none border-thick border-border bg-background text-foreground hover:bg-primary hover:text-primary-foreground font-bold text-xs h-9 shadow-none"
+                    className="h-auto min-h-11 w-full min-w-0 whitespace-normal break-words px-3 py-2 text-center text-xs leading-snug font-bold"
                     variant="outline"
                   >
                     {isDownloading ? (
