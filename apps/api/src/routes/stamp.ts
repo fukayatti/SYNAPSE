@@ -13,7 +13,7 @@ import {
   orderItem,
   orderItemTopping,
 } from "@fesflow/db";
-import { and, desc, eq, isNull, ne, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, isNull, like, ne, or, sql } from "drizzle-orm";
 import { ulid } from "ulidx";
 import { getSession, hasPermission } from "../utils/auth";
 import type { AppEnv } from "../types";
@@ -123,6 +123,12 @@ function parseCircleStoreAreaId(raw: string | null | undefined): string | null {
   } catch {
     return null;
   }
+}
+
+function toIsoDate(value: Date | number | null | undefined): string | null {
+  if (value == null) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 
 async function resolveVisitor(db: AppEnv["Variables"]["db"], eventId: string, code: string) {
@@ -582,6 +588,228 @@ stampRoutes.get("/event/:eventId/redemptions", async (c) => {
     totalQuantity: [...summaryByReward.values()].reduce((total, row) => total + row.quantity, 0),
     summary: [...summaryByReward.values()],
     history: recentHistory,
+  });
+});
+
+// 2026-10-16: ラリー実績の人数はリストバンド本数ではなく、完了注文に紐づくイベント来場者IDで集計する。
+// 注文数・アカウント利用人数・アカウント未連携注文を分け、物理バンドを使わない来場形態も同じ画面で把握できるようにする。
+stampRoutes.get("/event/:eventId/usage", async (c) => {
+  const db = c.get("db");
+  const eventId = c.req.param("eventId");
+  if (!(await hasPermission(c, null, "event:write", eventId))) {
+    apiError("FORBIDDEN", "このイベントのスタンプラリー実績を閲覧する権限がありません");
+  }
+
+  const eventRows = await db.select({
+    stampRallySettings: event.stampRallySettings,
+    storeAreas: event.storeAreas,
+  }).from(event).where(and(eq(event.id, eventId), isNull(event.deletedAt))).limit(1);
+  const eventRow = eventRows[0];
+  if (!eventRow) apiError("NOT_FOUND", "イベントが見つかりません");
+
+  const settings = parseStampRallySettings(eventRow.stampRallySettings);
+  const configuredAreas = parseStoreAreas(eventRow.storeAreas);
+  const circles = await db.select({ id: circle.id, name: circle.name, settings: circle.settings })
+    .from(circle).where(and(eq(circle.eventId, eventId), isNull(circle.deletedAt)));
+  const circlesById = new Map(circles.map((row) => [row.id, row]));
+  const validTargetAreaIds = settings.targetAreaIds.filter((id) => configuredAreas.some((area) => area.id === id));
+  const useLegacyAreas = validTargetAreaIds.length === 0 && settings.legacyAreas.length > 0;
+  const targetCircleIds = useLegacyAreas
+    ? settings.legacyAreas.flatMap((area) => area.circleIds.filter((id) => circlesById.has(id)))
+    : circles.filter((row) => validTargetAreaIds.includes(parseCircleStoreAreaId(row.settings) || ""))
+        .map((row) => row.id);
+  const uniqueTargetCircleIds = [...new Set(targetCircleIds)];
+  const targetCircleFilter = sql`${circle.id} in (select value from json_each(${JSON.stringify(uniqueTargetCircleIds)}))`;
+
+  const storeAreaById = new Map(configuredAreas.map((area) => [area.id, area.name]));
+  const targetCircleSet = new Set(uniqueTargetCircleIds);
+  const storeRows = await db.select({
+    circleId: circle.id,
+    orderCount: sql<number>`count(${order.id})`,
+    visitorCount: sql<number>`count(distinct ${eventUser.id})`,
+    anonymousOrderCount: sql<number>`coalesce(sum(case when ${order.id} is not null and ${eventUser.id} is null then 1 else 0 end), 0)`,
+    revenue: sql<number>`coalesce(sum(${order.totalPrice}), 0)`,
+    lastUsedAt: sql<number | null>`max(coalesce(${order.completedAt}, ${order.createdAt}))`,
+  }).from(circle)
+    .leftJoin(order, and(
+      eq(order.circleId, circle.id),
+      ne(order.status, "cancelled"),
+      or(eq(order.status, "completed"), eq(order.completed, true)),
+    ))
+    .leftJoin(eventUser, and(eq(eventUser.id, order.userId), eq(eventUser.eventId, eventId)))
+    .where(and(eq(circle.eventId, eventId), isNull(circle.deletedAt)))
+    .groupBy(circle.id);
+  const storeUsageById = new Map(storeRows.map((row) => [row.circleId, row]));
+  const stores = circles.map((row) => {
+    const usage = storeUsageById.get(row.id);
+    const areaId = parseCircleStoreAreaId(row.settings);
+    return {
+      circleId: row.id,
+      name: row.name,
+      storeAreaId: areaId,
+      storeAreaName: areaId ? storeAreaById.get(areaId) ?? null : null,
+      isStampTarget: targetCircleSet.has(row.id),
+      completedOrderCount: usage?.orderCount ?? 0,
+      visitorAccountCount: usage?.visitorCount ?? 0,
+      unlinkedOrderCount: usage?.anonymousOrderCount ?? 0,
+      orderTotal: usage?.revenue ?? 0,
+      lastUsedAt: toIsoDate(usage?.lastUsedAt),
+    };
+  }).sort((left, right) => right.visitorAccountCount - left.visitorAccountCount || left.name.localeCompare(right.name, "ja"));
+
+  const visitorCounts = uniqueTargetCircleIds.length > 0
+    ? await db.select({
+        eventUserId: eventUser.id,
+        visitedStoreCount: sql<number>`count(distinct ${circle.id})`,
+      }).from(order)
+        .innerJoin(circle, eq(order.circleId, circle.id))
+        .innerJoin(eventUser, and(eq(eventUser.id, order.userId), eq(eventUser.eventId, eventId)))
+        .where(and(
+          eq(circle.eventId, eventId),
+          isNull(circle.deletedAt),
+          targetCircleFilter,
+          ne(order.status, "cancelled"),
+          or(eq(order.status, "completed"), eq(order.completed, true)),
+        ))
+        .groupBy(eventUser.id)
+    : [];
+  const participantIds = new Set(visitorCounts.map((row) => row.eventUserId));
+  const qualifiedIds = new Set<string>();
+  if (useLegacyAreas) {
+    // 旧形式はエリアごとに必要数が異なるため、既存条件をそのまま再現する。
+    for (const area of settings.legacyAreas) {
+      const areaCircleIds = [...new Set(area.circleIds.filter((id) => circlesById.has(id)))];
+      if (areaCircleIds.length === 0) continue;
+      const areaCircleFilter = sql`${circle.id} in (select value from json_each(${JSON.stringify(areaCircleIds)}))`;
+      const areaVisitors = await db.select({
+        eventUserId: eventUser.id,
+        visitedStoreCount: sql<number>`count(distinct ${circle.id})`,
+      }).from(order)
+        .innerJoin(circle, eq(order.circleId, circle.id))
+        .innerJoin(eventUser, and(eq(eventUser.id, order.userId), eq(eventUser.eventId, eventId)))
+        .where(and(
+          eq(circle.eventId, eventId),
+          isNull(circle.deletedAt),
+          areaCircleFilter,
+          ne(order.status, "cancelled"),
+          or(eq(order.status, "completed"), eq(order.completed, true)),
+        ))
+        .groupBy(eventUser.id);
+      for (const visitor of areaVisitors) {
+        if (visitor.visitedStoreCount >= area.requiredCount) qualifiedIds.add(visitor.eventUserId);
+      }
+    }
+  } else {
+    for (const visitor of visitorCounts) {
+      if (visitor.visitedStoreCount >= settings.requiredCount) qualifiedIds.add(visitor.eventUserId);
+    }
+  }
+
+  const redemptionRows = await db.select({
+    eventUserId: stampRallyRedemption.eventUserId,
+    quantity: stampRallyRedemption.quantity,
+  }).from(stampRallyRedemption).where(eq(stampRallyRedemption.eventId, eventId));
+  const recordedWithNewFormat = new Set(redemptionRows.map((row) => row.eventUserId));
+  const legacyRedemptionRows = await db.select({ eventUserId: eventUser.id })
+    .from(rewardRedemption).innerJoin(eventUser, eq(rewardRedemption.userId, eventUser.id))
+    .where(eq(eventUser.eventId, eventId));
+  const redeemedIds = new Set([
+    ...recordedWithNewFormat,
+    ...legacyRedemptionRows.map((row) => row.eventUserId),
+  ]);
+  const legacyOnlyIds = new Set(legacyRedemptionRows
+    .map((row) => row.eventUserId)
+    .filter((id) => !recordedWithNewFormat.has(id)));
+  const qualifiedRedeemedCount = [...qualifiedIds].filter((id) => redeemedIds.has(id)).length;
+  const redeemedQuantity = redemptionRows.reduce((sum, row) => sum + row.quantity, 0) + legacyOnlyIds.size;
+  const rewardSummaryRows = await db.select({
+    rewardId: stampRallyRedemption.rewardId,
+    quantity: sql<number>`sum(${stampRallyRedemption.quantity})`,
+  }).from(stampRallyRedemption).where(eq(stampRallyRedemption.eventId, eventId))
+    .groupBy(stampRallyRedemption.rewardId);
+  const redeemedByReward = new Map(rewardSummaryRows.map((row) => [row.rewardId, row.quantity]));
+  if (legacyOnlyIds.size > 0) {
+    redeemedByReward.set("default", (redeemedByReward.get("default") ?? 0) + legacyOnlyIds.size);
+  }
+  const rewards = settings.rewards.map((reward) => {
+    const redeemed = redeemedByReward.get(reward.id) ?? 0;
+    return {
+      ...reward,
+      redeemedQuantity: redeemed,
+      remainingQuantity: reward.stockQuantity === null ? null : Math.max(0, reward.stockQuantity - redeemed),
+    };
+  });
+
+  return c.json({
+    enabled: settings.enabled,
+    targetStoreCount: uniqueTargetCircleIds.length,
+    requiredCount: settings.requiredCount,
+    participantAccountCount: participantIds.size,
+    qualifiedAccountCount: qualifiedIds.size,
+    redeemedAccountCount: redeemedIds.size,
+    qualifiedRedeemedAccountCount: qualifiedRedeemedCount,
+    redeemedQuantity,
+    rewards,
+    stores,
+  });
+});
+
+// 2026-10-16: 店舗詳細はイベントスタッフ権限の範囲で、完了注文を来場者アカウント単位にまとめてページ表示する。
+stampRoutes.get("/event/:eventId/stores/:circleId", async (c) => {
+  const db = c.get("db");
+  const eventId = c.req.param("eventId");
+  const circleId = c.req.param("circleId");
+  if (!(await hasPermission(c, null, "event:write", eventId))) {
+    apiError("FORBIDDEN", "このイベントの店舗利用実績を閲覧する権限がありません");
+  }
+  const rawPage = Number(c.req.query("page") || "1");
+  const pageSize = 25;
+  const search = (c.req.query("q") || "").trim().slice(0, 80);
+  const searchFilter = search
+    ? or(like(eventUser.nickname, `%${search}%`), sql`cast(${eventUser.displayId} as text) like ${`%${search}%`}`)
+    : undefined;
+  const visitorFilter = and(
+    eq(circle.id, circleId),
+    eq(circle.eventId, eventId),
+    isNull(circle.deletedAt),
+    ne(order.status, "cancelled"),
+    or(eq(order.status, "completed"), eq(order.completed, true)),
+    eq(eventUser.eventId, eventId),
+    searchFilter,
+  );
+  const circleRows = await db.select({ id: circle.id, name: circle.name })
+    .from(circle).where(and(eq(circle.id, circleId), eq(circle.eventId, eventId), isNull(circle.deletedAt))).limit(1);
+  const store = circleRows[0];
+  if (!store) apiError("NOT_FOUND", "店舗が見つかりません");
+
+  const countRows = await db.select({ total: sql<number>`count(distinct ${eventUser.id})` })
+    .from(order).innerJoin(circle, eq(order.circleId, circle.id))
+    .innerJoin(eventUser, and(eq(eventUser.id, order.userId), eq(eventUser.eventId, eventId)))
+    .where(visitorFilter);
+  const total = countRows[0]?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const page = Number.isSafeInteger(rawPage) && rawPage > 0 ? Math.min(rawPage, totalPages) : 1;
+  const visitors = await db.select({
+    displayId: eventUser.displayId,
+    nickname: eventUser.nickname,
+    orderCount: sql<number>`count(${order.id})`,
+    orderTotal: sql<number>`coalesce(sum(${order.totalPrice}), 0)`,
+    lastUsedAt: sql<number | null>`max(coalesce(${order.completedAt}, ${order.createdAt}))`,
+  }).from(order)
+    .innerJoin(circle, eq(order.circleId, circle.id))
+    .innerJoin(eventUser, and(eq(eventUser.id, order.userId), eq(eventUser.eventId, eventId)))
+    .where(visitorFilter)
+    .groupBy(eventUser.id, eventUser.displayId, eventUser.nickname)
+    .orderBy(desc(sql`max(coalesce(${order.completedAt}, ${order.createdAt}))`), asc(eventUser.displayId))
+    .limit(pageSize)
+    .offset((page - 1) * pageSize);
+
+  return c.json({
+    store,
+    page,
+    pageSize,
+    total,
+    visitors: visitors.map((visitor) => ({ ...visitor, lastUsedAt: toIsoDate(visitor.lastUsedAt) })),
   });
 });
 

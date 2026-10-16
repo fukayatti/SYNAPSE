@@ -95,6 +95,8 @@ function getCircleStoreAreaId(circle: Circle): string | null {
 export function StampRallySettingsCard({ eventId, event }: { eventId: string; event: EventWithStoreAreas }) {
   const queryClient = useQueryClient();
   const [settings, setSettings] = useState<ParsedSettings>(() => parseSettings(event.stampRallySettings));
+  const [draftSettings, setDraftSettings] = useState<ParsedSettings>(() => parseSettings(event.stampRallySettings));
+  const [requiredCountInput, setRequiredCountInput] = useState(() => String(parseSettings(event.stampRallySettings).requiredCount));
   const [isEditorOpen, setIsEditorOpen] = useState(false);
   const storeAreas = useMemo(() => parseStoreAreas(event.storeAreas), [event.storeAreas]);
   const circlesQuery = useQuery({
@@ -104,11 +106,15 @@ export function StampRallySettingsCard({ eventId, event }: { eventId: string; ev
   useEffect(() => setSettings(parseSettings(event.stampRallySettings)), [event.stampRallySettings]);
 
   const circlesInTargets = (circlesQuery.data ?? []).filter((circle) =>
-    settings.targetAreaIds.includes(getCircleStoreAreaId(circle) || "")
+    draftSettings.targetAreaIds.includes(getCircleStoreAreaId(circle) || "")
   );
-  const invalidRequiredCount = !Number.isInteger(settings.requiredCount) || settings.requiredCount < 1 || settings.requiredCount > 100;
+  const persistedCircleCount = (circlesQuery.data ?? []).filter((circle) =>
+    settings.targetAreaIds.includes(getCircleStoreAreaId(circle) || "")
+  ).length;
+  const parsedRequiredCount = requiredCountInput.trim() === "" ? Number.NaN : Number(requiredCountInput);
+  const invalidRequiredCount = !/^\d+$/.test(requiredCountInput) || !Number.isInteger(parsedRequiredCount) || parsedRequiredCount < 1 || parsedRequiredCount > 100;
   const invalidRulesUrl = (() => {
-    const raw = settings.rulesUrl.trim();
+    const raw = draftSettings.rulesUrl.trim();
     if (!raw) return false;
     try {
       const url = new URL(raw);
@@ -117,43 +123,51 @@ export function StampRallySettingsCard({ eventId, event }: { eventId: string; ev
       return true;
     }
   })();
-  const invalidRewards = settings.rewards.length === 0 || settings.rewards.length > 20 ||
-    settings.rewards.some((reward) => !reward.name.trim() || reward.name.trim().length > 100 ||
+  const invalidRewards = draftSettings.rewards.length === 0 || draftSettings.rewards.length > 20 ||
+    draftSettings.rewards.some((reward) => !reward.name.trim() || reward.name.trim().length > 100 ||
       (reward.stockQuantity !== null && (!Number.isInteger(reward.stockQuantity) || reward.stockQuantity < 0 || reward.stockQuantity > 500_000))) ||
-    new Set(settings.rewards.map((reward) => reward.id)).size !== settings.rewards.length ||
-    new Set(settings.rewards.map((reward) => reward.name.trim().toLocaleLowerCase())).size !== settings.rewards.length;
-  const invalidSettings = settings.targetAreaIds.length > 50 ||
-    new Set(settings.targetAreaIds).size !== settings.targetAreaIds.length ||
+    new Set(draftSettings.rewards.map((reward) => reward.id)).size !== draftSettings.rewards.length ||
+    new Set(draftSettings.rewards.map((reward) => reward.name.trim().toLocaleLowerCase())).size !== draftSettings.rewards.length;
+  const invalidSettings = draftSettings.targetAreaIds.length > 50 ||
+    new Set(draftSettings.targetAreaIds).size !== draftSettings.targetAreaIds.length ||
     invalidRequiredCount || invalidRewards ||
-    settings.redemptionLocation.trim().length > 500 || settings.rulesUrl.trim().length > 2048 || invalidRulesUrl ||
-    (settings.enabled && (
-    settings.targetAreaIds.length === 0 ||
-    settings.requiredCount > circlesInTargets.length ||
-    !settings.redemptionLocation.trim()
+    draftSettings.redemptionLocation.trim().length > 500 || draftSettings.rulesUrl.trim().length > 2048 || invalidRulesUrl ||
+    (draftSettings.enabled && (
+    draftSettings.targetAreaIds.length === 0 ||
+    parsedRequiredCount > circlesInTargets.length ||
+    !draftSettings.redemptionLocation.trim()
     ));
 
   const save = useMutation({
     mutationFn: () => {
       const payload: StampRallySettings = {
-        enabled: settings.enabled,
-        targetAreaIds: settings.targetAreaIds,
-        requiredCount: settings.requiredCount,
-        rewardTitle: settings.rewards[0]?.name.trim() || settings.rewardTitle.trim() || "景品交換",
-        rewards: settings.rewards.map((reward) => ({ ...reward, name: reward.name.trim() })),
-        redemptionLocation: settings.redemptionLocation.trim(),
-        rulesUrl: settings.rulesUrl.trim(),
+        enabled: draftSettings.enabled,
+        targetAreaIds: draftSettings.targetAreaIds,
+        requiredCount: parsedRequiredCount,
+        rewardTitle: draftSettings.rewards[0]?.name.trim() || draftSettings.rewardTitle.trim() || "景品交換",
+        rewards: draftSettings.rewards.map((reward) => ({ ...reward, name: reward.name.trim() })),
+        redemptionLocation: draftSettings.redemptionLocation.trim(),
+        rulesUrl: draftSettings.rulesUrl.trim(),
       };
       return eventApi.setStampRallySettings(eventId, payload);
     },
     onSuccess: () => {
       toast.success("スタンプラリーの設定を保存しました");
+      setSettings({ ...draftSettings, requiredCount: parsedRequiredCount });
       setIsEditorOpen(false);
       queryClient.invalidateQueries({ queryKey: ["event", eventId] });
+      queryClient.invalidateQueries({ queryKey: ["stamp-rally-usage", eventId] });
     },
     onError: (error: any) => toast.error(error?.message || "設定を保存できませんでした"),
   });
 
-  const toggleTargetArea = (areaId: string) => setSettings((current) => ({
+  const openEditor = () => {
+    setDraftSettings(settings);
+    setRequiredCountInput(String(settings.requiredCount));
+    setIsEditorOpen(true);
+  };
+
+  const toggleTargetArea = (areaId: string) => setDraftSettings((current) => ({
     ...current,
     targetAreaIds: current.targetAreaIds.includes(areaId)
       ? current.targetAreaIds.filter((id) => id !== areaId)
@@ -169,11 +183,9 @@ export function StampRallySettingsCard({ eventId, event }: { eventId: string; ev
               <Ticket className="h-4 w-4" />
               <h3 className="text-xs font-bold uppercase tracking-wider">スタンプラリー</h3>
             </div>
-            <ToggleSwitch
-              checked={settings.enabled}
-              onChange={(enabled) => setSettings((current) => ({ ...current, enabled }))}
-              label="スタンプラリー"
-            />
+            <span className={`text-[10px] font-bold ${settings.enabled ? "text-success" : "text-muted-foreground"}`}>
+              {settings.enabled ? "受付中" : "停止中"}
+            </span>
           </div>
           <p className="text-[11px] leading-relaxed text-muted-foreground">
             事前に登録した会場エリアから対象エリアを選び、利用条件と景品交換案内を設定します。
@@ -186,7 +198,7 @@ export function StampRallySettingsCard({ eventId, event }: { eventId: string; ev
                 : "対象エリア未設定"}
             </p>
             <p className="text-[10px] text-muted-foreground">景品 {settings.rewards.length}種類</p>
-            <Button type="button" variant="outline" size="sm" onClick={() => setIsEditorOpen(true)}>
+            <Button type="button" variant="outline" size="sm" onClick={openEditor}>
               <Settings2 className="h-4 w-4" />条件を設定
             </Button>
           </div>
@@ -196,7 +208,7 @@ export function StampRallySettingsCard({ eventId, event }: { eventId: string; ev
             </p>
           )}
           {settings.enabled && settings.redemptionLocation.trim().length === 0 && <p className="text-[10px] text-error" role="alert">景品交換場所を入力してください。</p>}
-          {settings.enabled && (settings.targetAreaIds.length === 0 || settings.requiredCount > circlesInTargets.length) && <p className="text-[10px] text-error" role="alert">対象エリアの店舗数が必要数に足りません。サークルの場所を確認してください。</p>}
+          {settings.enabled && (settings.targetAreaIds.length === 0 || settings.requiredCount > persistedCircleCount) && <p className="text-[10px] text-error" role="alert">対象エリアの店舗数が必要数に足りません。サークルの場所を確認してください。</p>}
         </CardContent>
       </Card>
 
@@ -208,6 +220,17 @@ export function StampRallySettingsCard({ eventId, event }: { eventId: string; ev
         maxWidth="lg"
       >
         <div className="max-h-[70vh] space-y-4 overflow-y-auto pr-1">
+          <div className="flex items-center justify-between gap-3 border-b-thin border-border pb-3">
+            <div className="space-y-1">
+              <p className="text-xs font-bold">スタンプラリーを受付</p>
+              <p className="text-[10px] text-muted-foreground">停止中も、ここまでの利用実績は確認できます。</p>
+            </div>
+            <ToggleSwitch
+              checked={draftSettings.enabled}
+              onChange={(enabled) => setDraftSettings((current) => ({ ...current, enabled }))}
+              label="スタンプラリーの受付"
+            />
+          </div>
           <fieldset className="space-y-2">
             <legend className="text-xs font-bold">対象エリア</legend>
             {storeAreas.length === 0 ? (
@@ -217,7 +240,7 @@ export function StampRallySettingsCard({ eventId, event }: { eventId: string; ev
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {storeAreas.map((area) => {
-                  const selected = settings.targetAreaIds.includes(area.id);
+                  const selected = draftSettings.targetAreaIds.includes(area.id);
                   const count = (circlesQuery.data ?? []).filter((circle) => getCircleStoreAreaId(circle) === area.id).length;
                   return (
                     <button
@@ -239,18 +262,22 @@ export function StampRallySettingsCard({ eventId, event }: { eventId: string; ev
             )}
           </fieldset>
 
+          {/* 2026-10-16: 数値を空にしたり途中値を入力してもReactが既定値へ戻さず、保存時のみ整数として検証する。 */}
           <label className="block space-y-1">
             <span className="text-xs font-bold">景品を獲得する利用店舗数</span>
             <Input
-              type="number"
-              min={1}
-              max={100}
-              step={1}
-              value={settings.requiredCount}
+              type="text"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              maxLength={3}
+              value={requiredCountInput}
+              aria-describedby="stamp-required-count-help"
               aria-invalid={invalidRequiredCount}
-              onChange={(e) => setSettings((current) => ({ ...current, requiredCount: e.target.value === "" ? 0 : Number(e.target.value) }))}
+              onChange={(e) => setRequiredCountInput(e.target.value)}
             />
-            <span className="block text-[10px] text-muted-foreground">1〜100の整数を入力してください。対象エリア全体の異なる店舗を数えます。</span>
+            <span id="stamp-required-count-help" className="block text-[10px] text-muted-foreground">1〜100の整数。選択エリア全体で、注文完了した異なる店舗を数えます。</span>
+            {invalidRequiredCount && <span className="block text-[10px] text-error" role="alert">必要数は1〜100の整数で入力してください。</span>}
+            {!invalidRequiredCount && draftSettings.enabled && parsedRequiredCount > circlesInTargets.length && <span className="block text-[10px] text-error" role="alert">選択中の対象店舗は {circlesInTargets.length} 店舗です。必要数を減らすか、対象エリアを追加してください。</span>}
           </label>
 
           <section className="space-y-2" aria-labelledby="stamp-reward-catalog-title">
@@ -263,8 +290,8 @@ export function StampRallySettingsCard({ eventId, event }: { eventId: string; ev
                 type="button"
                 variant="outline"
                 size="sm"
-                disabled={settings.rewards.length >= 20}
-                onClick={() => setSettings((current) => ({
+                disabled={draftSettings.rewards.length >= 20}
+                onClick={() => setDraftSettings((current) => ({
                   ...current,
                   rewards: [...current.rewards, { id: crypto.randomUUID(), name: "", stockQuantity: null }],
                 }))}
@@ -273,14 +300,14 @@ export function StampRallySettingsCard({ eventId, event }: { eventId: string; ev
               </Button>
             </div>
             <div className="space-y-2">
-              {settings.rewards.map((reward, index) => (
+              {draftSettings.rewards.map((reward, index) => (
                 <div key={reward.id} className="grid grid-cols-1 gap-2 border-b-thin border-border py-2 sm:grid-cols-[minmax(0,1fr)_10rem_auto] sm:items-end">
                   <label className="block space-y-1">
                     <span className="text-[10px] font-bold">景品名 {index + 1}</span>
                     <Input
                       maxLength={100}
                       value={reward.name}
-                      onChange={(event) => setSettings((current) => ({
+                      onChange={(event) => setDraftSettings((current) => ({
                         ...current,
                         rewards: current.rewards.map((item) => item.id === reward.id ? { ...item, name: event.target.value } : item),
                       }))}
@@ -294,7 +321,7 @@ export function StampRallySettingsCard({ eventId, event }: { eventId: string; ev
                       min={0}
                       max={500_000}
                       value={reward.stockQuantity ?? ""}
-                      onChange={(event) => setSettings((current) => ({
+                      onChange={(event) => setDraftSettings((current) => ({
                         ...current,
                         rewards: current.rewards.map((item) => item.id === reward.id
                           ? { ...item, stockQuantity: event.target.value === "" ? null : Number(event.target.value) }
@@ -306,8 +333,8 @@ export function StampRallySettingsCard({ eventId, event }: { eventId: string; ev
                   <Button
                     type="button"
                     variant="outline"
-                    disabled={settings.rewards.length <= 1}
-                    onClick={() => setSettings((current) => ({
+                    disabled={draftSettings.rewards.length <= 1}
+                    onClick={() => setDraftSettings((current) => ({
                       ...current,
                       rewards: current.rewards.filter((item) => item.id !== reward.id),
                     }))}
@@ -325,8 +352,8 @@ export function StampRallySettingsCard({ eventId, event }: { eventId: string; ev
             <textarea
               maxLength={500}
               rows={3}
-              value={settings.redemptionLocation}
-              onChange={(e) => setSettings((current) => ({ ...current, redemptionLocation: e.target.value }))}
+              value={draftSettings.redemptionLocation}
+              onChange={(e) => setDraftSettings((current) => ({ ...current, redemptionLocation: e.target.value }))}
               className="w-full border-thick border-border bg-background p-3 text-sm"
               placeholder="例: 本館1階の本部テントで、このスタンプ画面を提示してください。"
             />
@@ -334,7 +361,7 @@ export function StampRallySettingsCard({ eventId, event }: { eventId: string; ev
 
           <label className="block space-y-1">
             <span className="text-xs font-bold">スタンプラリーのルールURL</span>
-            <Input type="url" maxLength={2048} value={settings.rulesUrl} onChange={(e) => setSettings((current) => ({ ...current, rulesUrl: e.target.value }))} placeholder="https://example.com/rules" />
+            <Input type="url" maxLength={2048} value={draftSettings.rulesUrl} onChange={(e) => setDraftSettings((current) => ({ ...current, rulesUrl: e.target.value }))} placeholder="https://example.com/rules" />
             {invalidRulesUrl && <span className="block text-[10px] text-error" role="alert">URLは http または https で入力してください。</span>}
           </label>
 

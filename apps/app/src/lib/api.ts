@@ -651,6 +651,49 @@ export interface StampRallyRedemptionHistory {
   history: StampRallyRedemption[];
 }
 
+// 2026-10-16: 来場者アカウント・完了注文・匿名注文を分けて返し、物理バンド本数に依存しない実績表示にする。
+export interface StampRallyUsageStore {
+  circleId: string;
+  name: string;
+  storeAreaId: string | null;
+  storeAreaName: string | null;
+  isStampTarget: boolean;
+  completedOrderCount: number;
+  visitorAccountCount: number;
+  unlinkedOrderCount: number;
+  orderTotal: number;
+  lastUsedAt: string | null;
+}
+
+export interface StampRallyUsageSummary {
+  enabled: boolean;
+  targetStoreCount: number;
+  requiredCount: number;
+  participantAccountCount: number;
+  qualifiedAccountCount: number;
+  redeemedAccountCount: number;
+  qualifiedRedeemedAccountCount: number;
+  redeemedQuantity: number;
+  rewards: Array<StampRallyReward & { redeemedQuantity: number; remainingQuantity: number | null }>;
+  stores: StampRallyUsageStore[];
+}
+
+export interface StampRallyStoreVisitor {
+  displayId: number;
+  nickname: string | null;
+  orderCount: number;
+  orderTotal: number;
+  lastUsedAt: string | null;
+}
+
+export interface StampRallyStoreVisitorsPage {
+  store: { id: string; name: string };
+  page: number;
+  pageSize: number;
+  total: number;
+  visitors: StampRallyStoreVisitor[];
+}
+
 export interface VisitorStampRallyArea extends StampRallyArea {}
 
 export interface LegacyVisitorStampRally {
@@ -671,6 +714,15 @@ export const stampRallyApi = {
     }),
   redemptions: (eventId: string) =>
     fetchApi<StampRallyRedemptionHistory>(`/api/stamps/event/${encodeURIComponent(eventId)}/redemptions`),
+  usage: (eventId: string) =>
+    fetchApi<StampRallyUsageSummary>(`/api/stamps/event/${encodeURIComponent(eventId)}/usage`),
+  storeVisitors: (eventId: string, circleId: string, page = 1, query = "") => {
+    const params = new URLSearchParams({ page: String(page) });
+    if (query.trim()) params.set("q", query.trim());
+    return fetchApi<StampRallyStoreVisitorsPage>(
+      `/api/stamps/event/${encodeURIComponent(eventId)}/stores/${encodeURIComponent(circleId)}?${params.toString()}`,
+    );
+  },
 };
 
 export type EventLifecycleStatus = "upcoming" | "live" | "ended" | "archived";
