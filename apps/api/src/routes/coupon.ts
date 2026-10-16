@@ -56,6 +56,7 @@ couponRoutes.get("/circle/:circleId", async (c) => {
 // クーポン作成。kind (2026-09-16 フィードバック対応) で対象/割引の計算方式を切り替える。
 // menu_discount: 対象メニューの小計から discountAmount 円引く。
 // free_topping: 対象トッピングを freeUnits 個 (未指定=無制限) まで無料にする。
+// cart_percentage: 税・送料を含まないカートの商品小計全体から指定率を引く (2026-10-16)。
 const baseCouponFields = {
   title: z.string().min(1).max(100),
   passphrase: z.string().min(1).max(50),
@@ -77,6 +78,11 @@ const createCouponSchema = z.discriminatedUnion("kind", [
     // 未指定 = 対象トッピングを個数上限なく全部無料にする ("自由度を無限にする" フィードバック対応)。
     freeUnits: z.number().int().min(1).optional(),
     toppingIds: z.array(z.string()).min(1, "対象トッピングを1つ以上選んでください"),
+  }),
+  z.object({
+    kind: z.literal("cart_percentage"),
+    ...baseCouponFields,
+    discountPercent: z.number().int().min(1).max(100),
   }),
 ]);
 
@@ -123,7 +129,7 @@ couponRoutes.post(
         }
         const rows = await db.select().from(coupon).where(eq(coupon.id, id));
         return c.json({ ...rows[0], menuIds: body.menuIds, toppingIds: [] }, 201);
-      } else {
+      } else if (body.kind === "free_topping") {
         const toppings = await db.select().from(topping).where(inArray(topping.id, body.toppingIds));
         if (toppings.length !== body.toppingIds.length || toppings.some((t) => t.circleId !== circleId)) {
           apiError("BAD_REQUEST", "指定されたトッピングの一部が見つからないか、このサークルのものではありません");
@@ -145,6 +151,21 @@ couponRoutes.post(
         }
         const rows = await db.select().from(coupon).where(eq(coupon.id, id));
         return c.json({ ...rows[0], menuIds: [], toppingIds: body.toppingIds }, 201);
+      } else {
+        await db.insert(coupon).values({
+          id,
+          circleId,
+          title: body.title,
+          slug: nanoid(16),
+          passphrase: body.passphrase,
+          kind: "cart_percentage",
+          discountPercent: body.discountPercent,
+          maxRedemptions: body.maxRedemptions,
+          expiresAt: body.expiresAt ? new Date(body.expiresAt) : undefined,
+          status: "active",
+        });
+        const rows = await db.select().from(coupon).where(eq(coupon.id, id));
+        return c.json({ ...rows[0], menuIds: [], toppingIds: [] }, 201);
       }
     } catch (error) {
       if (error instanceof AppError) throw error;
@@ -199,6 +220,7 @@ couponRoutes.post(
       title: cp.title,
       kind: cp.kind,
       discountAmount: cp.discountAmount,
+      discountPercent: cp.discountPercent,
       freeUnits: cp.freeUnits,
       menuIds,
       toppingIds,

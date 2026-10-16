@@ -12,6 +12,7 @@ import {
 import { UnsavedChangesDialog } from "@/components/ui/UnsavedChangesDialog";
 import { useEntityForm } from "@/hooks/useEntityForm";
 import { Save } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { AllergenSelector } from "@/components/menu/AllergenSelector";
 import { parseJapaneseAllergens, type JapaneseAllergen } from "@fesflow/config/allergens";
 
@@ -20,13 +21,14 @@ interface ToppingFormModalProps {
   isOpen: boolean;
   onClose: () => void;
   topping?: Topping | null;
+  onDelete?: () => void;
 }
 
 // 売り切れフラグを保持 (2026-07-15)。メニュー同様、在庫数はトッピング編集では扱わず
 // 在庫管理から操作する。ここで持つのは売切かどうかだけ。
 type ToppingForm = { name: string; category: string; price: number; imagePath: string; description: string; allergens: JapaneseAllergen[] | null; soldOut: boolean };
 
-export function ToppingFormModal({ circleId, isOpen, onClose, topping }: ToppingFormModalProps) {
+export function ToppingFormModal({ circleId, isOpen, onClose, topping, onDelete }: ToppingFormModalProps) {
   // 在庫管理拡張ONのサークルでは、売切はトッピング編集から変更不可 (在庫で自動制御)。
   const { data: circleData } = useQuery({
     queryKey: ["circle", circleId],
@@ -216,6 +218,11 @@ export function ToppingFormModal({ circleId, isOpen, onClose, topping }: Topping
             追加する
           </FormSubmitButton>
         )}
+        {/* 2026-10-16: 削除を一覧から外し、フォーム下部に編集終了操作を置く。 */}
+        <div className="flex justify-between gap-2 border-t-thick border-border pt-3">
+          {isEdit && onDelete ? <Button type="button" variant="destructive" onClick={onDelete}>削除</Button> : <span />}
+          <Button type="button" variant="outline" onClick={handleOverlayClose}>閉じる</Button>
+        </div>
       </Modal>
 
       <UnsavedChangesDialog

@@ -1,4 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
 import { menuApi, toppingApi, type MenuWithToppings } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { ImageUpload } from "@/components/image-upload";
@@ -13,6 +14,7 @@ import {
 import { UnsavedChangesDialog } from "@/components/ui/UnsavedChangesDialog";
 import { useEntityForm } from "@/hooks/useEntityForm";
 import { Save } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { parseToppingCategoryMaximums, parseToppingCategoryMinimums } from "@/components/menu/ToppingSelection";
 import { AllergenSelector } from "@/components/menu/AllergenSelector";
@@ -23,6 +25,7 @@ interface MenuFormModalProps {
   isOpen: boolean;
   onClose: () => void;
   menu?: MenuWithToppings | null; // 編集時は選択肢も一緒に受け取り、新規作成後に紐付け設定へ進む
+  onDelete?: () => void;
 }
 
 type MenuForm = {
@@ -36,6 +39,7 @@ type MenuForm = {
   soldOut: boolean;
   inventoryEnabled: boolean;
   stockQuantity: number;
+  toppingIds: string[];
   defaultToppingIds: string[];
   toppingWizardEnabled: boolean;
   toppingCategoryMinimums: Record<string, number>;
@@ -52,7 +56,17 @@ function parseDefaultToppingIds(raw?: string): string[] {
   }
 }
 
-export function MenuFormModal({ circleId, isOpen, onClose, menu }: MenuFormModalProps) {
+export function MenuFormModal({ circleId, isOpen, onClose, menu, onDelete }: MenuFormModalProps) {
+  // 2026-10-16: 既存カテゴリから選ぶ操作と同じ画面での新規カテゴリ登録に使う。
+  const [newCategory, setNewCategory] = useState("");
+  useEffect(() => {
+    if (isOpen) setNewCategory("");
+  }, [isOpen, menu?.id]);
+  const { data: menus } = useQuery({
+    queryKey: ["menus", circleId],
+    queryFn: () => menuApi.list(circleId),
+    enabled: isOpen && !!circleId,
+  });
   // 既定トッピングの選択肢 (サークルのトッピング一覧)
   const { data: toppings } = useQuery({
     queryKey: ["toppings", circleId],
@@ -67,7 +81,8 @@ export function MenuFormModal({ circleId, isOpen, onClose, menu }: MenuFormModal
   } = useEntityForm<MenuForm, MenuWithToppings>({
     isOpen,
     entity: menu,
-    emptyForm: { name: "", category: "", price: 0, imagePath: "", description: "", allergens: null, soldOut: false, inventoryEnabled: false, stockQuantity: 0, defaultToppingIds: [], toppingWizardEnabled: false, toppingCategoryMinimums: {}, toppingCategoryMaximums: {} },
+    // 2026-10-16: 新規メニューでも対応トッピングを選択でき、アレルゲン未選択を検証できるよう両方を初期化する。
+    emptyForm: { name: "", category: "", price: 0, imagePath: "", description: "", allergens: null, soldOut: false, inventoryEnabled: false, stockQuantity: 0, toppingIds: [], defaultToppingIds: [], toppingWizardEnabled: false, toppingCategoryMinimums: {}, toppingCategoryMaximums: {} },
     toForm: (m) => ({
       name: m.name,
       category: m.category || "",
@@ -78,6 +93,7 @@ export function MenuFormModal({ circleId, isOpen, onClose, menu }: MenuFormModal
       soldOut: m.soldOut ?? false,
       inventoryEnabled: m.inventoryEnabled ?? false,
       stockQuantity: m.stockQuantity ?? 0,
+      toppingIds: m.toppings.map((t) => t.id),
       defaultToppingIds: parseDefaultToppingIds(m.defaultToppingIds),
       toppingWizardEnabled: m.toppingWizardEnabled ?? false,
       toppingCategoryMinimums: parseToppingCategoryMinimums(m.toppingCategoryMinimums),
@@ -100,6 +116,7 @@ export function MenuFormModal({ circleId, isOpen, onClose, menu }: MenuFormModal
         inventoryEnabled: data.inventoryEnabled,
         stockQuantity: data.stockQuantity,
         soldOut: data.soldOut,
+        toppingIds: data.toppingIds,
         defaultToppingIds: data.defaultToppingIds,
         toppingWizardEnabled: data.toppingWizardEnabled,
         toppingCategoryMinimums: data.toppingCategoryMinimums,
@@ -117,6 +134,7 @@ export function MenuFormModal({ circleId, isOpen, onClose, menu }: MenuFormModal
         description: data.description || undefined,
         allergens: data.allergens,
         soldOut: data.soldOut,
+        toppingIds: data.toppingIds,
         inventoryEnabled: data.inventoryEnabled,
         stockQuantity: data.stockQuantity,
         defaultToppingIds: data.defaultToppingIds,
@@ -135,7 +153,8 @@ export function MenuFormModal({ circleId, isOpen, onClose, menu }: MenuFormModal
     },
   });
 
-  const wizardToppingSource = menu?.toppings ?? [];
+  // 2026-10-16: 対応トッピングをこのフォームで編集し、選択条件も最新の選択肢を基準にする。
+  const wizardToppingSource = (toppings ?? []).filter((t) => form.toppingIds.includes(t.id));
   const wizardCategories = [...new Set(wizardToppingSource.map((t) => t.category?.trim() ?? ""))]
     .sort((a, b) => a.localeCompare(b, "ja"));
 
@@ -198,15 +217,18 @@ export function MenuFormModal({ circleId, isOpen, onClose, menu }: MenuFormModal
           />
         </div>
 
-        <FormField
-          id="menuCategory"
-          label="メニューカテゴリ"
-          maxLength={100}
-          value={form.category}
-          onChange={(e) => setForm({ ...form, category: e.target.value })}
-          onBlur={triggerAutoSave}
-          placeholder="例: ドリンク"
-        />
+        {/* 2026-10-16: 新カテゴリを追加したらすぐ選べるようにし、一覧へ登録されるタイミングも伝える。 */}
+        <div className="space-y-2">
+          <FormSelect id="menuCategory" label="メニューカテゴリ" value={form.category} onChange={(e) => { setForm({ ...form, category: e.target.value }); if (isEdit) saveNow({ ...form, category: e.target.value }); }}>
+            <option value="">未分類</option>
+            {[...new Set([...(menus ?? []).map((item) => item.category?.trim()).filter((value): value is string => !!value), form.category.trim()].filter((value) => value.length > 0))].sort((a, b) => a.localeCompare(b, "ja")).map((category) => <option key={category} value={category}>{category}</option>)}
+          </FormSelect>
+          <div className="flex items-end gap-2">
+            <FormField id="newMenuCategory" label="新しいカテゴリ" fieldClassName="min-w-0 flex-1" maxLength={100} value={newCategory} onChange={(e) => setNewCategory(e.target.value)} placeholder="例: ドリンク" />
+            <Button type="button" variant="outline" className="shrink-0" disabled={!newCategory.trim()} onClick={() => { const category = newCategory.trim(); const next = { ...form, category }; setForm(next); setNewCategory(""); if (isEdit) saveNow(next); }}>追加して選択</Button>
+          </div>
+          <p className="text-xs text-muted-foreground">新しいカテゴリはこのメニューを保存すると一覧にも追加されます。</p>
+        </div>
 
         <ImageUpload
           label="メニュー画像"
@@ -330,36 +352,52 @@ export function MenuFormModal({ circleId, isOpen, onClose, menu }: MenuFormModal
         {/* 既定トッピング: レジで追加時に自動で入るトッピング */}
         {toppings && toppings.length > 0 && (
           <div className="space-y-1.5">
-            <Label className="text-xs font-bold uppercase">
-              既定トッピング（レジで自動適用）
-            </Label>
-            <div className="flex flex-wrap gap-1.5">
+            <Label className="text-xs font-bold uppercase">対応トッピング</Label>
+            <p className="text-[10px] text-muted-foreground">このメニューで選択できるトッピングをリストから選びます。</p>
+            <div className="divide-y-thin divide-border border-y-thin border-border">
               {toppings.map((t) => {
-                const selected = form.defaultToppingIds.includes(t.id);
+                const selected = form.toppingIds.includes(t.id);
                 return (
                   <button
                     key={t.id}
                     type="button"
+                    aria-pressed={selected}
                     onClick={() => {
                       const next = {
                         ...form,
+                        toppingIds: selected
+                          ? form.toppingIds.filter((x) => x !== t.id)
+                          : [...form.toppingIds, t.id],
                         defaultToppingIds: selected
                           ? form.defaultToppingIds.filter((x) => x !== t.id)
-                          : [...form.defaultToppingIds, t.id],
+                          : form.defaultToppingIds,
                       };
                       setForm(next);
                       if (isEdit) saveNow(next);
                     }}
                     className={cn(
-                      "border-thick rounded-none px-2 py-1 text-xs font-bold transition-all",
+                      "flex w-full items-center gap-3 py-2 text-left text-xs font-bold transition-all",
                       selected
                         ? "border-primary bg-primary text-primary-foreground"
                         : "border-border bg-background hover:bg-muted",
                     )}
                   >
-                    {t.name} (+¥{t.price})
+                    <span aria-hidden="true" className="flex h-5 w-5 items-center justify-center border-thick border-border">{selected ? "✓" : ""}</span>
+                    <span className="flex-1">{t.category || "未分類"} · {t.name}</span><span>¥{t.price}</span>
                   </button>
                 );
+              })}
+            </div>
+          </div>
+        )}
+
+        {toppings && toppings.length > 0 && (
+          <div className="space-y-2 border-t-thin border-border pt-3">
+            <Label className="text-xs font-bold uppercase">既定トッピング（レジで自動適用）</Label>
+            <div className="divide-y-thin divide-border border-y-thin border-border">
+              {toppings.filter((t) => form.toppingIds.includes(t.id)).map((t) => {
+                const selected = form.defaultToppingIds.includes(t.id);
+                return <button key={t.id} type="button" aria-pressed={selected} onClick={() => { const next = { ...form, defaultToppingIds: selected ? form.defaultToppingIds.filter((id) => id !== t.id) : [...form.defaultToppingIds, t.id] }; setForm(next); if (isEdit) saveNow(next); }} className="flex w-full items-center gap-3 py-2 text-left text-xs font-bold"><span aria-hidden="true" className="flex h-5 w-5 items-center justify-center border-thick border-border">{selected ? "✓" : ""}</span><span className="flex-1">{t.name}</span><span>¥{t.price}</span></button>;
               })}
             </div>
           </div>
@@ -389,7 +427,7 @@ export function MenuFormModal({ circleId, isOpen, onClose, menu }: MenuFormModal
                 <p className="text-xs font-bold">設定は3ステップ</p>
                 <ol className="list-decimal space-y-1 pl-5 text-[11px] leading-relaxed text-muted-foreground">
                   <li>トッピングを登録し、同じ種類には同じカテゴリ名を付ける（例: ソース）。</li>
-                  <li>「トッピング対応設定」で、このメニューに選択肢を紐付ける。</li>
+                  <li>この画面の「対応トッピング」で選択肢を紐付ける。</li>
                   <li>カテゴリごとに「任意」「1つ以上」「1つだけ」または必要数を選ぶ。</li>
                 </ol>
                 <p className="text-[10px] font-bold">設定後はレジで「選択」→カテゴリを選ぶ→「カートに入れる」で完了します。</p>
@@ -453,7 +491,7 @@ export function MenuFormModal({ circleId, isOpen, onClose, menu }: MenuFormModal
                   </div>
                 );
               }) : (
-                <p className="text-[11px] text-warning">メニューを保存し、「トッピング対応設定」で選択肢を紐付けてから、メニューを再度編集してください。</p>
+                <p className="text-[11px] text-warning">上の「対応トッピング」から選択肢を選ぶと、カテゴリごとの設定が表示されます。</p>
               )}
               <p className="border-t-thin border-border pt-2 text-[10px] text-muted-foreground">レジに表示されるのは、このメニューに紐付けたトッピングだけです。必須ルールの選択肢が売り切れた場合は、注文できなくなるため販売状態も確認してください。</p>
             </div>
@@ -470,6 +508,11 @@ export function MenuFormModal({ circleId, isOpen, onClose, menu }: MenuFormModal
             追加する
           </FormSubmitButton>
         )}
+        {/* 2026-10-16: 削除を一覧から外し、編集内容と同じ文脈で行えるようにする。 */}
+        <div className="flex justify-between gap-2 border-t-thick border-border pt-3">
+          {isEdit && onDelete ? <Button type="button" variant="destructive" onClick={onDelete}>削除</Button> : <span />}
+          <Button type="button" variant="outline" onClick={handleOverlayClose}>閉じる</Button>
+        </div>
       </Modal>
 
       <UnsavedChangesDialog

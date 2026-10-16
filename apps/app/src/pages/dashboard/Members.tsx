@@ -1,5 +1,6 @@
 
 import { useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   CircleAuthGuard,
@@ -42,6 +43,7 @@ import {
   Ban,
   RotateCcw,
   Search,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useUnsavedChanges } from "@/components/UnsavedNavigationGuard";
@@ -60,9 +62,9 @@ function MembersContent() {
   // 一度だけ読む独自 state だと、同一パス上でのスペース切り替え後に古いサークル名の
   // ままになる。useAuth() (authChange 購読) から直接取得するよう統一する。
   const { circleId, role, userEmail, circleName: authCircleName, advancedPermissions } = useAuth();
-  // 高度な権限管理 OFF のイベントでは、サークル内は全員同権限なのでロールを選ばせない
-  // (circle_manager への昇格は API でも event_manager 限定のため、選ばせてもエラーになる)。
-  // イベント管理者は常にロールを調整できる (2026-10-05)。
+  // 2026-10-16: 高度な権限管理 OFF では circle_staff が実効上 circle_manager 相当となるため、
+  // オーナーとイベント管理者にロール選択を表示する。circle_admin の付与は既存APIの許可範囲内。
+  // circle_staff へ与える実効権限と、ロール変更できる操作者の判定は分けて扱う。
   // 「ロールと権限」の説明は、拡張機能「スタッフ管理」が OFF なら staff:* (名簿の閲覧/編集/削除) を
   // 載せない。OFF ではスタッフ管理ページ自体が出ず、権限を持っていても使えないため (2026-10-05)。
   // クエリキーは DashboardLayout と共通 (["circle", circleId]) なので追加リクエストにならない。
@@ -72,7 +74,9 @@ function MembersContent() {
     enabled: !!circleId,
   });
   const staffExtensionEnabled = parseCircleSettings(circleData?.settings).extensions.staff;
-  const canChooseRole = advancedPermissions !== false || role === ROLES.EVENT_MANAGER;
+  // 2026-10-16: 高度な権限管理がOFFでも、オーナーとイベント管理者はcircle_adminを付与できる。
+  // circle_staff の実効権限変換と、メンバーを編集できる実ロールの判定は別の責務として扱う。
+  const canChooseRole = role === ROLES.CIRCLE_MANAGER || role === ROLES.EVENT_MANAGER;
   const circleName = authCircleName ?? "サークルダッシュボード";
   const queryClient = useQueryClient();
   const [showAddForm, setShowAddForm] = useState(false);
@@ -139,6 +143,15 @@ function MembersContent() {
     queryKey: ["roles"],
     queryFn: () => membershipApi.getRoles(),
   });
+  // 2026-10-16: 権限の差を把握しやすいよう、既存のロール API が返す権限を比較表にする。
+  // スタッフ管理拡張が無効な場合は従来どおり staff:* を表から除く。
+  const comparisonRoles = [ROLES.CIRCLE_MANAGER, ROLES.CIRCLE_ADMIN, ROLES.CIRCLE_STAFF];
+  const comparableRoleData = (rolesData ?? []).filter((roleInfo) =>
+    comparisonRoles.includes(roleInfo.role as typeof comparisonRoles[number]),
+  );
+  const permissionRows = [...new Set(comparableRoleData.flatMap((roleInfo) => roleInfo.permissions))]
+    .filter((permission) => staffExtensionEnabled || !permission.startsWith("staff:"))
+    .sort((a, b) => (PERMISSION_NAMES[a] || a).localeCompare(PERMISSION_NAMES[b] || b, "ja"));
 
   const addMemberMutation = useMutation({
     mutationFn: (input: {
@@ -752,28 +765,70 @@ function MembersContent() {
       <Card>
         <CardHeader>
           <CardTitle>ロールと権限</CardTitle>
-          <CardDescription>サークル内の各ロールで利用できる機能</CardDescription>
+          <CardDescription>✓ は利用可、× は利用不可です。メンバーの追加・変更などはロールの権限表に加え、実ロールによるオーナー判定も適用されます。</CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="grid gap-4 md:grid-cols-2">
-            {rolesData &&
-              rolesData.filter((roleInfo) => roleInfo.role === "circle_manager" || roleInfo.role === "circle_admin" || roleInfo.role === "circle_staff").map((roleInfo) => (
-                <div
-                  key={roleInfo.role}
-                  className="p-4 border-thick border-border space-y-2"
-                >
-                  <div className="flex items-center gap-2">
-                    <Badge variant={getRoleBadgeVariant(roleInfo.role)}>
-                      {ROLE_NAMES[roleInfo.role as RoleType] || roleInfo.role}
-                    </Badge>
-                  </div>
-                  <p className="text-sm text-muted-foreground leading-relaxed">
-                    権限: {roleInfo.permissions
-                      .filter((p) => staffExtensionEnabled || !p.startsWith("staff:"))
-                      .map(p => PERMISSION_NAMES[p] || p).join("、 ") || "なし"}
-                  </p>
-                </div>
-              ))}
+          {advancedPermissions === false && (
+            <div className="mb-4 border-l-thick border-warning pl-3 text-sm leading-relaxed" role="note">
+              高度な権限管理が OFF の場合、circle_staff は通常機能の権限判定で circle_manager 相当になります。メンバー管理などの操作では、実ロールに基づきオーナーまたはイベント管理者かどうかを別途確認します。
+              オーナーまたはイベント管理者は、この画面から circle_admin（管理者）を付与できます。
+              {role === ROLES.EVENT_MANAGER && (
+                <p className="mt-2">
+                  ロールごとに権限を分ける場合は
+                  <Link to="/event/dashboard" className="ml-1 text-info underline underline-offset-2">
+                    イベント管理を開き
+                  </Link>
+                  、左メニューの「管理」→「イベント設定」→「高度な権限管理」を ON にしてください。
+                </p>
+              )}
+            </div>
+          )}
+          {/* 2026-10-16: 表を横スクロールしても、各行の権限名を追えるよう左端を固定する。 */}
+          <div className="max-w-full overflow-x-auto">
+            <table className="w-full min-w-[640px] border-collapse text-left text-xs font-mono" aria-label="ロール別の権限">
+              <thead>
+                <tr className="border-b-thick border-border">
+                  <th scope="col" className="sticky left-0 z-20 border-r-thin border-border bg-background p-3">権限</th>
+                  {comparisonRoles.map((roleName) => (
+                    <th key={roleName} scope="col" className="p-3 text-center">
+                      {ROLE_NAMES[roleName]}
+                      {roleName === ROLES.CIRCLE_STAFF && advancedPermissions === false && (
+                        <span className="block text-[10px] font-normal text-muted-foreground">通常機能: {ROLE_NAMES[ROLES.CIRCLE_MANAGER]}相当</span>
+                      )}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {permissionRows.map((permission) => (
+                  <tr key={permission} className="border-b-thin border-border">
+                    <th scope="row" className="sticky left-0 z-10 border-r-thin border-border bg-background p-3 font-normal">
+                      {PERMISSION_NAMES[permission] || permission}
+                    </th>
+                    {comparisonRoles.map((roleName) => {
+                      const effectiveRoleName = roleName === ROLES.CIRCLE_STAFF && advancedPermissions === false
+                        ? ROLES.CIRCLE_MANAGER
+                        : roleName;
+                      const roleInfo = comparableRoleData.find((item) => item.role === effectiveRoleName);
+                      const allowed = roleInfo?.permissions.includes(permission) ?? false;
+                      return (
+                        <td key={roleName} className="p-3 text-center" aria-label={allowed ? "利用可" : "利用不可"}>
+                          {allowed ? (
+                            <Check className="mx-auto h-4 w-4 text-success" aria-hidden="true" />
+                          ) : (
+                            <X className="mx-auto h-4 w-4 text-muted-foreground" aria-hidden="true" />
+                          )}
+                          <span className="sr-only">{allowed ? "利用可" : "利用不可"}</span>
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+                {permissionRows.length === 0 && (
+                  <tr><td colSpan={comparisonRoles.length + 1} className="p-4 text-center text-muted-foreground">権限情報を読み込めません</td></tr>
+                )}
+              </tbody>
+            </table>
           </div>
         </CardContent>
       </Card>

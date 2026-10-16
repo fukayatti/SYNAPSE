@@ -218,6 +218,13 @@
       "when": 1792128710746,
       "tag": "0030_breezy_millenium_guard",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "6",
+      "when": 1792137413658,
+      "tag": "0031_parched_mandarin",
+      "breakpoints": true
     }
   ]
 }

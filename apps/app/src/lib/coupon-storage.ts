@@ -14,6 +14,7 @@ export interface StoredCoupon {
   title: string;
   kind: CouponKind;
   discountAmount: number | null; // menu_discount のみ
+  discountPercent: number | null; // cart_percentage のみ
   freeUnits: number | null; // free_topping のみ。null = 無制限
   // 適用対象。kind に応じてどちらかが使われる (カートにこのいずれかが入っている時だけ有効)。
   menuIds: string[];
@@ -31,7 +32,7 @@ function isValidStoredCoupon(value: unknown): value is StoredCoupon {
     typeof v.slug === "string" &&
     typeof v.passphrase === "string" &&
     typeof v.title === "string" &&
-    (v.kind === "menu_discount" || v.kind === "free_topping") &&
+    (v.kind === "menu_discount" || v.kind === "free_topping" || v.kind === "cart_percentage") &&
     Array.isArray(v.menuIds) &&
     Array.isArray(v.toppingIds)
   );

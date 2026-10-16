@@ -78,6 +78,8 @@ export const topping = sqliteTable(
     // 在庫数 (2026-07-15 追加)。メニューと同じ意味論: 0 = 在庫無制限/未管理(チェック・減算しない)、
     // 1 以上 = 在庫管理対象で、注文のたびに減り 0 になると soldOut を自動セットする。
     stockQuantity: integer("stock_quantity").default(0).notNull(),
+    // 2026-10-16: 管理画面で調整したトッピング順を保持し、注文側でも同じ順を使う。
+    sortOrder: integer("sort_order").default(0).notNull(),
     createdAt: integer("created_at", { mode: "timestamp_ms" })
       .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
       .notNull(),

@@ -386,6 +386,8 @@ preOrderRoutes.post(
       }
 
       // クーポン適用 (2026-09-16, issue #50)。枠の最終判定と消費も注文の保存batch内で行う。
+      // 2026-10-16: cart_percentage は税・送料なしの商品小計全体を基準にサーバーで計算する。
+      // 複数クーポンの割引合計も商品小計以下に抑え、pre_order の total と割引履歴を一致させる。
       // 2026-09-16 フィードバック対応: (1) kind (menu_discount / free_topping) に応じて対象が
       // メニューかトッピングかを切り替え、computeCouponDiscount に計算を委ねる。(2) 複数枚
       // 同時適用に対応。まず全クーポンを検証・計算してから消費するのは、途中の1枚が
@@ -402,17 +404,24 @@ preOrderRoutes.post(
           circleId,
           preOrderId: currentDraft?.id,
         });
-        const targetIds =
-          cp.kind === "free_topping"
-            ? await getCouponToppingIds(db, cp.id)
-            : await getCouponMenuIds(db, cp.id);
-        const computedDiscount = computeCouponDiscount(cp, targetIds, itemList);
+        const targetIds = cp.kind === "free_topping"
+          ? await getCouponToppingIds(db, cp.id)
+          : cp.kind === "menu_discount"
+            ? await getCouponMenuIds(db, cp.id)
+            : [];
+        const remainingSubtotal = Math.max(0, totalPrice - validatedCoupons.reduce((sum, item) => sum + item.discount, 0));
+        const computedDiscount = Math.min(
+          remainingSubtotal,
+          computeCouponDiscount(cp, targetIds, itemList),
+        );
         if (computedDiscount <= 0) {
           apiError(
             "BAD_REQUEST",
-            cp.kind === "free_topping"
-              ? `クーポン「${cp.title}」の対象トッピングがカートに含まれていません`
-              : `クーポン「${cp.title}」の対象メニューがカートに含まれていません`
+            cp.kind === "cart_percentage"
+              ? `クーポン「${cp.title}」を適用できる商品小計がありません`
+              : cp.kind === "free_topping"
+                ? `クーポン「${cp.title}」の対象トッピングがカートに含まれていません`
+                : `クーポン「${cp.title}」の対象メニューがカートに含まれていません`
           );
         }
         validatedCoupons.push({ id: cp.id, title: cp.title, discount: computedDiscount });

@@ -152,6 +152,9 @@ function MenuCard({
           className="w-full h-10 sm:h-11 border-thick border-border bg-primary text-primary-foreground font-mono text-xs sm:text-sm font-bold uppercase rounded-none hover:bg-background hover:text-foreground transition-all"
           onClick={menu.toppingWizardEnabled && availableToppings.length > 0 ? openToppingWizard : handleAdd}
           disabled={menu.soldOut || (!menu.toppingWizardEnabled && !selectionReady)}
+          aria-label={menu.toppingWizardEnabled && availableToppings.length > 0
+            ? `${menu.name}のトッピングを選択`
+            : `${menu.name}をカートに追加。トッピング込み ¥${(menu.price + selectedExtra).toLocaleString()}`}
         >
           {menu.toppingWizardEnabled && availableToppings.length > 0
             ? "選択"
@@ -202,6 +205,7 @@ function MenuCard({
 // カート本体。デスクトップのサイドバーとモバイルのスライドアップの両方で使い回す。
 function CartBody({
   cart,
+  idPrefix,
   menuMap,
   peopleCount,
   activeCustomer,
@@ -219,6 +223,7 @@ function CartBody({
   onSetPayment,
 }: {
   cart: CartLine[];
+  idPrefix: "desktop" | "mobile";
   menuMap: Map<string, MenuWithToppings>;
   peopleCount: number;
   activeCustomer: { userId: string; wristbandId: string | null; familyBandCount: number; allergies: JapaneseAllergen[] | null } | null;
@@ -238,6 +243,8 @@ function CartBody({
 }) {
   // 支払い方法が2つ以上あるのに未選択なら確定を止める。
   const needsPayment = paymentMethods.length > 1 && !paymentMethod;
+  // 2026-10-16: カート操作の状態を読み上げ可能にし、数量変更後の合計と選択状態を追えるようにする。
+  const peopleCountId = `${idPrefix}-people-count`;
   const allergyWarnings = getCartAllergyWarnings(cart, menuMap, activeCustomer?.allergies ?? null);
   return (
     // 2026-07-16: 親 (aside / モバイルのスライドアップパネル) は max-height + overflow-hidden で
@@ -264,8 +271,11 @@ function CartBody({
                     <p className="font-bold text-sm truncate">{line.menuName}</p>
                     <p className="text-xs text-muted-foreground">¥{line.menuPrice.toLocaleString()}</p>
                   </div>
+                  {/* 2026-10-16: アイコンだけの操作にも商品名を含む読み上げ名を付ける。 */}
                   <button
+                    type="button"
                     onClick={() => onRemoveLine(line.lineId)}
+                    aria-label={`${line.menuName}をカートから削除`}
                     className="w-8 h-8 border-thin border-border flex items-center justify-center hover:bg-error hover:text-white shrink-0 transition-all"
                   >
                     <Trash2 className="h-3 w-3" />
@@ -276,7 +286,7 @@ function CartBody({
                 {allowed.length > 0 && (
                   <div className="space-y-1.5">
                     <p className="text-xs font-bold uppercase tracking-wider">トッピング:</p>
-                    <div className="flex flex-wrap gap-1.5">
+                    <div className="space-y-1.5">
                       {allowed.map((topping) => {
                         const on = line.toppings.some((t) => t.toppingId === topping.id);
                         return (
@@ -285,19 +295,22 @@ function CartBody({
                             type="button"
                             disabled={topping.soldOut}
                             onClick={() => onToggleTopping(line.lineId, topping)}
+                            aria-pressed={on}
                             className={cn(
-                              "flex items-center gap-1.5 border-thick rounded-none px-2 py-1 text-xs font-bold transition-all disabled:opacity-40 disabled:cursor-not-allowed",
+                              "flex min-h-10 w-full items-center justify-between gap-2 border-thick rounded-none px-2 py-1 text-left text-xs font-bold transition-all disabled:opacity-40 disabled:cursor-not-allowed",
                               on
                                 ? "border-primary bg-primary text-primary-foreground"
                                 : "border-border bg-background hover:bg-muted"
                             )}
                           >
-                            {topping.imagePath && (
-                              <img src={resolveAssetUrl(topping.imagePath)} alt="" className="h-5 w-5 object-cover border-thin border-current shrink-0" />
-                            )}
-                            <span>{topping.name}</span>
-                            <span className={on ? "opacity-80" : "text-muted-foreground"}>
-                              {topping.price >= 0 ? `+¥${topping.price}` : `-¥${Math.abs(topping.price)}`}
+                            <span className="flex min-w-0 items-center gap-2">
+                              {topping.imagePath && (
+                                <img src={resolveAssetUrl(topping.imagePath)} alt="" className="h-5 w-5 object-cover border-thin border-current shrink-0" />
+                              )}
+                              <span className="break-words">{topping.name}</span>
+                            </span>
+                            <span className={cn("shrink-0 tabular-nums", on ? "opacity-80" : "text-muted-foreground")}>
+                              {topping.price >= 0 ? `+¥${topping.price.toLocaleString()}` : `-¥${Math.abs(topping.price).toLocaleString()}`}
                             </span>
                           </button>
                         );
@@ -308,16 +321,20 @@ function CartBody({
 
                 {/* 数量 */}
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center border-thin border-border">
+                  <div className="flex items-center border-thin border-border" role="group" aria-label={`${line.menuName}の数量`}>
                     <button
+                      type="button"
                       onClick={() => onUpdateQuantity(line.lineId, -1)}
+                      aria-label={`${line.menuName}の数量を1減らす`}
                       className="w-10 h-10 flex items-center justify-center hover:bg-primary hover:text-primary-foreground transition-all border-r-thin border-border"
                     >
                       <Minus className="h-4 w-4" />
                     </button>
-                    <span className="w-10 text-center font-black text-lg">{line.quantity}</span>
+                    <span className="w-10 text-center font-black text-lg" aria-live="polite" aria-atomic="true">{line.quantity}</span>
                     <button
+                      type="button"
                       onClick={() => onUpdateQuantity(line.lineId, 1)}
+                      aria-label={`${line.menuName}の数量を1増やす`}
                       className="w-10 h-10 flex items-center justify-center hover:bg-primary hover:text-primary-foreground transition-all border-l-thin border-border"
                     >
                       <Plus className="h-4 w-4" />
@@ -336,11 +353,12 @@ function CartBody({
           これが無いと flex の既定 shrink:1 により極端なケースで確定ボタンごと潰れうる。 */}
       <div className="shrink-0 p-3 sm:p-4 border-t-thick border-border space-y-3 bg-background">
         <div className="flex items-center gap-3">
-          <Label htmlFor="peopleCount" className="font-mono text-xs uppercase tracking-wider whitespace-nowrap">来店人数</Label>
+          {/* 2026-10-16: PC用とモバイル用のカートが同時にDOMへあるため、入力IDを分けてラベル先を一意にする。 */}
+          <Label htmlFor={peopleCountId} className="font-mono text-xs uppercase tracking-wider whitespace-nowrap">来店人数</Label>
           {/* 入力中は 0/空を許容し、フォーカスを外した時に 1 未満なら 1 へ戻す
               (min=1 だと打ち直しのたびに値が押し戻されて入力しづらいため)。 */}
           <Input
-            id="peopleCount"
+            id={peopleCountId}
             type="number"
             inputMode="numeric"
             className="h-10 text-center font-bold border-thick border-border rounded-none"
@@ -350,7 +368,7 @@ function CartBody({
           />
         </div>
         <p className="-mt-2 text-[10px] text-muted-foreground">家族の登録人数とは別項目です。注文の来店人数は必要に応じて入力してください。</p>
-        <div className="flex justify-between items-center border-thick border-border px-4 py-3 bg-muted">
+        <div className="flex justify-between items-center border-thick border-border px-4 py-3 bg-muted" role="status" aria-live="polite" aria-atomic="true">
           <span className="font-mono text-sm uppercase tracking-wider">合計金額</span>
           <span className="font-headline text-2xl sm:text-3xl font-black">¥{total.toLocaleString()}</span>
         </div>
@@ -368,6 +386,7 @@ function CartBody({
                   key={m}
                   type="button"
                   onClick={() => onSetPayment(m)}
+                  aria-pressed={paymentMethod === m}
                   className={cn(
                     "border-thick rounded-none px-2 py-2.5 text-sm font-bold transition-all",
                     paymentMethod === m
@@ -767,7 +786,8 @@ function RegisterPageContent() {
       {/* 横幅に余裕がある画面 (xl+) はカートを右サイドバー固定、狭い画面は下部バー+スライドアップ */}
       <div className="xl:flex xl:items-start xl:gap-4">
         {/* ===== メニュー一覧 (メインカラム) ===== */}
-        <div className="flex-1 min-w-0 p-3 sm:p-4 pb-32 xl:pb-4">
+        {/* 2026-10-16: モバイルの固定会計バーが商品ボタンを覆わないよう、バーと安全領域分の余白を予約する。 */}
+        <div className="flex-1 min-w-0 p-3 pb-[calc(10rem+env(safe-area-inset-bottom))] sm:p-4 sm:pb-[calc(11rem+env(safe-area-inset-bottom))] xl:pb-4">
           {/* ヘッダーバー */}
           <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 bg-primary p-3 sm:p-4 text-primary-foreground border-thick border-border mb-4">
             <h1 className="font-mono text-lg sm:text-2xl font-black uppercase tracking-wider">
@@ -960,10 +980,11 @@ function RegisterPageContent() {
           </div>
           <CartBody
             cart={cart}
+            idPrefix="desktop"
             menuMap={menuMap}
             peopleCount={peopleCount}
             activeCustomer={activeCustomer}
-            submitting={createOrder.isPending}
+            submitting={createOrder.isPending || claimOrder.isPending}
             onToggleTopping={toggleTopping}
             onUpdateQuantity={updateQuantity}
             onRemoveLine={removeLine}
@@ -981,22 +1002,24 @@ function RegisterPageContent() {
 
       {/* ===== モバイル/タブレット: 固定カートフッターバー (xl 未満のみ) ===== */}
       {cart.length > 0 && (
-        <div className="xl:hidden fixed bottom-0 left-0 right-0 z-40 bg-primary text-primary-foreground border-t-heavy border-border">
+        <div className="xl:hidden fixed bottom-0 left-0 right-0 z-40 border-t-heavy border-border bg-primary pb-[env(safe-area-inset-bottom)] text-primary-foreground">
           <button
             onClick={() => setIsCartPanelOpen(true)}
-            className="w-full flex items-center justify-between px-4 py-3 sm:py-4 font-mono"
+            aria-label={`カートを開く。${getTotalCount()}点、合計${getTotalPrice().toLocaleString()}円`}
+            className="flex w-full items-center justify-between gap-2 px-3 py-3 font-mono sm:px-4 sm:py-4"
           >
-            <div className="flex items-center gap-3">
-              <span className="bg-background text-foreground px-2 py-0.5 text-xs font-black uppercase">
+            <div className="flex min-w-0 items-center gap-2 sm:gap-3">
+              <span className="shrink-0 bg-background px-2 py-0.5 text-xs font-black uppercase text-foreground" aria-live="polite" aria-atomic="true">
                 {getTotalCount()}点
               </span>
-              <span className="text-xl sm:text-2xl font-black">
+              <span className="truncate text-lg font-black tabular-nums sm:text-2xl">
                 ¥{getTotalPrice().toLocaleString()}
               </span>
             </div>
-            <span className="flex items-center gap-2 border-thick border-primary-foreground px-4 py-2 font-black uppercase text-sm tracking-wider hover:bg-primary-foreground hover:text-primary transition-all">
+            <span className="flex shrink-0 items-center gap-1 border-thick border-primary-foreground px-2 py-2 text-xs font-black uppercase tracking-wider transition-all hover:bg-primary-foreground hover:text-primary sm:gap-2 sm:px-4 sm:text-sm">
               <ShoppingCart className="h-4 w-4" />
-              カートを見る
+              <span className="sm:hidden">カート</span>
+              <span className="hidden sm:inline">カートを見る</span>
             </span>
           </button>
         </div>
@@ -1014,6 +1037,7 @@ function RegisterPageContent() {
               <h2 className="font-black text-lg uppercase">[カート確認]</h2>
               <button
                 onClick={() => setIsCartPanelOpen(false)}
+                aria-label="カートを閉じる"
                 className="w-10 h-10 border-thin border-primary-foreground flex items-center justify-center hover:bg-primary-foreground hover:text-primary transition-all"
               >
                 <X className="h-5 w-5" />
@@ -1021,10 +1045,11 @@ function RegisterPageContent() {
             </div>
             <CartBody
               cart={cart}
+              idPrefix="mobile"
               menuMap={menuMap}
               peopleCount={peopleCount}
               activeCustomer={activeCustomer}
-              submitting={createOrder.isPending}
+              submitting={createOrder.isPending || claimOrder.isPending}
               onToggleTopping={toggleTopping}
               onUpdateQuantity={updateQuantity}
               onRemoveLine={removeLine}

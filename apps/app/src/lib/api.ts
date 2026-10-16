@@ -1036,6 +1036,7 @@ export interface Topping {
   imagePath: string | null;
   soldOut: boolean;
   stockQuantity: number;
+  sortOrder: number;
 }
 
 export interface MenuWithToppings extends Menu {
@@ -1267,6 +1268,7 @@ export interface CreateToppingInput {
   imagePath?: string;
   soldOut?: boolean;
   stockQuantity?: number;
+  sortOrder?: number;
 }
 
 export interface UpdateToppingInput {
@@ -1278,6 +1280,7 @@ export interface UpdateToppingInput {
   imagePath?: string | null;
   soldOut?: boolean;
   stockQuantity?: number;
+  sortOrder?: number;
 }
 
 export interface CreateStaffInput {
@@ -1608,7 +1611,8 @@ export interface CreatePreOrderInput {
 // クーポンの種類 (2026-09-16 フィードバック対応)。
 // menu_discount: 対象メニューの小計から discountAmount 円引く。
 // free_topping: 対象トッピングを freeUnits 個 (null=無制限) まで無料にする。
-export type CouponKind = "menu_discount" | "free_topping";
+// cart_percentage: 税・送料を含まない商品小計全体から整数率で割引 (2026-10-16)。
+export type CouponKind = "menu_discount" | "free_topping" | "cart_percentage";
 
 export interface Coupon {
   id: string;
@@ -1618,6 +1622,7 @@ export interface Coupon {
   passphrase: string;
   kind: CouponKind;
   discountAmount: number | null; // menu_discount のみ
+  discountPercent: number | null; // cart_percentage のみ
   freeUnits: number | null; // free_topping のみ。null = 無制限
   maxRedemptions: number | null; // 使用上限回数。null = 無制限
   redeemedCount: number;
@@ -1640,6 +1645,14 @@ export type CreateCouponInput =
       menuIds: string[];
     }
   | {
+      kind: "cart_percentage";
+      title: string;
+      passphrase: string;
+      discountPercent: number;
+      maxRedemptions?: number;
+      expiresAt?: string;
+    }
+  | {
       kind: "free_topping";
       title: string;
       passphrase: string;
@@ -1655,6 +1668,7 @@ export interface CouponVerifyResult {
   title: string;
   kind: CouponKind;
   discountAmount: number | null;
+  discountPercent: number | null;
   freeUnits: number | null;
   menuIds: string[];
   toppingIds: string[];

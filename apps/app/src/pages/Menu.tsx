@@ -199,7 +199,9 @@ function VisitorMenuCard({
                         ? toppingMatches
                           ? "選択中のトッピングが無料になります"
                           : "対象トッピングを選ぶと無料になります"
-                        : `¥${c.discountAmount?.toLocaleString()}引き`}
+                        : c.kind === "cart_percentage"
+                          ? `カート全体から${c.discountPercent}%引き`
+                          : `¥${c.discountAmount?.toLocaleString()}引き`}
                     </p>
                   </div>
                   <button
@@ -523,13 +525,15 @@ function MenuPageContent() {
     setCart((prev) => addCartLine(prev, menu, chosen));
   };
 
-  // このメニューに関係するクーポン (2026-09-16)。menu_discount はこのメニューが対象のもの、
-  // free_topping はこのメニューに紐づくトッピングのどれかが対象のもの。
+  // このメニューに関係するクーポン (2026-10-16)。cart_percentage は商品小計全体が対象。
+  // menu_discount はこのメニューが対象、free_topping は紐づくトッピングが対象。
   const relevantCouponsForMenu = (menu: MenuWithToppings) =>
     appliedCoupons.filter((c) =>
-      c.kind === "menu_discount"
-        ? c.menuIds.includes(menu.id)
-        : (menu.toppings ?? []).some((t) => c.toppingIds.includes(t.id))
+      c.kind === "cart_percentage"
+        ? true
+        : c.kind === "menu_discount"
+          ? c.menuIds.includes(menu.id)
+          : (menu.toppings ?? []).some((t) => c.toppingIds.includes(t.id))
     );
 
   const updateLineQuantity = (lineId: string, delta: number) => {
@@ -601,13 +605,17 @@ function MenuPageContent() {
   // クーポン適用は事前オーダー(preOrderApi)経由のみ対応 (issue #50 スコープ外: COD直販/レジ)。
   // COD (代引き) モッドが有効なサークルでは orderApi.create に割引を渡す経路が無いため、
   // 誤って「割引されると見せて実際は反映されない」ことがないよう表示自体を出さない。
-  // 2026-09-16 フィードバック対応: (1) kind に応じて menu_discount (対象メニューの小計から
-  // 定額引き) / free_topping (対象トッピングを freeUnits 個まで無料) を計算する。
+  // 2026-10-16: cart_percentage は商品小計全体 (税・送料なし) から割引し、サーバと同じく円未満切り捨て。
+  // 2026-09-16 フィードバック対応: menu_discount / free_topping も既存どおり計算する。
   // サーバ側 (utils/coupon.ts computeCouponDiscount) と同じロジック。(2) 検証済みでも
   // 自動では適用せず、enabledCouponSlugs (「クーポン」欄でのユーザーの明示選択) に
   // 含まれるものだけ有効にする。(3) 複数枚を検証済みの場合は全部リストに出し、
   // 選んだ分だけ同時に適用できる (以前は1枚しか保存/表示できなかった不具合の修正)。
   const potentialDiscountFor = (c: StoredCoupon): number => {
+    if (c.kind === "cart_percentage") {
+      const subtotal = getTotalPrice();
+      return Math.min(subtotal, Math.floor((subtotal * (c.discountPercent ?? 0)) / 100));
+    }
     if (c.kind === "free_topping") {
       const unitPrices: number[] = [];
       for (const line of cart) {
@@ -627,10 +635,17 @@ function MenuPageContent() {
     return Math.min(c.discountAmount ?? 0, eligibleSubtotal);
   };
   // 実際に効くクーポン = 明示的にONにしていて、かつ対象商品がカートにある (割引>0) もの。
-  const applicableCoupons = isPreOrderEnabled()
-    ? []
-    : appliedCoupons.filter((c) => enabledCouponSlugs.has(c.slug) && potentialDiscountFor(c) > 0);
-  const couponDiscount = applicableCoupons.reduce((sum, c) => sum + potentialDiscountFor(c), 0);
+  const couponApplications: { coupon: StoredCoupon; discount: number }[] = [];
+  if (!isPreOrderEnabled()) {
+    for (const c of appliedCoupons) {
+      if (!enabledCouponSlugs.has(c.slug)) continue;
+      const remaining = Math.max(0, getTotalPrice() - couponApplications.reduce((sum, item) => sum + item.discount, 0));
+      const discount = Math.min(remaining, potentialDiscountFor(c));
+      if (discount > 0) couponApplications.push({ coupon: c, discount });
+    }
+  }
+  const applicableCoupons = couponApplications.map((item) => item.coupon);
+  const couponDiscount = couponApplications.reduce((sum, item) => sum + item.discount, 0);
   const getDiscountedTotal = () => Math.max(0, getTotalPrice() - couponDiscount);
 
   const draftPayload = JSON.stringify({
@@ -1064,14 +1079,15 @@ function MenuPageContent() {
         />
 
         <div className="border-t-thick border-border pt-3 space-y-2">
-          {applicableCoupons.map((c) => (
+          {/* 2026-10-16: 小計上限で調整した後の実適用額を内訳にも表示する。 */}
+          {couponApplications.map(({ coupon: c, discount }) => (
             <div key={c.slug} className="flex items-center justify-between text-xs">
               <span className="flex items-center gap-1.5 font-bold">
                 <Ticket className="h-3.5 w-3.5 shrink-0" />
                 「{c.title}」
               </span>
               <span className="flex items-center gap-2">
-                <span className="font-bold text-success">-¥{potentialDiscountFor(c).toLocaleString()}</span>
+                <span className="font-bold text-success">-¥{discount.toLocaleString()}</span>
                 <button
                   type="button"
                   onClick={() => toggleCoupon(c.slug)}
