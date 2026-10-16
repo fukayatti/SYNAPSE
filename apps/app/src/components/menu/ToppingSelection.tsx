@@ -70,7 +70,8 @@ export function ToppingSelection({
       .sort(([a], [b]) => categoryLabel(a).localeCompare(categoryLabel(b), "ja"))
       .map(([category, options]) => ({
         category,
-        options: options.sort((a, b) => a.name.localeCompare(b.name, "ja")),
+        // 2026-10-16: APIの管理順を維持し、注文時の選択肢にも調整済み順を反映する。
+        options,
       }));
   }, [toppings]);
 
@@ -127,7 +128,7 @@ export function ToppingSelection({
                 {ruleLabel} · {chosenCount}{maximum ? `/${maximum}` : "個選択中"}
               </span>
             </div>
-            <div className="flex flex-wrap gap-2">
+            <div className="divide-y-thin divide-border border-y-thin border-border">
               {options.map((topping) => {
                 const isSelected = selected.has(topping.id);
                 const isFree = isSelected && freeIds.has(topping.id);
@@ -146,12 +147,13 @@ export function ToppingSelection({
                       onToggle(topping.id);
                     }}
                     className={cn(
-                      "flex min-h-11 items-center gap-1.5 border-thick px-3 py-2 text-xs font-bold transition-colors disabled:cursor-not-allowed disabled:opacity-40",
-                      isSelected ? "border-primary bg-primary text-primary-foreground" : "border-border bg-background hover:bg-muted",
+                      "flex min-h-11 w-full items-center gap-2 px-2 py-2 text-left text-xs font-bold transition-colors disabled:cursor-not-allowed disabled:opacity-40",
+                      isSelected ? "bg-primary text-primary-foreground" : "bg-background hover:bg-muted",
                     )}
                   >
-                    {topping.imagePath && <img src={resolveAssetUrl(topping.imagePath)} alt="" className="h-5 w-5 shrink-0 border-thin border-current object-cover" />}
-                    <span>{topping.name}</span>
+                    <span aria-hidden="true" className="flex h-5 w-5 shrink-0 items-center justify-center border-thick border-current">{isSelected ? "✓" : ""}</span>
+                    {topping.imagePath && <img src={resolveAssetUrl(topping.imagePath)} alt="" className="h-7 w-7 shrink-0 border-thin border-current object-cover" />}
+                    <span className="flex-1">{topping.name}</span>
                     {isFree ? (
                       <span className="flex items-center gap-1"><span className="line-through opacity-70">¥{topping.price}</span><span>無料</span></span>
                     ) : (
