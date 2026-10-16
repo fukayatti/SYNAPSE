@@ -1,4 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
 import { toppingApi, circleApi, parseCircleSettings, type Topping } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { ImageUpload } from "@/components/image-upload";
@@ -6,6 +7,7 @@ import { Modal } from "@/components/ui/Modal";
 import { Label } from "@/components/ui/label";
 import {
   FormField,
+  FormSelect,
   FormSubmitButton,
   EditModeBanner,
 } from "@/components/ui/FormField";
@@ -29,6 +31,17 @@ interface ToppingFormModalProps {
 type ToppingForm = { name: string; category: string; price: number; imagePath: string; description: string; allergens: JapaneseAllergen[] | null; soldOut: boolean };
 
 export function ToppingFormModal({ circleId, isOpen, onClose, topping, onDelete }: ToppingFormModalProps) {
+  const [newCategory, setNewCategory] = useState("");
+  useEffect(() => {
+    if (isOpen) setNewCategory("");
+  }, [isOpen, topping?.id]);
+
+  const { data: toppings } = useQuery({
+    queryKey: ["toppings", circleId],
+    queryFn: () => toppingApi.list(circleId),
+    enabled: isOpen && !!circleId,
+  });
+
   // 在庫管理拡張ONのサークルでは、売切はトッピング編集から変更不可 (在庫で自動制御)。
   const { data: circleData } = useQuery({
     queryKey: ["circle", circleId],
@@ -128,18 +141,33 @@ export function ToppingFormModal({ circleId, isOpen, onClose, topping, onDelete 
           />
         </div>
 
-        <div>
-          <FormField
+        <div className="space-y-2">
+          <FormSelect
             id="toppingCategory"
             label="トッピングカテゴリ"
-            maxLength={100}
             value={form.category}
-            onChange={(e) => setForm({ ...form, category: e.target.value })}
-            onBlur={triggerAutoSave}
-            placeholder="例: サイズ / ソース"
-          />
-          {/* 2026-10-08: トッピング名でなくカテゴリ名をそろえる操作だと明示し、設定時の迷いを減らす。 */}
-          <p className="mt-1 text-[10px] text-muted-foreground">同じカテゴリ名（例:「ソース」）を付けたトッピングは、ウィザードの同じステップにまとまります。</p>
+            onChange={(e) => {
+              const next = { ...form, category: e.target.value };
+              setForm(next);
+              if (isEdit) saveNow(next);
+            }}
+          >
+            <option value="">未分類</option>
+            {[...new Set([...(toppings ?? []).map((item) => item.category?.trim()).filter((value): value is string => !!value), form.category.trim()].filter(Boolean))]
+              .sort((a, b) => a.localeCompare(b, "ja"))
+              .map((category) => <option key={category} value={category}>{category}</option>)}
+          </FormSelect>
+          <div className="flex items-end gap-2">
+            <FormField id="newToppingCategory" label="新しいカテゴリ" fieldClassName="min-w-0 flex-1" maxLength={100} value={newCategory} onChange={(e) => setNewCategory(e.target.value)} placeholder="例: サイズ / ソース" />
+            <Button type="button" variant="outline" className="shrink-0" disabled={!newCategory.trim()} onClick={() => {
+              const category = newCategory.trim();
+              const next = { ...form, category };
+              setForm(next);
+              setNewCategory("");
+              if (isEdit) saveNow(next);
+            }}>追加して選択</Button>
+          </div>
+          <p className="text-[10px] text-muted-foreground">同じカテゴリ名のトッピングはレジの選択ステップにまとまります。新しいカテゴリは保存時に一覧へ反映されます。</p>
         </div>
 
         <ImageUpload

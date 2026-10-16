@@ -176,9 +176,9 @@ function MenuManagementContent() {
       <div className="space-y-8 font-mono text-foreground">
         
         {/* メニューセクション */}
-        <div className="space-y-4">
+        <section aria-labelledby="menu-management-heading" className="space-y-4 border-thick border-border p-4">
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b-thick border-border pb-3 gap-2 sm:gap-0">
-            <h2 className="text-sm font-bold uppercase tracking-wider">[メニュー管理]</h2>
+            <h2 id="menu-management-heading" className="text-sm font-bold uppercase tracking-wider">[メニュー管理]</h2>
             <div className="flex gap-2 w-full sm:w-auto">
               <Button
                 onClick={handleOpenMenuAdd}
@@ -231,12 +231,12 @@ function MenuManagementContent() {
             </div>
 
           )}
-        </div>
+        </section>
 
         {/* トッピングセクション */}
-        <div className="space-y-4">
+        <section aria-labelledby="topping-management-heading" className="space-y-4 border-thick border-border p-4">
           <div className="flex justify-between items-center border-b-thick border-border pb-3">
-            <h2 className="text-sm font-bold uppercase tracking-wider">[トッピング管理]</h2>
+            <h2 id="topping-management-heading" className="text-sm font-bold uppercase tracking-wider">[トッピング管理]</h2>
             <Button
               onClick={handleOpenToppingAdd}
               className="rounded-none border-thick border-primary bg-primary text-primary-foreground hover:bg-background hover:text-foreground h-8 text-[11px] font-bold uppercase px-3 flex items-center gap-1"
@@ -277,7 +277,7 @@ function MenuManagementContent() {
               </div>
             </>
           )}
-        </div>
+        </section>
 
       </div>
 

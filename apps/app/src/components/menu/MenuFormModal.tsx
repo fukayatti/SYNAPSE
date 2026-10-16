@@ -376,13 +376,16 @@ export function MenuFormModal({ circleId, isOpen, onClose, menu, onDelete }: Men
                       if (isEdit) saveNow(next);
                     }}
                     className={cn(
-                      "flex w-full items-center gap-3 py-2 text-left text-xs font-bold transition-all",
+                      "flex w-full items-center gap-3 border-l-thin px-3 py-2 text-left text-xs font-bold transition-colors",
                       selected
-                        ? "border-primary bg-primary text-primary-foreground"
-                        : "border-border bg-background hover:bg-muted",
+                        ? "border-primary bg-primary/5 text-foreground"
+                        : "border-transparent bg-background hover:border-border hover:bg-muted/50",
                     )}
                   >
-                    <span aria-hidden="true" className="flex h-5 w-5 items-center justify-center border-thick border-border">{selected ? "✓" : ""}</span>
+                    <span aria-hidden="true" className={cn(
+                      "flex h-5 w-5 shrink-0 items-center justify-center border-thin text-[11px]",
+                      selected ? "border-primary font-black text-primary" : "border-muted-foreground/50 text-transparent",
+                    )}>{selected ? "✓" : ""}</span>
                     <span className="flex-1">{t.category || "未分類"} · {t.name}</span><span>¥{t.price}</span>
                   </button>
                 );
