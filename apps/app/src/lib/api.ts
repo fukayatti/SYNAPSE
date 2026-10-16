@@ -790,6 +790,12 @@ export interface LiveOrder {
   totalPrice: number;
   estimatedTime: number | null;
   createdAt: string;
+  items: {
+    name: string;
+    quantity: number;
+    unitPrice: number;
+    toppings: { name: string; unitPrice: number }[];
+  }[];
 }
 
 // 在庫一覧の1件 (GET /api/festivals/:id/inventory)

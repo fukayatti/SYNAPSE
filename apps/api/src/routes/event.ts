@@ -8,6 +8,7 @@ import {
   circle,
   order,
   orderItem,
+  orderItemTopping,
   eventUser,
   review,
   circleVisit,
@@ -307,6 +308,40 @@ eventRoutes.get("/:id/orders/live", async (c) => {
         .where(and(inArray(order.circleId, circleIds), inArray(order.status, ["pending", "preparing"])))
     : [];
 
+  // 注文一覧の行は簡潔に保ち、タップ時の詳細には注文時点の商品名・単価を返す。
+  const activeOrderIds = active.map((row) => row.id);
+  const lineItems = activeOrderIds.length
+    ? await db
+        .select({
+          id: orderItem.id,
+          orderId: orderItem.orderId,
+          name: orderItem.menuName,
+          quantity: orderItem.quantity,
+          unitPrice: orderItem.menuPrice,
+        })
+        .from(orderItem)
+        .where(inArray(orderItem.orderId, activeOrderIds))
+    : [];
+  const lineItemIds = lineItems.map((item) => item.id);
+  const toppings = lineItemIds.length
+    ? await db
+        .select({ orderItemId: orderItemTopping.orderItemId, name: orderItemTopping.toppingName, unitPrice: orderItemTopping.toppingPrice })
+        .from(orderItemTopping)
+        .where(inArray(orderItemTopping.orderItemId, lineItemIds))
+    : [];
+  const toppingsByItem = new Map<string, typeof toppings>();
+  for (const topping of toppings) {
+    const items = toppingsByItem.get(topping.orderItemId) ?? [];
+    items.push(topping);
+    toppingsByItem.set(topping.orderItemId, items);
+  }
+  const itemsByOrder = new Map<string, typeof lineItems>();
+  for (const item of lineItems) {
+    const items = itemsByOrder.get(item.orderId) ?? [];
+    items.push(item);
+    itemsByOrder.set(item.orderId, items);
+  }
+
   const rows = active
     .map((o) => ({
       id: o.id,
@@ -318,6 +353,10 @@ eventRoutes.get("/:id/orders/live", async (c) => {
       totalPrice: o.totalPrice,
       estimatedTime: o.estimatedTime,
       createdAt: o.createdAt,
+      items: (itemsByOrder.get(o.id) ?? []).map(({ id, ...item }) => ({
+        ...item,
+        toppings: toppingsByItem.get(id) ?? [],
+      })),
     }))
     .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
 
