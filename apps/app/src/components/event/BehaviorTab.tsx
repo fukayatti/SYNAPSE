@@ -1,13 +1,12 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { circleApi, eventApi, type EventBehavior } from "@/lib/api";
+import { eventApi, type EventBehavior } from "@/lib/api";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState } from "@/components/ui/ErrorState";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Activity, RefreshCw, Radio, Users, Clock, Repeat, Footprints, UserCheck, ArrowRight } from "lucide-react";
-import { CongestionMonitor } from "./CongestionMonitor";
 
-// 来場者行動・混雑・スタッフ分析タブ (2026-07-14)
+// 来場者行動・スタッフ分析タブ (2026-07-14)
 // 「一人一人の行動ログ(注文・回遊・スタンプ・受付時刻)」の横断集計を表示する。
 // 既存の統計・分析タブ(売上/メニュー中心)では見えない、滞在・回遊・離脱・スタッフ負荷・動線を扱う。
 // バックエンド: GET /api/festivals/:id/behavior (sales:read 権限)。
@@ -65,21 +64,6 @@ export function BehaviorTab({ eventId }: { eventId: string }) {
     refetchInterval: live ? 15_000 : false,
   });
 
-  const {
-    data: circles,
-    isLoading: circlesLoading,
-    isError: circlesError,
-    error: circlesErrorObj,
-    refetch: refetchCircles,
-    isFetching: circlesFetching,
-  } = useQuery({
-    queryKey: ["circles", eventId],
-    queryFn: () => circleApi.list(eventId),
-    enabled: !!eventId,
-    // 2026-10-16: LIVE中は15秒、通常時も1分ごとに報告の有効期限を更新する。
-    refetchInterval: live ? 15_000 : 60_000,
-  });
-
   const b: EventBehavior | undefined = data;
   const j = b?.journey;
 
@@ -99,10 +83,10 @@ export function BehaviorTab({ eventId }: { eventId: string }) {
       <div className="flex flex-col gap-3 border-b-thick border-border pb-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 className="text-sm font-bold flex items-center gap-2 uppercase tracking-wider">
-            <Activity className="h-4 w-4" /> 来場者行動・混雑分析
+            <Activity className="h-4 w-4" /> 来場者行動分析
           </h2>
           <p className="text-[10px] text-muted-foreground mt-1 font-mono">
-            一人一人の行動ログから、滞在・回遊・離脱・混雑とスタッフ配置の負荷・動線を可視化します。
+            一人一人の行動ログから、滞在・回遊・離脱とスタッフ配置の負荷・動線を可視化します。
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -118,22 +102,14 @@ export function BehaviorTab({ eventId }: { eventId: string }) {
           </button>
           <button
             type="button"
-            onClick={() => { void Promise.all([refetch(), refetchCircles()]); }}
-            disabled={isFetching || circlesFetching}
+            onClick={() => { void refetch(); }}
+            disabled={isFetching}
             className="flex items-center gap-1 font-mono text-[11px] uppercase border-thick border-border px-2 py-1 hover:bg-muted"
           >
-            <RefreshCw className={`h-3.5 w-3.5 ${isFetching || circlesFetching ? "animate-spin" : ""}`} /> 更新
+            <RefreshCw className={`h-3.5 w-3.5 ${isFetching ? "animate-spin" : ""}`} /> 更新
           </button>
         </div>
       </div>
-
-      <CongestionMonitor
-        circles={circles}
-        isLoading={circlesLoading}
-        isError={circlesError}
-        error={circlesErrorObj}
-        onRetry={() => { void refetchCircles(); }}
-      />
 
       {isLoading ? (
         <div className="grid grid-cols-2 gap-3 md:grid-cols-4">

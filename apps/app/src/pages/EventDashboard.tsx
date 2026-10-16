@@ -13,6 +13,7 @@ import { loadCircleSalesOrders } from "@/features/event-dashboard/sales";
 import { CirclesTab } from "@/components/event/CirclesTab";
 import { AnalyticsTab } from "@/components/event/AnalyticsTab";
 import { BehaviorTab } from "@/components/event/BehaviorTab";
+import { CongestionTab } from "@/components/event/CongestionTab";
 import { OrderMonitorTab } from "@/components/event/OrderMonitorTab";
 import { InventoryTab } from "@/components/event/InventoryTab";
 import { AnnounceTab } from "@/components/event/AnnounceTab";
@@ -146,6 +147,7 @@ export default function EventDashboard() {
           {activeTab === "analytics" && <AnalyticsTab eventId={eventId} eventName={eventName} />}
           {activeTab === "reviews" && <EventReviewsTab eventId={eventId} />}
           {activeTab === "behavior" && <BehaviorTab eventId={eventId} />}
+          {activeTab === "congestion" && <CongestionTab eventId={eventId} />}
 
           {/* TAB: データエクスポート */}
           {activeTab === "export" && <ExportTab eventId={eventId} />}
