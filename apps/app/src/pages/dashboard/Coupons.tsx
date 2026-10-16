@@ -237,6 +237,9 @@ function CouponsContent() {
                       <span>使用状況: <span className="text-foreground font-bold">{c.redeemedCount} / {c.maxRedemptions ?? "無制限"}</span></span>
                       {c.expiresAt && <span>期限: {new Date(c.expiresAt).toLocaleString("ja-JP")}</span>}
                     </div>
+                    {c.kind === "cart_percentage" && (
+                      <p className="text-muted-foreground">商品小計全体が対象 (税・送料は対象外)</p>
+                    )}
                     {c.kind !== "cart_percentage" && <p className="text-muted-foreground">
                       対象{c.kind === "free_topping" ? "トッピング" : "メニュー"}:{" "}
                       <span className="text-foreground font-bold">
@@ -292,7 +295,7 @@ function CouponsContent() {
       >
         <div className="space-y-1.5">
           <p className="text-xs font-bold uppercase">種類</p>
-          <div className="flex gap-1.5">
+          <div className="flex flex-wrap gap-1.5">
             {(
               [
                 ["menu_discount", "金額引き"],
@@ -485,8 +488,11 @@ function CouponsContent() {
             )}
           </div>
         ) : (
-          <div className="border-thick border-border bg-muted/20 p-3 text-xs leading-relaxed">
-            カートに含まれる商品小計全体から割引します。税・送料は対象外です。
+          <div className="space-y-1 border-thick border-border bg-muted/20 p-3 text-xs leading-relaxed">
+            {/* 2026-10-16: 対象・計算例・併用時の上限を分け、割引条件を読み飛ばしにくくする。 */}
+            <p><strong>対象:</strong> メニュー価格と選択トッピングを合わせた商品小計全体 (税・送料は対象外)</p>
+            <p><strong>計算例:</strong> 商品小計が¥1,000で10%引きなら¥100引き (1円未満切り捨て)</p>
+            <p><strong>併用時:</strong> クーポンの割引額合計は商品小計が上限です</p>
           </div>
         )}
 

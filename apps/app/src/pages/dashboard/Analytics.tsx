@@ -201,7 +201,8 @@ function CircleAnalyticsContent() {
         <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4">
           <StatCard label="総売上" value={yen(t.revenue)} icon={Coins} />
           <StatCard label="総注文数" value={t.orders.toLocaleString()} sub={`完了率 ${t.completedRate}%`} icon={Receipt} />
-          <StatCard label="総客数" value={t.customers.toLocaleString()} sub={`平均客単価 ${yen(t.avgSpend)}`} icon={Users} />
+          {/* 2026-10-16: 平均客単価は専用KPIで見せ、総客数カードとの重複を避ける。 */}
+          <StatCard label="総客数" value={t.customers.toLocaleString()} icon={Users} />
           <StatCard label="平均調理時間" value={t.avgPrepMin != null ? `${t.avgPrepMin}分` : "—"} icon={Clock} />
           <StatCard label="平均評価" value={t.avgRating != null ? `★${t.avgRating}` : "—"} sub={`${t.reviews}件のレビュー`} icon={Star} />
           <StatCard label="スキャン来場者" value={t.visitors.toLocaleString()} icon={Users} />

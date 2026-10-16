@@ -709,32 +709,36 @@ function MembersContent() {
       <Card>
         <CardHeader>
           <CardTitle>ロールと権限</CardTitle>
-          <CardDescription>✓ は利用可、× は利用不可です。メンバー管理など一部の操作はオーナー権限で制御されます。</CardDescription>
+          <CardDescription>✓ は利用可、× は利用不可です。メンバーの追加・変更などはロールの権限表に加え、実ロールによるオーナー判定も適用されます。</CardDescription>
         </CardHeader>
         <CardContent>
           {advancedPermissions === false && (
             <div className="mb-4 border-l-thick border-warning pl-3 text-sm leading-relaxed" role="note">
-              高度な権限管理が OFF の場合、circle_staff は通常の機能権限の判定で circle_manager 相当として扱われます。メンバー管理などのオーナー限定操作は別途制御されます。
-              オーナー（circle_manager）またはイベント管理者は、この画面から「管理者」ロールを付与できます。
+              高度な権限管理が OFF の場合、circle_staff は通常機能の権限判定で circle_manager 相当になります。メンバー管理などの操作では、実ロールに基づきオーナーまたはイベント管理者かどうかを別途確認します。
+              オーナーまたはイベント管理者は、この画面から circle_admin（管理者）を付与できます。
               {role === ROLES.EVENT_MANAGER && (
                 <p className="mt-2">
                   ロールごとに権限を分ける場合は
                   <Link to="/event/dashboard" className="ml-1 text-info underline underline-offset-2">
                     イベント管理を開き
                   </Link>
-                  、メニューの「イベント設定」で「高度な権限管理」を ON にしてください。
+                  、左メニューの「管理」→「イベント設定」→「高度な権限管理」を ON にしてください。
                 </p>
               )}
             </div>
           )}
+          {/* 2026-10-16: 表を横スクロールしても、各行の権限名を追えるよう左端を固定する。 */}
           <div className="max-w-full overflow-x-auto">
             <table className="w-full min-w-[640px] border-collapse text-left text-xs font-mono" aria-label="ロール別の権限">
               <thead>
                 <tr className="border-b-thick border-border">
-                  <th scope="col" className="p-3">権限</th>
+                  <th scope="col" className="sticky left-0 z-20 border-r-thin border-border bg-background p-3">権限</th>
                   {comparisonRoles.map((roleName) => (
                     <th key={roleName} scope="col" className="p-3 text-center">
                       {ROLE_NAMES[roleName]}
+                      {roleName === ROLES.CIRCLE_STAFF && advancedPermissions === false && (
+                        <span className="block text-[10px] font-normal text-muted-foreground">通常機能: {ROLE_NAMES[ROLES.CIRCLE_MANAGER]}相当</span>
+                      )}
                     </th>
                   ))}
                 </tr>
@@ -742,7 +746,7 @@ function MembersContent() {
               <tbody>
                 {permissionRows.map((permission) => (
                   <tr key={permission} className="border-b-thin border-border">
-                    <th scope="row" className="p-3 font-normal">
+                    <th scope="row" className="sticky left-0 z-10 border-r-thin border-border bg-background p-3 font-normal">
                       {PERMISSION_NAMES[permission] || permission}
                     </th>
                     {comparisonRoles.map((roleName) => {

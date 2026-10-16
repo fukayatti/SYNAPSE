@@ -57,9 +57,14 @@ function SalesManagementContent() {
     new Set((orders ?? []).filter((o) => o.createdAt).map((o) => dayKey(new Date(o.createdAt!))))
   ).sort((a, b) => (a < b ? 1 : -1));
 
-  // orders 取得後、まだ日付未選択なら最新の営業日を既定にする。
+  // 2026-10-16: スペース切り替え後に前サークルの選択日が残ると、新しい注文があるのに空表示になる。
+  // 選択日が現在の注文日一覧に含まれない場合は最新の営業日に戻す。
   useEffect(() => {
-    if (!selectedDate && availableDates.length > 0) {
+    if (availableDates.length === 0) {
+      if (selectedDate) setSelectedDate("");
+      return;
+    }
+    if (!availableDates.includes(selectedDate)) {
       setSelectedDate(availableDates[0]);
     }
   }, [availableDates, selectedDate]);
@@ -252,8 +257,12 @@ function SalesManagementContent() {
               <CardDescription className="text-xs">9:00 - 18:00 の時間帯別売上 (円)</CardDescription>
             </CardHeader>
             <CardContent className="flex justify-center">
-              <div 
-                className="w-full max-w-[500px] cursor-pointer hover:opacity-80 transition-opacity" 
+              {/* 2026-10-16: グラフ拡大をマウスだけでなくキーボードからも開けるよう共通Buttonにする。 */}
+              <Button
+                type="button"
+                variant="ghost"
+                aria-label="時間帯別売上グラフを拡大"
+                className="h-auto w-full max-w-[500px] cursor-pointer justify-start p-0 text-foreground no-underline hover:bg-transparent hover:text-foreground active:bg-transparent active:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
                 onClick={() => setIsChartExpanded(true)}
                 title="クリックして拡大"
               >
@@ -322,7 +331,7 @@ function SalesManagementContent() {
                     </g>
                   ))}
                 </svg>
-              </div>
+              </Button>
             </CardContent>
           </Card>
 
