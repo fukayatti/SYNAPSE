@@ -2,7 +2,7 @@
 import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { CircleAuthGuard, getAuthInfo, useAuth } from "@/hooks/useCircleAuth";
-import { menuApi, toppingApi, orderApi, circleApi, eventApi, wristbandApi, preOrderApi, parseCircleSettings, parseEventPaymentMethods, activeWaitTimeReport, type MenuWithToppings, type Topping } from "@/lib/api";
+import { menuApi, toppingApi, orderApi, circleApi, eventApi, wristbandApi, preOrderApi, couponApi, parseCircleSettings, parseEventPaymentMethods, activeWaitTimeReport, type MenuWithToppings, type Topping } from "@/lib/api";
 import { extractIdFromCode, cn } from "@/lib/utils";
 import { undoableAction } from "@/lib/toast-undo";
 import { ModSandbox } from "@/components/ModSandbox";
@@ -217,7 +217,10 @@ function CartBody({
   onSubmit,
   onClear,
   total,
-  preOrderCouponApplied,
+  isPreOrder,
+  registerCoupons,
+  registerCouponId,
+  onSetRegisterCoupon,
   paymentMethods,
   paymentMethod,
   onSetPayment,
@@ -235,7 +238,10 @@ function CartBody({
   onSubmit: () => void;
   onClear: () => void;
   total: number;
-  preOrderCouponApplied: boolean;
+  isPreOrder: boolean;
+  registerCoupons: { id: string; title: string; discountPercent: number | null }[];
+  registerCouponId: string;
+  onSetRegisterCoupon: (id: string) => void;
   // 支払い方法 (2026-07-12)。要素が2つ以上のときだけ選択UIを出す。
   paymentMethods: string[];
   paymentMethod: string;
@@ -368,13 +374,36 @@ function CartBody({
           />
         </div>
         <p className="-mt-2 text-[10px] text-muted-foreground">家族の登録人数とは別項目です。注文の来店人数は必要に応じて入力してください。</p>
+        {registerCoupons.length > 0 && (
+          <div className="space-y-1.5">
+            <Label htmlFor={`${idPrefix}-register-coupon`} className="font-mono text-xs uppercase tracking-wider">レジ専用割引券</Label>
+            <select
+              id={`${idPrefix}-register-coupon`}
+              value={registerCouponId}
+              onChange={(event) => onSetRegisterCoupon(event.target.value)}
+              disabled={isPreOrder}
+              className="h-10 w-full border-thick border-border bg-background px-2 text-sm font-bold disabled:opacity-50"
+            >
+              <option value="">適用しない</option>
+              {registerCoupons.map((coupon) => (
+                <option key={coupon.id} value={coupon.id}>{coupon.title} ({coupon.discountPercent}％引き)</option>
+              ))}
+            </select>
+            {isPreOrder && <p className="text-[10px] text-muted-foreground">事前注文にはレジ専用割引券を適用できません。</p>}
+            {!isPreOrder && registerCouponId && (() => {
+              const selected = registerCoupons.find((coupon) => coupon.id === registerCouponId);
+              const discount = selected?.discountPercent
+                ? Math.floor((checkoutTotal(cart, null) * selected.discountPercent) / 100)
+                : 0;
+              return discount > 0 ? <p className="text-xs font-bold text-primary">割引額: −¥{discount.toLocaleString()}</p> : null;
+            })()}
+          </div>
+        )}
         <div className="flex justify-between items-center border-thick border-border px-4 py-3 bg-muted" role="status" aria-live="polite" aria-atomic="true">
           <span className="font-mono text-sm uppercase tracking-wider">合計金額</span>
           <span className="font-headline text-2xl sm:text-3xl font-black">¥{total.toLocaleString()}</span>
         </div>
-        {preOrderCouponApplied && (
-          <p className="text-xs text-muted-foreground">事前注文に適用済みのクーポンを反映した金額です。</p>
-        )}
+        {isPreOrder && <p className="text-xs text-muted-foreground">事前注文時に確定した金額です。</p>}
 
         {/* 支払い方法の選択 (対応が2つ以上のサークルのみ表示。1つなら自動採用) */}
         {paymentMethods.length > 1 && (
@@ -457,7 +486,14 @@ function RegisterPageContent() {
   const [activeCustomer, setActiveCustomer] = useState<{ userId: string; wristbandId: string | null; familyBandCount: number; allergies: JapaneseAllergen[] | null } | null>(null);
   const [activePreOrderId, setActivePreOrderId] = useState<string | null>(null);
   const [activePreOrderTotalPrice, setActivePreOrderTotalPrice] = useState<number | null>(null);
-  const [activePreOrderCouponApplied, setActivePreOrderCouponApplied] = useState(false);
+  const [registerCouponId, setRegisterCouponId] = useState("");
+  const { data: registerCoupons = [] } = useQuery({
+    queryKey: ["register-coupons", circleId],
+    queryFn: () => couponApi.registerOptions(circleId),
+    enabled: !!circleId,
+    refetchInterval: 60_000,
+  });
+  useEffect(() => setRegisterCouponId(""), [circleId]);
 
   const { data: circle } = useQuery({
     queryKey: ["circle", circleId],
@@ -553,7 +589,6 @@ function RegisterPageContent() {
     if (!activeCustomer) {
       setActivePreOrderId(null);
       setActivePreOrderTotalPrice(null);
-      setActivePreOrderCouponApplied(false);
       return;
     }
 
@@ -568,9 +603,9 @@ function RegisterPageContent() {
         if (!isMounted) return;
         if (pendingOrders.length > 0) {
           const po = pendingOrders[0]!;
+          setRegisterCouponId("");
           setActivePreOrderId(po.id);
           setActivePreOrderTotalPrice(po.totalPrice);
-          setActivePreOrderCouponApplied((po.couponSlugs?.length ?? 0) > 0);
           setCart(
             po.items.map((item) => ({
               lineId: crypto.randomUUID(),
@@ -597,15 +632,15 @@ function RegisterPageContent() {
           });
         } else {
           setActivePreOrderId(null);
+          setRegisterCouponId("");
           setActivePreOrderTotalPrice(null);
-          setActivePreOrderCouponApplied(false);
         }
       } catch (err) {
         console.error("Failed to load pre-order items:", err);
         if (isMounted) {
           setActivePreOrderId(null);
+          setRegisterCouponId("");
           setActivePreOrderTotalPrice(null);
-          setActivePreOrderCouponApplied(false);
         }
       }
     };
@@ -623,6 +658,7 @@ function RegisterPageContent() {
     items: cart.map((line) => ({ menuId: line.menuId, quantity: line.quantity, toppingIds: line.toppings.map((t) => t.toppingId) })),
     paymentMethod: paymentMethod || undefined,
     cashierId: getAuthInfo()?.userEmail ?? undefined,
+    registerCouponId: activePreOrderId ? undefined : registerCouponId || undefined,
   } : null;
   const submitOrder = useOrderSubmission(orderInput);
   const createOrder = useMutation({
@@ -633,6 +669,7 @@ function RegisterPageContent() {
       setPeopleCount(1);
       setActiveCustomer(null); // 会計完了後に顧客情報をクリア
       setActivePreOrderId(null);
+      setRegisterCouponId("");
       setIsCartPanelOpen(false);
       // 支払い方法は次の会計で選び直す (単一方法は effect で再セットされる)
       setPaymentMethod("");
@@ -663,6 +700,7 @@ function RegisterPageContent() {
       setPeopleCount(1);
       setActiveCustomer(null);
       setActivePreOrderId(null);
+      setRegisterCouponId("");
       setIsCartPanelOpen(false);
       setPaymentMethod("");
     },
@@ -716,7 +754,13 @@ function RegisterPageContent() {
 
   // 2026-10-08: 店頭受取では事前注文に保存済みの合計を請求額として見せる。
   // 明細の現行価格を足すとクーポン値引きが消えて見え、画面表示とclaim後の記録額がずれる。
-  const getTotalPrice = () => checkoutTotal(cart, activePreOrderId ? activePreOrderTotalPrice : null);
+  const getTotalPrice = () => {
+    const subtotal = checkoutTotal(cart, activePreOrderId ? activePreOrderTotalPrice : null);
+    const selected = activePreOrderId ? null : registerCoupons.find((option) => option.id === registerCouponId);
+    return selected?.discountPercent
+      ? Math.max(0, subtotal - Math.floor((subtotal * selected.discountPercent) / 100))
+      : subtotal;
+  };
   const getTotalCount = () => cartCount(cart);
 
   const handleSubmitOrder = async () => {
@@ -740,14 +784,19 @@ function RegisterPageContent() {
 
   const clearCart = () => {
     const prev = cart;
+    const previousCouponId = registerCouponId;
     undoableAction({
       message: "カートをクリアしました",
       optimistic: () => {
         setCart([]);
         setActivePreOrderId(null);
+        setRegisterCouponId("");
       },
       commit: () => {}, // クライアントのみ (サーバ反映なし)
-      rollback: () => setCart(prev),
+      rollback: () => {
+        setCart(prev);
+        setRegisterCouponId(previousCouponId);
+      },
     });
   };
 
@@ -992,7 +1041,10 @@ function RegisterPageContent() {
             onSubmit={handleSubmitOrder}
             onClear={clearCart}
             total={getTotalPrice()}
-            preOrderCouponApplied={!!activePreOrderId && activePreOrderCouponApplied}
+            isPreOrder={!!activePreOrderId}
+            registerCoupons={registerCoupons}
+            registerCouponId={registerCouponId}
+            onSetRegisterCoupon={setRegisterCouponId}
             paymentMethods={effectivePayments}
             paymentMethod={paymentMethod}
             onSetPayment={setPaymentMethod}
@@ -1057,7 +1109,10 @@ function RegisterPageContent() {
               onSubmit={handleSubmitOrder}
               onClear={clearCart}
               total={getTotalPrice()}
-              preOrderCouponApplied={!!activePreOrderId && activePreOrderCouponApplied}
+              isPreOrder={!!activePreOrderId}
+              registerCoupons={registerCoupons}
+              registerCouponId={registerCouponId}
+              onSetRegisterCoupon={setRegisterCouponId}
               paymentMethods={effectivePayments}
               paymentMethod={paymentMethod}
               onSetPayment={setPaymentMethod}

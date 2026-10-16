@@ -19,6 +19,7 @@ import {
   couponMenu,
   couponTopping,
   couponRedemption,
+  orderCoupon,
 } from "./order";
 import {
   eventUser,
@@ -200,6 +201,7 @@ export const couponRelations = relations(coupon, ({ one, many }) => ({
     references: [circle.id],
   }),
   redemptions: many(couponRedemption),
+  orderCoupons: many(orderCoupon),
   preOrders: many(preOrder),
   couponMenus: many(couponMenu),
   couponToppings: many(couponTopping),
@@ -240,6 +242,11 @@ export const couponRedemptionRelations = relations(couponRedemption, ({ one }) =
     fields: [couponRedemption.preOrderId],
     references: [preOrder.id],
   }),
+}));
+
+export const orderCouponRelations = relations(orderCoupon, ({ one }) => ({
+  coupon: one(coupon, { fields: [orderCoupon.couponId], references: [coupon.id] }),
+  order: one(order, { fields: [orderCoupon.orderId], references: [order.id] }),
 }));
 
 // --- visitor ---

@@ -7,7 +7,7 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import { coupon, couponMenu, couponTopping, circle, menu, topping } from "@fesflow/db";
-import { eq, desc, inArray } from "drizzle-orm";
+import { eq, desc, inArray, and } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { ulid } from "ulidx";
 import { hasPermission } from "../utils/auth";
@@ -53,6 +53,28 @@ couponRoutes.get("/circle/:circleId", async (c) => {
   );
 });
 
+// レジ担当向けの選択肢は、事前注文用の合言葉や配布情報を返さず、利用可能なPOSクーポンだけに絞る。
+couponRoutes.get("/circle/:circleId/register-options", async (c) => {
+  const db = c.get("db");
+  const circleId = c.req.param("circleId");
+  if (!(await hasPermission(c, circleId, "order:write"))) {
+    apiError("FORBIDDEN", "権限がありません");
+  }
+  const rows = await db.select({
+    id: coupon.id,
+    title: coupon.title,
+    discountPercent: coupon.discountPercent,
+    maxRedemptions: coupon.maxRedemptions,
+    redeemedCount: coupon.redeemedCount,
+    expiresAt: coupon.expiresAt,
+  }).from(coupon).where(and(eq(coupon.circleId, circleId), eq(coupon.registerOnly, true), eq(coupon.status, "active")))
+    .orderBy(desc(coupon.createdAt));
+  return c.json(rows.filter((item) =>
+    (!item.expiresAt || item.expiresAt.getTime() >= Date.now()) &&
+    (item.maxRedemptions === null || item.redeemedCount < item.maxRedemptions),
+  ));
+});
+
 // クーポン作成。kind (2026-09-16 フィードバック対応) で対象/割引の計算方式を切り替える。
 // menu_discount: 対象メニューの小計から discountAmount 円引く。
 // free_topping: 対象トッピングを freeUnits 個 (未指定=無制限) まで無料にする。
@@ -82,7 +104,10 @@ const createCouponSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("cart_percentage"),
     ...baseCouponFields,
+    // レジ専用はレジ画面の選択式なので、来場者用の合言葉を設定しない。
+    passphrase: z.string().max(50).optional(),
     discountPercent: z.number().int().min(1).max(100),
+    registerOnly: z.boolean().default(false),
   }),
 ]);
 
@@ -152,13 +177,17 @@ couponRoutes.post(
         const rows = await db.select().from(coupon).where(eq(coupon.id, id));
         return c.json({ ...rows[0], menuIds: [], toppingIds: body.toppingIds }, 201);
       } else {
+        if (!body.registerOnly && !body.passphrase?.trim()) {
+          apiError("BAD_REQUEST", "来場者向けクーポンには合言葉が必要です");
+        }
         await db.insert(coupon).values({
           id,
           circleId,
           title: body.title,
           slug: nanoid(16),
-          passphrase: body.passphrase,
+          passphrase: body.registerOnly ? "" : body.passphrase!.trim(),
           kind: "cart_percentage",
+          registerOnly: body.registerOnly,
           discountPercent: body.discountPercent,
           maxRedemptions: body.maxRedemptions,
           expiresAt: body.expiresAt ? new Date(body.expiresAt) : undefined,

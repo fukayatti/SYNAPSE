@@ -29,6 +29,7 @@ const initialForm = {
   passphrase: "",
   discountAmount: 100,
   discountPercent: 10,
+  registerOnly: false,
   // 空欄 = 使用回数無制限 (2026-09-16 フィードバック対応)。
   maxRedemptions: 5 as number | "",
   menuIds: [] as string[],
@@ -96,24 +97,31 @@ function CouponsContent() {
     mutationFn: () => {
       const base = {
         title: form.title.trim(),
-        passphrase: form.passphrase.trim(),
         maxRedemptions: form.maxRedemptions === "" ? undefined : form.maxRedemptions,
       };
       const input: CreateCouponInput =
         form.kind === "menu_discount"
-          ? { kind: "menu_discount", ...base, discountAmount: Math.max(1, form.discountAmount), menuIds: form.menuIds }
+          ? { kind: "menu_discount", ...base, passphrase: form.passphrase.trim(), discountAmount: Math.max(1, form.discountAmount), menuIds: form.menuIds }
           : form.kind === "free_topping"
             ? {
               kind: "free_topping",
               ...base,
+              passphrase: form.passphrase.trim(),
               freeUnits: form.freeUnits === "" ? undefined : form.freeUnits,
               toppingIds: form.toppingIds,
             }
-            : { kind: "cart_percentage", ...base, discountPercent: Math.min(100, Math.max(1, form.discountPercent)) };
+            : {
+              kind: "cart_percentage",
+              ...base,
+              ...(form.registerOnly ? {} : { passphrase: form.passphrase.trim() }),
+              registerOnly: form.registerOnly,
+              discountPercent: Math.min(100, Math.max(1, form.discountPercent)),
+            };
       return couponApi.create(circleId, input);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["coupons", circleId] });
+      queryClient.invalidateQueries({ queryKey: ["register-coupons", circleId] });
       toast.success("クーポンを作成しました");
       setShowCreateForm(false);
       setForm(initialForm);
@@ -125,6 +133,7 @@ function CouponsContent() {
     mutationFn: (id: string) => couponApi.disable(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["coupons", circleId] });
+      queryClient.invalidateQueries({ queryKey: ["register-coupons", circleId] });
       toast.success("クーポンを無効化しました");
     },
     onError: (e: any) => toast.error(e?.message || "無効化に失敗しました"),
@@ -146,12 +155,11 @@ function CouponsContent() {
 
   const isFormValid =
     !!form.title.trim() &&
-    !!form.passphrase.trim() &&
     (form.kind === "menu_discount"
-      ? form.discountAmount >= 1 && form.menuIds.length > 0
+      ? !!form.passphrase.trim() && form.discountAmount >= 1 && form.menuIds.length > 0
       : form.kind === "free_topping"
-        ? form.toppingIds.length > 0
-        : form.discountPercent >= 1 && form.discountPercent <= 100);
+        ? !!form.passphrase.trim() && form.toppingIds.length > 0
+        : (form.registerOnly || !!form.passphrase.trim()) && form.discountPercent >= 1 && form.discountPercent <= 100);
 
   // 2026-10-16: 作成モーダルの入力も共通遷移ガードに登録し、離脱時に同じ作成処理を使う。
   useUnsavedChanges({
@@ -241,6 +249,7 @@ function CouponsContent() {
                       <span>
                         種類: <span className="text-foreground font-bold">{c.kind === "free_topping" ? "トッピング無料" : c.kind === "cart_percentage" ? "カート全体の割引" : "金額引き"}</span>
                       </span>
+                      {c.registerOnly && <span className="font-bold text-primary">サークルレジのみ</span>}
                       {c.kind === "cart_percentage" ? (
                         <span>割引率: <span className="text-foreground font-bold">{c.discountPercent}%</span></span>
                       ) : c.kind === "menu_discount" ? (
@@ -252,7 +261,9 @@ function CouponsContent() {
                       {c.expiresAt && <span>期限: {new Date(c.expiresAt).toLocaleString("ja-JP")}</span>}
                     </div>
                     {c.kind === "cart_percentage" && (
-                      <p className="text-muted-foreground">商品小計全体が対象 (税・送料は対象外)</p>
+                      <p className="text-muted-foreground">
+                        {c.registerOnly ? "サークル側レジで確定する新規会計だけに適用" : "来場者の事前注文に適用"} · 商品小計全体が対象 (税・送料は対象外)
+                      </p>
                     )}
                     {c.kind !== "cart_percentage" && <p className="text-muted-foreground">
                       対象{c.kind === "free_topping" ? "トッピング" : "メニュー"}:{" "}
@@ -270,14 +281,14 @@ function CouponsContent() {
                       </p>
                     )}
                     <div className="flex flex-wrap items-center gap-2 pt-1">
-                      <Button
+                      {!c.registerOnly && <Button
                         type="button"
                         onClick={() => copyShareText(c)}
                         className="h-7 border-thick border-border bg-background text-foreground rounded-none px-2 text-[11px] font-bold hover:bg-muted"
                       >
                         <Copy className="mr-1 h-3 w-3" />
                         共有用文面をコピー
-                      </Button>
+                      </Button>}
                       <PermissionGuard permission="coupon:write">
                         {c.status !== "disabled" && (
                           <Button
@@ -343,14 +354,38 @@ function CouponsContent() {
             value={form.title}
             onChange={(e) => setForm({ ...form, title: e.target.value })}
           />
-          <FormField
-            id="coupon-passphrase"
-            label="合言葉"
-            required
-            placeholder="fes2026"
-            value={form.passphrase}
-            onChange={(e) => setForm({ ...form, passphrase: e.target.value })}
-          />
+          {form.kind === "cart_percentage" && (
+            <div className="space-y-1.5">
+              <p className="text-xs font-bold">利用先</p>
+              <div className="flex flex-wrap gap-2">
+                {([[false, "来場者の事前注文"], [true, "サークル側レジのみ"]] as const).map(([registerOnly, label]) => (
+                  <button
+                    key={label}
+                    type="button"
+                    aria-pressed={form.registerOnly === registerOnly}
+                    onClick={() => setForm({ ...form, registerOnly })}
+                    className={cn(
+                      "border-thin px-3 py-2 text-xs font-bold",
+                      form.registerOnly === registerOnly ? "border-primary bg-primary text-primary-foreground" : "border-border bg-background hover:bg-muted",
+                    )}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <p className="text-[11px] text-muted-foreground">レジ専用クーポンは来場者ページ・事前注文では使用できません。</p>
+            </div>
+          )}
+          {!(form.kind === "cart_percentage" && form.registerOnly) && (
+            <FormField
+              id="coupon-passphrase"
+              label="合言葉"
+              required
+              placeholder="fes2026"
+              value={form.passphrase}
+              onChange={(e) => setForm({ ...form, passphrase: e.target.value })}
+            />
+          )}
           {form.kind === "menu_discount" ? (
             <FormField
               id="coupon-discount"

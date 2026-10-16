@@ -1623,6 +1623,7 @@ export interface Coupon {
   kind: CouponKind;
   discountAmount: number | null; // menu_discount のみ
   discountPercent: number | null; // cart_percentage のみ
+  registerOnly: boolean; // true の場合、サークル側POSの会計時だけ適用
   freeUnits: number | null; // free_topping のみ。null = 無制限
   maxRedemptions: number | null; // 使用上限回数。null = 無制限
   redeemedCount: number;
@@ -1647,8 +1648,9 @@ export type CreateCouponInput =
   | {
       kind: "cart_percentage";
       title: string;
-      passphrase: string;
+      passphrase?: string;
       discountPercent: number;
+      registerOnly?: boolean;
       maxRedemptions?: number;
       expiresAt?: string;
     }
@@ -1677,6 +1679,10 @@ export interface CouponVerifyResult {
 export const couponApi = {
   listByCircle: (circleId: string) =>
     fetchApi<Coupon[]>(`/api/coupons/circle/${circleId}`),
+  registerOptions: (circleId: string) =>
+    fetchApi<{ id: string; title: string; discountPercent: number | null; maxRedemptions: number | null; redeemedCount: number; expiresAt: string | null }[]>(
+      `/api/coupons/circle/${circleId}/register-options`,
+    ),
   create: (circleId: string, data: CreateCouponInput) =>
     fetchApi<Coupon>(`/api/coupons/circle/${circleId}`, {
       method: "POST",
