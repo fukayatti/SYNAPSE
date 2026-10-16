@@ -206,8 +206,8 @@ export default function MyPage() {
   }
 
   const activeWristband = userStatus?.familyWristbands?.find((band) => band.id === session?.wristbandId) ?? userStatus?.wristband;
-  // 2026-10-16: 家族一覧では本人のバンドを除き、各家族の情報だけを編集対象にする。
-  const familyMembers = (userStatus?.familyWristbands ?? []).filter((band) => band.id !== activeWristband?.id);
+  // 2026-10-16: 本人と家族を分けず、アカウントに紐付く全バンドを同じ一覧で個別管理する。
+  const familyMembers = userStatus?.familyWristbands ?? [];
   const targetWbId = activeWristband?.id || userId;
   // 2026-07-13: 来場者の表示QRのURLを物理リストバンドのQRと同じ形式 (/w/:id) に統一する。
   // 店頭レジ側はすでに入力文字列から /w/:id や ?wb=... を解析してIDを抽出できるように修正済みのため、これで動作する。
