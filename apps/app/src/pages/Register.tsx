@@ -273,7 +273,7 @@ function CartBody({
                 {allowed.length > 0 && (
                   <div className="space-y-1.5">
                     <p className="text-xs font-bold uppercase tracking-wider">トッピング:</p>
-                    <div className="flex flex-wrap gap-1.5">
+                    <div className="space-y-1.5">
                       {allowed.map((topping) => {
                         const on = line.toppings.some((t) => t.toppingId === topping.id);
                         return (
@@ -283,18 +283,20 @@ function CartBody({
                             disabled={topping.soldOut}
                             onClick={() => onToggleTopping(line.lineId, topping)}
                             className={cn(
-                              "flex items-center gap-1.5 border-thick rounded-none px-2 py-1 text-xs font-bold transition-all disabled:opacity-40 disabled:cursor-not-allowed",
+                              "flex min-h-10 w-full items-center justify-between gap-2 border-thick rounded-none px-2 py-1 text-left text-xs font-bold transition-all disabled:opacity-40 disabled:cursor-not-allowed",
                               on
                                 ? "border-primary bg-primary text-primary-foreground"
                                 : "border-border bg-background hover:bg-muted"
                             )}
                           >
-                            {topping.imagePath && (
-                              <img src={resolveAssetUrl(topping.imagePath)} alt="" className="h-5 w-5 object-cover border-thin border-current shrink-0" />
-                            )}
-                            <span>{topping.name}</span>
-                            <span className={on ? "opacity-80" : "text-muted-foreground"}>
-                              {topping.price >= 0 ? `+¥${topping.price}` : `-¥${Math.abs(topping.price)}`}
+                            <span className="flex min-w-0 items-center gap-2">
+                              {topping.imagePath && (
+                                <img src={resolveAssetUrl(topping.imagePath)} alt="" className="h-5 w-5 object-cover border-thin border-current shrink-0" />
+                              )}
+                              <span className="break-words">{topping.name}</span>
+                            </span>
+                            <span className={cn("shrink-0 tabular-nums", on ? "opacity-80" : "text-muted-foreground")}>
+                              {topping.price >= 0 ? `+¥${topping.price.toLocaleString()}` : `-¥${Math.abs(topping.price).toLocaleString()}`}
                             </span>
                           </button>
                         );
@@ -755,7 +757,8 @@ function RegisterPageContent() {
       {/* 横幅に余裕がある画面 (xl+) はカートを右サイドバー固定、狭い画面は下部バー+スライドアップ */}
       <div className="xl:flex xl:items-start xl:gap-4">
         {/* ===== メニュー一覧 (メインカラム) ===== */}
-        <div className="flex-1 min-w-0 p-3 sm:p-4 pb-32 xl:pb-4">
+        {/* 2026-10-16: モバイルの固定会計バーが商品ボタンを覆わないよう、バーと安全領域分の余白を予約する。 */}
+        <div className="flex-1 min-w-0 p-3 pb-[calc(10rem+env(safe-area-inset-bottom))] sm:p-4 sm:pb-[calc(11rem+env(safe-area-inset-bottom))] xl:pb-4">
           {/* ヘッダーバー */}
           <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 bg-primary p-3 sm:p-4 text-primary-foreground border-thick border-border mb-4">
             <h1 className="font-mono text-lg sm:text-2xl font-black uppercase tracking-wider">
@@ -968,22 +971,24 @@ function RegisterPageContent() {
 
       {/* ===== モバイル/タブレット: 固定カートフッターバー (xl 未満のみ) ===== */}
       {cart.length > 0 && (
-        <div className="xl:hidden fixed bottom-0 left-0 right-0 z-40 bg-primary text-primary-foreground border-t-heavy border-border">
+        <div className="xl:hidden fixed bottom-0 left-0 right-0 z-40 border-t-heavy border-border bg-primary pb-[env(safe-area-inset-bottom)] text-primary-foreground">
           <button
             onClick={() => setIsCartPanelOpen(true)}
-            className="w-full flex items-center justify-between px-4 py-3 sm:py-4 font-mono"
+            aria-label={`カートを開く。${getTotalCount()}点、合計${getTotalPrice().toLocaleString()}円`}
+            className="flex w-full items-center justify-between gap-2 px-3 py-3 font-mono sm:px-4 sm:py-4"
           >
-            <div className="flex items-center gap-3">
-              <span className="bg-background text-foreground px-2 py-0.5 text-xs font-black uppercase">
+            <div className="flex min-w-0 items-center gap-2 sm:gap-3">
+              <span className="shrink-0 bg-background px-2 py-0.5 text-xs font-black uppercase text-foreground">
                 {getTotalCount()}点
               </span>
-              <span className="text-xl sm:text-2xl font-black">
+              <span className="truncate text-lg font-black tabular-nums sm:text-2xl">
                 ¥{getTotalPrice().toLocaleString()}
               </span>
             </div>
-            <span className="flex items-center gap-2 border-thick border-primary-foreground px-4 py-2 font-black uppercase text-sm tracking-wider hover:bg-primary-foreground hover:text-primary transition-all">
+            <span className="flex shrink-0 items-center gap-1 border-thick border-primary-foreground px-2 py-2 text-xs font-black uppercase tracking-wider transition-all hover:bg-primary-foreground hover:text-primary sm:gap-2 sm:px-4 sm:text-sm">
               <ShoppingCart className="h-4 w-4" />
-              カートを見る
+              <span className="sm:hidden">カート</span>
+              <span className="hidden sm:inline">カートを見る</span>
             </span>
           </button>
         </div>
