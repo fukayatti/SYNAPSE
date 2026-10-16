@@ -1142,7 +1142,6 @@ function MenuPageContent() {
       <Modal isOpen={isQrOpen} onClose={() => setIsQrOpen(false)} title="[マイQR]" maxWidth="md">
         {canDisplayMyQr && activeWristband ? (
           <div className="space-y-3 text-center">
-            <p className="text-xs text-muted-foreground">このQRは、入場登録したあなたを注文の受取や店頭会計で確認するためのものです。</p>
             <div className="inline-block border-thick border-border bg-background p-3">
               <QRCodeSVG
                 value={`${appOrigin}/w/${activeWristband.id}`}

@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { resolveAssetUrl } from "@/lib/asset-url";
 import { AllergenSelector } from "@/components/menu/AllergenSelector";
+import { QrScannerModal } from "@/components/pos/qr-scanner-modal";
 import { parseJapaneseAllergens, type JapaneseAllergen } from "@fesflow/config/allergens";
 
 /**
@@ -26,9 +27,16 @@ export default function Onboarding() {
   const [birthdayMonth, setBirthdayMonth] = useState("");
   const [birthdayDay, setBirthdayDay] = useState("");
   const [age, setAge] = useState("");
-  const [showAllergyStep, setShowAllergyStep] = useState(isAllergyEdit);
+  const [step, setStep] = useState<"profile" | "family" | "allergies">(isAllergyEdit ? "allergies" : "profile");
   const [allergies, setAllergies] = useState<JapaneseAllergen[] | null>(null);
+  const [isFamilyScannerOpen, setIsFamilyScannerOpen] = useState(false);
+  const [familyCode, setFamilyCode] = useState("");
+  const [familyNickname, setFamilyNickname] = useState("");
+  const [familyBirthdayMonth, setFamilyBirthdayMonth] = useState("");
+  const [familyBirthdayDay, setFamilyBirthdayDay] = useState("");
+  const [familyAge, setFamilyAge] = useState("");
   const queryClient = useQueryClient();
+  const isAdmissionWizard = !isEdit && !isAllergyEdit;
 
   // 入場前(セッション無し)に直接来たら入場を促す
   useEffect(() => {
@@ -42,7 +50,7 @@ export default function Onboarding() {
   const { data: profile, isLoading: profileLoading } = useQuery({
     queryKey: ["visitorProfile", userId],
     queryFn: () => wristbandApi.lookup(userId!),
-    enabled: (isEdit || isAllergyEdit) && !!userId,
+    enabled: (isEdit || isAllergyEdit || step === "family") && !!userId,
   });
 
   useEffect(() => {
@@ -102,13 +110,39 @@ export default function Onboarding() {
         toast.success("プロフィールを保存しました");
         navigate("/visitor/mypage", { replace: true });
       } else {
-        // 2026-10-15 (#124): 家族を後から追加した場合は MyPage で再申告を促す前提で、
-        // 入場時にも代表者のアレルギーを明示選択してから完了させる。
-        toast.success("続けて家族のアレルギーを登録してください");
-        setShowAllergyStep(true);
+        // 2026-10-16: 家族のバンド登録をアレルギー申告より先に完了し、家族全体の情報を一度に確認する。
+        toast.success("ご本人の情報を登録しました");
+        setStep("family");
       }
     },
     onError: (e: any) => toast.error(e?.message || (isEdit ? "保存に失敗しました" : "登録に失敗しました")),
+  });
+
+  const familyMutation = useMutation({
+    mutationFn: () => {
+      const visitor = getVisitor();
+      if (!visitor?.userId) throw new Error("セッションが見つかりません");
+      const birthdayMonthDay = familyBirthdayMonth && familyBirthdayDay
+        ? `${familyBirthdayMonth.padStart(2, "0")}-${familyBirthdayDay.padStart(2, "0")}`
+        : "";
+      return wristbandApi.addFamilyMember({
+        userId: visitor.userId,
+        wristbandId: familyCode.trim(),
+        nickname: familyNickname.trim(),
+        birthdayMonthDay,
+        age: Number(familyAge),
+      });
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["visitorProfile", userId] });
+      setFamilyCode("");
+      setFamilyNickname("");
+      setFamilyBirthdayMonth("");
+      setFamilyBirthdayDay("");
+      setFamilyAge("");
+      toast.success("家族のリストバンドを登録しました。続けて追加できます");
+    },
+    onError: (e: any) => toast.error(e?.message || "家族の追加に失敗しました"),
   });
 
   const allergiesMutation = useMutation({
@@ -150,8 +184,40 @@ export default function Onboarding() {
         </div>
       )}
       <div className="border-[3px] border-border p-6 space-y-6">
-        {showAllergyStep ? (
+        {isAdmissionWizard && (
+          /* 2026-10-16: イベント作成ウィザードと揃え、各工程の下線と現在地の反転で進捗を示す。 */
+          <ol aria-label="入場登録の進行状況" className="flex items-center justify-between gap-2 text-center text-[10px] font-bold sm:text-xs">
+            {([
+              ["profile", "本人情報"],
+              ["family", "家族の登録"],
+              ["allergies", "アレルギー"],
+            ] as const).map(([stepId, label], index) => {
+              const activeIndex = ["profile", "family", "allergies"].indexOf(step);
+              const isComplete = index < activeIndex;
+              const isActive = step === stepId;
+              return (
+                <li
+                  key={stepId}
+                  aria-current={isActive ? "step" : undefined}
+                  className={`min-w-0 flex-1 border-b-thick pb-2 ${isActive ? "border-primary text-foreground" : "border-border text-muted-foreground"}`}
+                >
+                  <span className={`mr-1 ${isActive ? "text-foreground" : "text-muted-foreground"}`}>{isComplete ? "✓" : index + 1}</span>{label}
+                </li>
+              );
+            })}
+          </ol>
+        )}
+        {step === "allergies" || isAllergyEdit ? (
           <>
+            {isAdmissionWizard && (
+              <button
+                type="button"
+                onClick={() => setStep("family")}
+                className="text-xs uppercase tracking-widest underline hover:text-info"
+              >
+                ← 家族の登録に戻る
+              </button>
+            )}
             {isAllergyEdit && (
               <button
                 onClick={() => navigate("/visitor/mypage")}
@@ -172,12 +238,122 @@ export default function Onboarding() {
               helpText="28品目から家族のどなたかに該当するものをすべて選択してください。該当する品目がない場合も「アレルゲンなし」を選んでください。"
             />
             <Button
+              type="button"
               className="w-full h-12 rounded-none border-[2px] uppercase font-black"
               onClick={() => allergiesMutation.mutate()}
               disabled={allergies === null || allergiesMutation.isPending}
             >
               {allergiesMutation.isPending ? "保存中..." : isAllergyEdit ? "家族のアレルギーを保存" : "アレルギーを登録して入場"}
             </Button>
+          </>
+        ) : step === "family" && isAdmissionWizard ? (
+          <>
+            <button
+              type="button"
+              onClick={() => setStep("profile")}
+              className="text-xs uppercase tracking-widest underline hover:text-info"
+            >
+              ← 本人情報に戻る
+            </button>
+            <div className="space-y-1">
+              <h1 className="text-2xl font-black uppercase tracking-wider">家族のリストバンド</h1>
+              <p className="text-sm text-muted-foreground">
+                家族のリストバンドを撮影して追加し、ご本人と同じ情報を登録してください。複数人いる場合は続けて登録できます。
+              </p>
+            </div>
+
+            <section aria-labelledby="family-registered-heading" className="space-y-2 border-b-thin border-border pb-4">
+              <div className="flex items-center justify-between gap-2">
+                <h2 id="family-registered-heading" className="text-xs font-black uppercase tracking-wider">登録した家族</h2>
+                <span className="text-[10px] text-muted-foreground">{profileLoading ? "読込中…" : `${(profile?.familyWristbands ?? []).filter((band) => band.id !== session?.wristbandId).length}人`}</span>
+              </div>
+              {(profile?.familyWristbands ?? [])
+                .filter((band) => band.id !== session?.wristbandId)
+                .map((band) => (
+                  <div key={band.id} className="border-thin border-border bg-muted/20 px-3 py-2 text-xs">
+                    <p className="font-bold">{band.nickname || "ニックネーム未設定"} · {band.age == null ? "年齢未設定" : `${band.age}歳`}</p>
+                    <p className="text-muted-foreground">誕生日 {band.birthdayMonthDay || "未設定"}</p>
+                  </div>
+                ))}
+              {!profileLoading && (profile?.familyWristbands ?? []).filter((band) => band.id !== session?.wristbandId).length === 0 && (
+                <p className="text-xs text-muted-foreground">まだ家族のリストバンドは登録されていません。</p>
+              )}
+            </section>
+
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <label className="text-[11px] font-black uppercase tracking-wider text-muted-foreground" htmlFor="family-wristband-code">
+                  リストバンド <span className="text-destructive">*</span>
+                </label>
+                <Button type="button" variant="outline" className="w-full" onClick={() => setIsFamilyScannerOpen(true)}>
+                  リストバンドを撮影して読み取る
+                </Button>
+                <Input
+                  id="family-wristband-code"
+                  aria-label="読み取ったリストバンドコード"
+                  value={familyCode}
+                  onChange={(e) => setFamilyCode(e.target.value)}
+                  placeholder="読み取りが難しい場合はコードを入力"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-[11px] font-black uppercase tracking-wider text-muted-foreground" htmlFor="family-nickname">
+                  ニックネーム <span className="text-destructive">*</span>
+                </label>
+                <Input id="family-nickname" value={familyNickname} onChange={(e) => setFamilyNickname(e.target.value)} placeholder="例: はなこ" maxLength={30} />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-[11px] font-black uppercase tracking-wider text-muted-foreground">誕生日（月日） <span className="text-destructive">*</span></label>
+                <div className="flex items-center gap-3">
+                  <select
+                    aria-label="家族の誕生日の月"
+                    value={familyBirthdayMonth}
+                    onChange={(e) => { setFamilyBirthdayMonth(e.target.value); setFamilyBirthdayDay(""); }}
+                    className="h-11 min-w-0 flex-1 border-[2px] bg-input px-3 font-mono"
+                  >
+                    <option value="">月を選択</option>
+                    {Array.from({ length: 12 }, (_, index) => String(index + 1)).map((month) => <option key={month} value={month}>{month}月</option>)}
+                  </select>
+                  <select
+                    aria-label="家族の誕生日の日"
+                    value={familyBirthdayDay}
+                    onChange={(e) => setFamilyBirthdayDay(e.target.value)}
+                    disabled={!familyBirthdayMonth}
+                    className="h-11 min-w-0 flex-1 border-[2px] bg-input px-3 font-mono disabled:opacity-50"
+                  >
+                    <option value="">日を選択</option>
+                    {Array.from({ length: familyBirthdayMonth ? new Date(Date.UTC(2000, Number(familyBirthdayMonth), 0)).getUTCDate() : 0 }, (_, index) => String(index + 1)).map((day) => <option key={day} value={day}>{day}日</option>)}
+                  </select>
+                </div>
+                <p className="text-[10px] text-muted-foreground">誕生日は月日だけ入力してください。</p>
+              </div>
+
+              <div className="space-y-2">
+                <label htmlFor="family-age" className="text-[11px] font-black uppercase tracking-wider text-muted-foreground">年齢 <span className="text-destructive">*</span></label>
+                <Input id="family-age" type="number" inputMode="numeric" min={0} max={120} step={1} value={familyAge} onChange={(e) => setFamilyAge(e.target.value)} placeholder="例: 10" />
+                {familyAge !== "" && (!Number.isInteger(Number(familyAge)) || Number(familyAge) < 0 || Number(familyAge) > 120) && (
+                  <p className="text-xs text-destructive">0〜120の整数を入力してください。</p>
+                )}
+              </div>
+
+              <Button
+                type="button"
+                className="w-full h-12"
+                disabled={!familyCode.trim() || !familyNickname.trim() || !familyBirthdayMonth || !familyBirthdayDay || familyAge === "" || !Number.isInteger(Number(familyAge)) || Number(familyAge) < 0 || Number(familyAge) > 120 || familyMutation.isPending}
+                onClick={() => familyMutation.mutate()}
+              >
+                {familyMutation.isPending ? "登録しています…" : "家族を登録して次を追加"}
+              </Button>
+            </div>
+
+            <div className="space-y-3 border-t-thin border-border pt-4">
+              <Button type="button" variant="outline" className="w-full" onClick={() => setStep("allergies")}>
+                家族の登録を終えて次へ
+              </Button>
+              <p className="text-center text-[10px] text-muted-foreground">家族がいない場合も、そのまま次へ進めます。</p>
+            </div>
           </>
         ) : (
           <>
@@ -281,6 +457,7 @@ export default function Onboarding() {
         </div>
 
         <Button
+          type="button"
           className="w-full h-12 rounded-none border-[2px] uppercase font-black"
           onClick={() => mutation.mutate()}
           disabled={
@@ -296,6 +473,20 @@ export default function Onboarding() {
           </>
         )}
       </div>
+      <QrScannerModal
+        circleId={eventId ?? ""}
+        isOpen={isFamilyScannerOpen}
+        onClose={() => setIsFamilyScannerOpen(false)}
+        mode="customer"
+        onCustomerScanned={(_, wristbandId) => {
+          if (!wristbandId) {
+            toast.error("リストバンドのQRコードを読み取ってください");
+            return;
+          }
+          setFamilyCode(wristbandId);
+          toast.success("リストバンドを読み取りました");
+        }}
+      />
     </div>
   );
 }

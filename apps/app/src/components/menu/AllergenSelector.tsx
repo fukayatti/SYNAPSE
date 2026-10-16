@@ -28,7 +28,7 @@ export function AllergenSelector({
       >
         {chooseNone ? "✓ アレルゲンなし（選択済み）" : "アレルゲンなし"}
       </button>
-      <div className="grid max-h-56 grid-cols-2 gap-1 overflow-y-auto border-thin border-border bg-background p-2 sm:grid-cols-3">
+      <div className="grid grid-cols-2 gap-1 border-thin border-border bg-background p-2 sm:grid-cols-3">
         {JAPANESE_ALLERGENS_28.map((allergen, index) => {
           const id = `allergen-${index}`;
           const checked = selected.includes(allergen);

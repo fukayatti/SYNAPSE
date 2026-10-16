@@ -381,6 +381,49 @@ wristbandRoutes.post(
   }
 );
 
+// 2026-10-16: 家族を代表者のアカウントにまとめた後も、バンド単位のプロフィールを編集できるようにする。
+wristbandRoutes.patch(
+  "/family-member/:wristbandId",
+  zBody(z.object({
+    userId: z.string().min(1),
+    nickname: z.string().trim().min(1).max(30),
+    birthdayMonthDay: z.string().regex(/^\d{2}-\d{2}$/),
+    age: z.number().int().min(0).max(120),
+  })),
+  async (c) => {
+    const db = c.get("db");
+    const wristbandId = c.req.param("wristbandId");
+    const { userId, nickname, birthdayMonthDay, age } = c.req.valid("json");
+    const [account] = await db.select().from(eventUser).where(eq(eventUser.id, userId));
+    if (!account) apiError("NOT_FOUND", "代表者が見つかりません");
+    if (!account.onboardedAt || account.status !== "available") {
+      apiError("CONFLICT", "代表者の入場登録完了後に家族情報を編集できます");
+    }
+
+    const [band] = await db.select().from(wristband).where(and(
+      eq(wristband.id, wristbandId),
+      eq(wristband.userId, userId),
+      or(eq(wristband.status, "active"), eq(wristband.status, "smartphone")),
+    ));
+    if (!band) apiError("NOT_FOUND", "このアカウントの有効な家族リストバンドが見つかりません");
+    if (!band.onboardedAt) apiError("CONFLICT", "入場登録前のリストバンドは家族一覧から編集できません");
+
+    const month = Number(birthdayMonthDay.slice(0, 2));
+    const day = Number(birthdayMonthDay.slice(3, 5));
+    const parsedDate = new Date(Date.UTC(2000, month - 1, day));
+    if (parsedDate.getUTCMonth() !== month - 1 || parsedDate.getUTCDate() !== day) {
+      apiError("BAD_REQUEST", "誕生日（月日）を正しく入力してください");
+    }
+
+    await db.update(wristband).set({ nickname, birthdayMonthDay, age }).where(and(
+      eq(wristband.id, wristbandId),
+      eq(wristband.userId, userId),
+      or(eq(wristband.status, "active"), eq(wristband.status, "smartphone")),
+    ));
+    return c.json({ success: true });
+  }
+);
+
 // リストバンドの新規登録・再発行 (紐付け)
 wristbandRoutes.post(
   "/register",
@@ -665,7 +708,8 @@ wristbandRoutes.post(
   zBody(
     z.object({
       userId: z.string().min(1),
-      wristbandId: z.string().optional(),
+      // 2026-10-16: SPA はスマホ入場時に wristbandId=null を送るため、API も null を受け付ける。
+      wristbandId: z.string().nullable().optional(),
       nickname: z.string().trim().min(1).max(30),
       favoriteDate: z.string().optional(), // YYYY-MM-DD
       birthdayMonthDay: z.string().regex(/^\d{2}-\d{2}$/).optional(),
