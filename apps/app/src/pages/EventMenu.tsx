@@ -10,6 +10,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { Store, ArrowRight, QrCode, Calendar, ChevronRight } from "lucide-react";
 import { resolveAssetUrl } from "@/lib/asset-url";
 import { findVisitorRouteItem } from "@/lib/visitor-route";
+import { groupCirclesByStoreArea } from "@/lib/store-areas";
 
 /**
  * イベント メニュー横断閲覧 (2026-07-06)。
@@ -134,6 +135,8 @@ function EventMenuContent({
   const uniqueCircles = circles
     ? Array.from(new Map(circles.map(c => [c.id, c])).values())
     : undefined;
+  const circleGroups = groupCirclesByStoreArea(uniqueCircles ?? [], event?.storeAreas)
+    .filter((group) => group.circles.length > 0);
 
   return (
     <EventTheme theme={theme} className="min-h-screen bg-background text-foreground">
@@ -211,8 +214,15 @@ function EventMenuContent({
         ) : circlesError ? (
           <ErrorState error={circlesErrorObj} onRetry={() => refetchCircles()} />
         ) : uniqueCircles && uniqueCircles.length > 0 ? (
-          <div className="grid gap-3 sm:grid-cols-2">
-            {uniqueCircles.map((circle) => (
+          <div className="space-y-5">
+            {circleGroups.map((group) => (
+              <section key={group.area?.id ?? "unassigned"} className="space-y-2">
+                <h3 className="flex items-center justify-between border-b-thin border-border pb-2 text-xs font-bold">
+                  <span>{group.area?.name ?? "エリア未設定"}</span>
+                  <span className="text-[10px] text-muted-foreground">{group.circles.length}店舗</span>
+                </h3>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {group.circles.map((circle) => (
               <button
                 key={circle.id}
                 type="button"
@@ -254,6 +264,9 @@ function EventMenuContent({
                   </div>
                 </div>
               </button>
+                  ))}
+                </div>
+              </section>
             ))}
           </div>
         ) : (

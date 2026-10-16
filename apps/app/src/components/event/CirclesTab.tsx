@@ -17,6 +17,7 @@ import { CircleCreateLinkModal } from "./CircleCreateLinkModal";
 import { CircleManageModal } from "./CircleManageModal";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { getAuthInfo, saveAuthInfo, useAuth } from "@/hooks/useCircleAuth";
+import { groupCirclesByStoreArea } from "@/lib/store-areas";
 
 interface CirclesTabProps {
   eventId: string;
@@ -100,6 +101,7 @@ export function CirclesTab({
   const uniqueCircles = circles
     ? Array.from(new Map(circles.map(c => [c.id, c])).values())
     : undefined;
+  const circleGroups = groupCirclesByStoreArea(uniqueCircles ?? [], eventData?.storeAreas);
 
   if (isCreateWizardOpen && eventData) {
     return (
@@ -156,8 +158,16 @@ export function CirclesTab({
       ) : circlesError ? (
         <ErrorState error={error} onRetry={onRetry} />
       ) : uniqueCircles && uniqueCircles.length > 0 ? (
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {uniqueCircles.map((cir) => (
+        <div className="space-y-5">
+          {circleGroups.map((group) => (
+            <section key={group.area?.id ?? "unassigned"} className="space-y-2">
+              <h3 className="flex items-center justify-between border-b-thin border-border pb-2 text-xs font-bold">
+                <span>{group.area?.name ?? "エリア未設定"}</span>
+                <span className="text-[10px] text-muted-foreground">{group.circles.length}サークル</span>
+              </h3>
+              {group.circles.length > 0 ? (
+                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                  {group.circles.map((cir) => (
             <Card
               key={cir.id}
               className="border-thick border-border rounded-none bg-background flex flex-col justify-between shadow-none hover:border-neutral-800 transition-all p-3"
@@ -170,12 +180,14 @@ export function CirclesTab({
                   </CardTitle>
                   <div className="flex gap-1 shrink-0">
                     <button
+                      aria-label={`${cir.name}を編集`}
                       className="p-0.5 text-muted-foreground hover:text-primary transition-all rounded-none cursor-pointer border-thick border-transparent hover:border-border hover:bg-muted"
                       onClick={() => handleOpenEdit(cir)}
                     >
                       <Edit className="h-3.5 w-3.5" />
                     </button>
                     <button
+                      aria-label={`${cir.name}を削除`}
                       className="p-0.5 text-destructive hover:text-neutral-800 transition-all rounded-none cursor-pointer border-thick border-transparent hover:border-border hover:bg-muted"
                       onClick={() => handleOpenDelete(cir)}
                     >
@@ -225,7 +237,6 @@ export function CirclesTab({
                       (PIN/管理者代理作成の概念は廃止)。 */}
                   <p>管理者: {cir.managerName || "未設定"}</p>
                   {cir.managerEmail && <p className="truncate">メール: {cir.managerEmail}</p>}
-                  <p className="opacity-50 text-[8px]">ID: {cir.id}</p>
                 </div>
               </div>
               
@@ -248,6 +259,12 @@ export function CirclesTab({
                 </Button>
               </div>
             </Card>
+                  ))}
+                </div>
+              ) : (
+                <p className="border-thin border-border p-3 text-[10px] text-muted-foreground">このエリアのサークルはまだありません。</p>
+              )}
+            </section>
           ))}
         </div>
       ) : (
@@ -283,8 +300,8 @@ export function CirclesTab({
       {/* 削除確認ダイアログ (破壊的操作のため ConfirmDialog を使用) */}
       <ConfirmDialog
         isOpen={isDeleteOpen}
-        title="[確認: サークルの削除]"
-        description={`本当にサークル「${circleToDelete?.name}」を削除してよろしいですか？この操作はサークルに紐づくメニューや売上データもすべて削除されます。`}
+        title="サークルを削除しますか？"
+        description={`サークル「${circleToDelete?.name}」を一覧から削除します。関連するメニューや運営画面も利用できなくなります。`}
         confirmLabel="削除する"
         isPending={deleteCircleMutation.isPending}
         onConfirm={() => circleToDelete && deleteCircleMutation.mutate(circleToDelete.id)}

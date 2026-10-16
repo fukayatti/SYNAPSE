@@ -77,7 +77,7 @@ export function CircleManageModal({
   if (!circle) return null;
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title={`[サークル運営: ${circle.name}]`}>
+    <Modal isOpen={isOpen} onClose={onClose} title={`「${circle.name}」の運営管理`}>
       <div className="space-y-5 font-mono">
         {/* 拡張機能 */}
         <section className="space-y-2">

@@ -1,15 +1,14 @@
 import { useState, useEffect } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { eventApi, uploadImage, parseEventPaymentMethods, parseStoreAreas, type EventLifecycleStatus, type EventStoreArea } from "@/lib/api";
+import { eventApi, uploadImage, parseEventPaymentMethods, type EventLifecycleStatus } from "@/lib/api";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Settings, Save, Upload, Loader2, Palette, CreditCard, Plus, X, Ticket, CalendarClock, Shield, MapPin } from "lucide-react";
+import { Settings, Save, Upload, Loader2, Palette, CreditCard, Plus, X, Ticket, CalendarClock, Shield } from "lucide-react";
 import { ToggleSwitch } from "@/components/ui/ToggleSwitch";
 import { toast } from "sonner";
 import { resolveAssetUrl } from "@/lib/asset-url";
-import { StampRallySettingsCard } from "@/components/event/StampRallySettingsCard";
 
 // 開催状態の選択肢 (主催者が切り替えられるのは upcoming/live/ended。archived は保持期間としてシステム側概念)。
 const LIFECYCLE_OPTIONS: { value: EventLifecycleStatus; label: string; desc: string }[] = [
@@ -63,31 +62,7 @@ export function SettingsTab({ eventId, event }: SettingsTabProps) {
     setPayments((p) => [...p, v]);
     setNewPayment("");
   };
-
-  // 2026-10-16 (#126): 店舗エリアは作成ウィザードと共有する安定ID付き一覧として保存する。
-  const [storeAreas, setStoreAreas] = useState<EventStoreArea[]>([]);
-  const [storeAreasSnapshot, setStoreAreasSnapshot] = useState<EventStoreArea[]>([]);
-  const [newStoreAreaName, setNewStoreAreaName] = useState("");
-  useEffect(() => {
-    const areas = parseStoreAreas(event?.storeAreas);
-    setStoreAreas(areas);
-    setStoreAreasSnapshot(areas);
-  }, [event?.storeAreas]);
-  const saveStoreAreas = useMutation({
-    mutationFn: () => eventApi.setStoreAreas(eventId, storeAreas),
-    onSuccess: () => {
-      setStoreAreasSnapshot(storeAreas);
-      queryClient.invalidateQueries({ queryKey: ["event", eventId] });
-      toast.success("店舗エリアを保存しました");
-    },
-    onError: (e: any) => toast.error(e?.message || "保存に失敗しました"),
-  });
-  const addStoreArea = () => {
-    const name = newStoreAreaName.trim();
-    if (!name || storeAreas.length >= 50 || storeAreas.some((area) => area.name.toLowerCase() === name.toLowerCase())) return;
-    setStoreAreas((current) => [...current, { id: crypto.randomUUID(), name }]);
-    setNewStoreAreaName("");
-  };
+  const invalidPayments = payments.length < 1 || payments.length > 20 || payments.some((payment) => !payment.trim() || payment.trim().length > 30) || new Set(payments.map((payment) => payment.trim())).size !== payments.length;
 
   // 開催ライフサイクル状態 (2026-07-15)。注文可否・来場者/管理の表示モードの正本。
   const [lifecycle, setLifecycle] = useState<EventLifecycleStatus>("live");
@@ -320,56 +295,6 @@ export function SettingsTab({ eventId, event }: SettingsTabProps) {
         </CardContent>
       </Card>
 
-      {/* 2026-10-16 (#126): 来場者一覧とサークル作成の両方で使う位置カテゴリをイベント単位で管理する。 */}
-      <Card className="rounded-none bg-background shadow-none">
-        <CardContent className="pt-6 space-y-3">
-          <div className="flex items-center gap-2 border-b-thin border-border pb-2">
-            <MapPin className="h-4 w-4" />
-            <h3 className="text-xs font-bold uppercase tracking-wider">店舗エリア</h3>
-          </div>
-          <p className="font-mono text-[11px] text-muted-foreground leading-[1.6]">
-            校舎名・フロアなどを登録すると、サークル作成時に出店場所を割り当てられ、来場者の出店一覧にも表示されます。使用中のエリアは、出店場所とスタンプラリー対象を変更してから削除してください。
-          </p>
-          <div className="flex flex-wrap gap-2">
-            {storeAreas.map((area) => (
-              <span key={area.id} className="flex items-center gap-1 border-thick border-border px-2 py-1 font-mono text-[12px]">
-                {area.name}
-                <button
-                  type="button"
-                  onClick={() => setStoreAreas((current) => current.filter((item) => item.id !== area.id))}
-                  className="text-muted-foreground hover:text-error"
-                  aria-label={`${area.name}を削除`}
-                >
-                  <X className="h-3 w-3" />
-                </button>
-              </span>
-            ))}
-            {storeAreas.length === 0 && <span className="text-[11px] text-muted-foreground">エリアはまだありません</span>}
-          </div>
-          <div className="flex gap-2">
-            <Input
-              value={newStoreAreaName}
-              onChange={(e) => setNewStoreAreaName(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addStoreArea())}
-              placeholder="例: 1号館 2階"
-              maxLength={60}
-              className="max-w-xs min-w-0"
-            />
-            <Button type="button" variant="outline" onClick={addStoreArea} disabled={!newStoreAreaName.trim() || storeAreas.length >= 50} className="shrink-0">
-              <Plus className="h-4 w-4 mr-1" /> 追加
-            </Button>
-          </div>
-          <div className="flex justify-end">
-            <Button
-              onClick={() => saveStoreAreas.mutate()}
-              disabled={saveStoreAreas.isPending || JSON.stringify(storeAreas) === JSON.stringify(storeAreasSnapshot)}
-            >
-              <Save className="h-4 w-4 mr-1.5" /> {saveStoreAreas.isPending ? "保存中..." : "店舗エリアを保存"}
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-
       {/* 支払い方法 (2026-07-12) */}
       <Card className="rounded-none bg-background shadow-none">
         <CardContent className="pt-6 space-y-3">
@@ -387,6 +312,7 @@ export function SettingsTab({ eventId, event }: SettingsTabProps) {
                 {p}
                 <button
                   type="button"
+                  aria-label={`${p}を削除`}
                   onClick={() => setPayments((prev) => prev.filter((x) => x !== p))}
                   disabled={payments.length <= 1}
                   className="text-muted-foreground hover:text-error disabled:opacity-30"
@@ -409,12 +335,13 @@ export function SettingsTab({ eventId, event }: SettingsTabProps) {
               maxLength={30}
               className="max-w-xs min-w-0"
             />
-            <Button type="button" variant="outline" onClick={addPayment} className="shrink-0">
+            <Button type="button" variant="outline" onClick={addPayment} disabled={payments.length >= 20 || !newPayment.trim() || payments.includes(newPayment.trim())} className="shrink-0">
               <Plus className="h-4 w-4 mr-1" /> 追加
             </Button>
           </div>
+          <p className="text-[10px] text-muted-foreground">{payments.length}/20件。支払い方法は30文字まで登録できます。</p>
           <div className="flex justify-end">
-            <Button onClick={() => savePayments.mutate()} disabled={savePayments.isPending}>
+            <Button onClick={() => savePayments.mutate()} disabled={savePayments.isPending || invalidPayments}>
               <Save className="h-4 w-4 mr-1.5" /> {savePayments.isPending ? "保存中..." : "支払い方法を保存"}
             </Button>
           </div>
@@ -443,9 +370,6 @@ export function SettingsTab({ eventId, event }: SettingsTabProps) {
           </div>
         </CardContent>
       </Card>
-
-      {/* 店舗利用スタンプラリー (2026-10-07)。景品条件は論理エリアごとに設定する。 */}
-      <StampRallySettingsCard eventId={eventId} event={event} />
 
       {/* 高度な権限管理 (2026-10-05) */}
       <Card className="rounded-none bg-background shadow-none">

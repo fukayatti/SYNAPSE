@@ -67,7 +67,7 @@ export function EventStaffFormModal({ eventId, isOpen, onClose }: EventStaffForm
         isOpen={isOpen}
         onClose={handleOverlayClose}
         maxWidth="md"
-        title="[招待の発行]"
+        title="スタッフ招待を発行"
       >
         <FormSelect
           id="invitePurpose"
@@ -130,7 +130,7 @@ export function EventStaffFormModal({ eventId, isOpen, onClose }: EventStaffForm
 
       <UnsavedChangesDialog
         isOpen={isConfirmOpen}
-        title="[確認: スタッフ招待フォームを閉じます]"
+        title="招待を発行せずに閉じますか？"
         description="招待を発行するには「招待を発行する」を押してください。破棄する場合は「保存せず閉じる」を選択してください。"
         onConfirm={handleSaveAndClose}
         onDiscard={handleDiscardAndClose}

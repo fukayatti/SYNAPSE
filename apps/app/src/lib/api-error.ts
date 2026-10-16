@@ -32,7 +32,11 @@ export class ApiError extends Error {
       retryAfterSec?: number;
     },
   ) {
-    super(message);
+    const details = opts.fields && Object.keys(opts.fields).length > 0
+      ? formatFieldsForToast(opts.fields)
+      : "";
+    const requestReference = opts.requestId ? `照会ID: ${opts.requestId}` : "";
+    super([message, details, requestReference].filter(Boolean).join(" / "));
     this.name = "ApiError";
     this.status = opts.status;
     this.code = opts.code;
@@ -103,9 +107,29 @@ export function networkApiError(cause?: unknown): ApiError {
 
 /** fields を「フィールド: メッセージ」の複数行にまとめる (トースト表示用の最低限のフォールバック)。 */
 export function formatFieldsForToast(fields: Record<string, string>): string {
+  const labels: Record<string, string> = {
+    userId: "来場者",
+    nickname: "ニックネーム",
+    favoriteDate: "日付",
+    birthdayMonthDay: "誕生日",
+    age: "年齢",
+    eventName: "イベント名",
+    storeAreas: "店舗エリア",
+    targetAreaIds: "対象エリア",
+    circleIds: "対象店舗",
+    requiredCount: "必要な店舗数",
+    rewardTitle: "景品名",
+    redemptionLocation: "景品交換場所",
+    rulesUrl: "ルールURL",
+    paymentMethods: "支払い方法",
+  };
   return Object.entries(fields)
-    .map(([field, message]) => (field === "_root" ? message : `${field}: ${message}`))
-    .join("\n");
+    .map(([field, message]) => {
+      if (field === "_root") return message;
+      const topLevelField = field.split(/[.\[\]]/, 1)[0] ?? field;
+      return `${labels[topLevelField] ?? field}: ${message}`;
+    })
+    .join("、");
 }
 
 // ── UX 分岐 (Phase4) ──────────────────────────────────────────────────────
@@ -186,12 +210,10 @@ export function handleApiErrorToast(error: unknown, opts: { toastId?: string } =
   }
 
   if (error.code === "VALIDATION" && error.fields && Object.keys(error.fields).length > 0) {
-    toast.error(`${error.message}\n${formatFieldsForToast(error.fields)}`, { id: opts.toastId });
+    toast.error(error.message, { id: opts.toastId });
     return;
   }
 
   // それ以外 (BAD_REQUEST/NOT_FOUND/CONFLICT/INTERNAL/NETWORK): 従来どおりトースト表示。
-  // requestId があればサポート問い合わせ時にログと突き合わせられるよう小さく添える。
-  const suffix = error.requestId ? ` (ID: ${error.requestId})` : "";
-  toast.error(`${error.message}${suffix}`, { id: opts.toastId });
+  toast.error(error.message, { id: opts.toastId });
 }

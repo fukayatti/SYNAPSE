@@ -12,7 +12,6 @@ import { parseJapaneseAllergens, type JapaneseAllergen } from "@fesflow/config/a
 
 /**
  * 来場者オンボーディング / プロフィール編集 (2026-07-04, 2026-07-15 編集モード追加)。
- * 収集はニックネーム + お好きな日付(任意)のみ。日付はリストバンド紛失時の本人確認用。
  *
  * `?edit=1` で開くと同じフォームを「編集」として使う (マイページの[情報を編集]から遷移)。
  * 初回登録と編集で入力項目は同じなので、画面を分けずコピーと遷移先だけ切り替える。
@@ -24,7 +23,6 @@ export default function Onboarding() {
   const isAllergyEdit = searchParams.get("allergies") === "1";
   const { isLoaded, isEntered, session, userId } = useVisitor();
   const [nickname, setNickname] = useState("");
-  const [favoriteDate, setFavoriteDate] = useState("");
   const [birthdayMonth, setBirthdayMonth] = useState("");
   const [birthdayDay, setBirthdayDay] = useState("");
   const [age, setAge] = useState("");
@@ -39,9 +37,9 @@ export default function Onboarding() {
     }
   }, [isLoaded, isEntered, navigate]);
 
-  // 編集モードでは現在のプロフィール(お好きな日付を含む)をサーバから取り出して初期表示する。
-  // session はニックネームしか持たないため、日付は lookup から補完する。
-  const { data: profile } = useQuery({
+  // 編集モードでは既に登録済みかを確認する。未登録の来場者が編集URLから
+  // 誕生日・年齢を省略して送信すると、APIが400で拒否するため必須状態を合わせる。
+  const { data: profile, isLoading: profileLoading } = useQuery({
     queryKey: ["visitorProfile", userId],
     queryFn: () => wristbandApi.lookup(userId!),
     enabled: (isEdit || isAllergyEdit) && !!userId,
@@ -51,10 +49,6 @@ export default function Onboarding() {
     if (profile?.user.nickname) setNickname(profile.user.nickname);
     else if (session?.nickname) setNickname(session.nickname);
   }, [profile?.user.nickname, session?.nickname]);
-
-  useEffect(() => {
-    if (profile?.user.favoriteDate) setFavoriteDate(profile.user.favoriteDate);
-  }, [profile?.user.favoriteDate]);
 
   useEffect(() => {
     const [month = "", day = ""] = profile?.user.birthdayMonthDay?.split("-") ?? [];
@@ -80,7 +74,8 @@ export default function Onboarding() {
   const hasValidAge =
     ageNumber !== undefined && Number.isInteger(ageNumber) && ageNumber >= 0 && ageNumber <= 120;
   const hasBirthday = !!birthdayMonthDay && Number(birthdayDay) <= daysInBirthdayMonth;
-  const hasRequiredAdmissionDetails = isEdit || (hasBirthday && hasValidAge);
+  const requiresAdmissionDetails = !isEdit || !profile?.user.onboardedAt;
+  const hasRequiredAdmissionDetails = !requiresAdmissionDetails || (hasBirthday && hasValidAge);
 
   const mutation = useMutation({
     mutationFn: () => {
@@ -90,7 +85,6 @@ export default function Onboarding() {
         userId: v.userId,
         wristbandId: v.wristbandId,
         nickname: nickname.trim(),
-        favoriteDate: favoriteDate || undefined,
         birthdayMonthDay: hasBirthday ? birthdayMonthDay : undefined,
         age: hasValidAge ? ageNumber : undefined,
       });
@@ -197,18 +191,20 @@ export default function Onboarding() {
         )}
         <div className="space-y-1">
           <h1 className="text-2xl font-black uppercase tracking-wider">
-            {isEdit ? "プロフィール編集" : eventData ? `[${eventData.eventName}]` : "ようこそ"}
+            {isEdit ? "プロフィール編集" : eventData?.eventName || "ようこそ"}
           </h1>
           <p className="text-sm text-muted-foreground">
             {isEdit
-              ? "ニックネーム・誕生日・年齢・お好きな日付を編集できます。"
+              ? requiresAdmissionDetails
+                ? "ニックネーム・誕生日・年齢を登録してください。"
+                : "ニックネーム・誕生日・年齢を編集できます。"
               : "ニックネーム・誕生日・年齢を登録してください。誕生日は月日だけで入力できます。"}
           </p>
         </div>
 
         <div className="space-y-2">
           <label htmlFor="visitor-birthday-month" className="text-[11px] font-black uppercase tracking-wider text-muted-foreground">
-            誕生日（月日） {!isEdit && <span className="text-destructive">*</span>}
+            誕生日（月日） {requiresAdmissionDetails && <span className="text-destructive">*</span>}
           </label>
           <div className="flex items-center gap-3">
             <select
@@ -222,7 +218,7 @@ export default function Onboarding() {
                 }
               }}
               aria-label="誕生日の月"
-              required={!isEdit}
+              required={requiresAdmissionDetails}
               className="h-11 min-w-0 flex-1 rounded-none border-[2px] bg-input px-3 font-mono"
             >
               <option value="">月を選択</option>
@@ -235,7 +231,7 @@ export default function Onboarding() {
               value={birthdayDay}
               onChange={(e) => setBirthdayDay(e.target.value)}
               aria-label="誕生日の日"
-              required={!isEdit}
+              required={requiresAdmissionDetails}
               disabled={!birthdayMonth}
               className="h-11 min-w-0 flex-1 rounded-none border-[2px] bg-input px-3 font-mono disabled:opacity-50"
             >
@@ -245,12 +241,12 @@ export default function Onboarding() {
               ))}
             </select>
           </div>
-          <p className="text-[10px] text-muted-foreground">誕生日の年は入力しません。</p>
+          <p className="text-[10px] text-muted-foreground">誕生日は月日だけ入力してください。</p>
         </div>
 
         <div className="space-y-2">
           <label htmlFor="visitor-age" className="text-[11px] font-black uppercase tracking-wider text-muted-foreground">
-            年齢 {!isEdit && <span className="text-destructive">*</span>}
+            年齢 {requiresAdmissionDetails && <span className="text-destructive">*</span>}
           </label>
           <Input
             id="visitor-age"
@@ -262,7 +258,7 @@ export default function Onboarding() {
             value={age}
             onChange={(e) => setAge(e.target.value)}
             placeholder="例: 16"
-            required={!isEdit}
+            required={requiresAdmissionDetails}
             aria-invalid={age !== "" && !hasValidAge}
             className="rounded-none border-[2px] h-11"
           />
@@ -284,26 +280,12 @@ export default function Onboarding() {
           />
         </div>
 
-        <div className="space-y-2">
-          <label className="text-[11px] font-black uppercase tracking-wider text-muted-foreground">
-            お好きな日付 (任意)
-          </label>
-          <Input
-            type="date"
-            value={favoriteDate}
-            onChange={(e) => setFavoriteDate(e.target.value)}
-            className="rounded-none border-[2px] h-11"
-          />
-          <p className="text-[10px] text-muted-foreground">
-            リストバンドを紛失した際の本人確認に使います（誕生日や記念日など、ご自身が覚えられる日付を入力してください）。公開されません。
-          </p>
-        </div>
-
         <Button
           className="w-full h-12 rounded-none border-[2px] uppercase font-black"
           onClick={() => mutation.mutate()}
           disabled={
             mutation.isPending ||
+            profileLoading ||
             !nickname.trim() ||
             !hasRequiredAdmissionDetails ||
             (age !== "" && !hasValidAge)

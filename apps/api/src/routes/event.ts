@@ -169,7 +169,7 @@ eventRoutes.put(
         circleIds: z.array(z.string().min(1).max(64)).max(100),
         rewardTitle: z.string().trim().max(100).default("景品交換"),
         rewardDescription: z.string().trim().max(500).default(""),
-      })).max(20),
+      })).max(20).optional(),
     }),
   })),
   async (c) => {

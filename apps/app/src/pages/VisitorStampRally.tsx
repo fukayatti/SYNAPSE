@@ -57,8 +57,8 @@ export default function VisitorStampRallyPage() {
         <ArrowLeft className="h-4 w-4" />マイページに戻る
       </button>
       <header className="border-b-thick border-border pb-3">
-        <h1 className="text-xl font-black uppercase flex items-center gap-2"><Ticket className="h-5 w-5" />[スタンプ]</h1>
-        <p className="text-xs text-muted-foreground mt-1">注文の受取が完了すると、利用した店舗にスタンプが付きます。</p>
+        <h1 className="text-xl font-black uppercase flex items-center gap-2"><Ticket className="h-5 w-5" />スタンプラリー</h1>
+        <p className="text-xs text-muted-foreground mt-1">注文を受け取ると店舗にスタンプが付き、条件を達成すると景品と交換できます。</p>
       </header>
 
       {query.isError ? <ErrorState error={query.error} onRetry={() => query.refetch()} /> : null}
@@ -155,7 +155,7 @@ export default function VisitorStampRallyPage() {
       <Modal
         isOpen={!!selectedCircle}
         onClose={() => setSelectedCircle(null)}
-        title={`[${selectedCircle?.name ?? "店舗"}の注文]`}
+        title={`「${selectedCircle?.name ?? "店舗"}」の注文履歴`}
         subtitle="受取完了した注文と注文時点の商品名を表示しています。"
         maxWidth="md"
       >

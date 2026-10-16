@@ -201,7 +201,7 @@ export default function MyPage() {
 
       <div className="border-b-thick border-border pb-4">
         <h1 className="text-xl sm:text-2xl md:text-3xl font-black uppercase tracking-tight leading-tight">
-          [マイデジタルQR]
+          マイQR
         </h1>
         <p className="text-[10px] sm:text-xs uppercase tracking-widest text-muted-foreground mt-1">
           店頭でこちらのQRまたはリストバンドをお見せください
@@ -232,16 +232,16 @@ export default function MyPage() {
         <Card className="border-heavy border-border bg-primary text-primary-foreground rounded-none p-4 sm:p-6 text-center shadow-none">
           <CardHeader className="p-0 mb-4">
             <div className="inline-block bg-background text-foreground px-3 py-1 text-xs font-black uppercase tracking-widest mx-auto">
-              MEMBER DIGITAL QR
+              来場用QR
             </div>
           </CardHeader>
           <CardContent className="p-0 space-y-4">
             <div className="bg-background p-3 sm:p-4 inline-block border-thick border-background mx-auto">
-              <QRCodeSVG value={userCheckinUrl} size={180} level="M" title="My Digital QR" className="mx-auto block" />
+              <QRCodeSVG value={userCheckinUrl} size={180} level="M" title="来場用QRコード" className="mx-auto block" />
             </div>
             <div className="space-y-1">
               <p className="text-xs text-primary-foreground/70 uppercase tracking-widest">
-                USER ID (呼出しID: #{userStatus?.user.displayId || "---"})
+                来場者ID（呼出番号: {userStatus?.user.displayId || "---"}）
               </p>
               <p className="text-base sm:text-xl font-bold tracking-wider break-all px-2">{userId}</p>
             </div>
@@ -249,9 +249,7 @@ export default function MyPage() {
         </Card>
       )}
 
-      {/* プロフィール表示 + 自己編集への導線 (2026-07-15)。
-          来場者が自分のニックネーム/お好きな日付を確認し、[編集]から修正できるようにする。
-          お好きな日付は本人確認用なので、伏せずに本人には見せる (公開はされない)。 */}
+      {/* プロフィール表示と自己編集への導線。 */}
       <div className="border-thick border-border bg-background p-4">
         <div className="flex items-center justify-between gap-2 mb-3">
           <span className="flex items-center gap-2 text-[11px] font-black uppercase tracking-widest text-muted-foreground">
@@ -271,12 +269,6 @@ export default function MyPage() {
             <dt className="text-[11px] uppercase tracking-wider text-muted-foreground shrink-0">ニックネーム</dt>
             <dd className="font-bold text-right break-all">
               {userStatus?.user.nickname || <span className="text-muted-foreground font-normal">未設定</span>}
-            </dd>
-          </div>
-          <div className="flex items-baseline justify-between gap-3">
-            <dt className="text-[11px] uppercase tracking-wider text-muted-foreground shrink-0">お好きな日付</dt>
-            <dd className="font-bold text-right">
-              {userStatus?.user.favoriteDate || <span className="text-muted-foreground font-normal">未設定</span>}
             </dd>
           </div>
         </dl>
@@ -393,8 +385,8 @@ export default function MyPage() {
             <Ticket className="h-5 w-5" />
           </span>
           <span>
-            <span className="block text-sm font-black uppercase tracking-tight">スタンプを見る</span>
-            <span className="block text-[11px] text-muted-foreground">利用した店舗と景品交換条件を確認</span>
+            <span className="block text-sm font-black uppercase tracking-tight">スタンプラリーを見る</span>
+            <span className="block text-[11px] text-muted-foreground">利用した店舗と景品の条件を確認</span>
           </span>
         </span>
         <ChevronRight className="h-5 w-5 shrink-0 transition-transform group-hover:translate-x-1" />
