@@ -30,6 +30,7 @@ import { ToggleSwitch } from "@/components/ui/ToggleSwitch";
 import { ExtensionsManager } from "@/components/circle/ExtensionsManager";
 import { toast } from "sonner";
 import { Save, UserCheck, CreditCard, Crown, Clock, ChefHat, CheckCircle2 } from "lucide-react";
+import { useUnsavedChanges } from "@/components/UnsavedNavigationGuard";
 
 // 注文モードの選択肢
 const ORDER_FLOW_OPTIONS: {
@@ -189,19 +190,20 @@ function CircleSettingsContent() {
 
   // 「運用設定」の保存。circleApi.updateSettings は settings カラムを丸ごと上書きするため、
   // 注文モード・拡張機能・支払い方法を常にまとめて送る。旧stock値も後方互換用に保持する。
+  const settingsDraft = { orderFlowMode, stockEnabled, staffEnabled, acceptedPayments, storeAreaId };
   const updateSettings = useMutation({
-    mutationFn: async () =>
+    mutationFn: async (draft: typeof settingsDraft) =>
       circleApi.updateSettings(circleId, {
-        orderFlowMode,
-        extensions: { stock: stockEnabled, staff: staffEnabled },
+        orderFlowMode: draft.orderFlowMode,
+        extensions: { stock: draft.stockEnabled, staff: draft.staffEnabled },
         // イベントに存在する方法だけ残す (イベント側で削除された方法を掃除)
-        acceptedPayments: acceptedPayments.filter((p) => eventPayments.includes(p)),
-        storeAreaId,
+        acceptedPayments: draft.acceptedPayments.filter((p) => eventPayments.includes(p)),
+        storeAreaId: draft.storeAreaId,
       }),
-    onSuccess: () => {
+    onSuccess: (_result, draft) => {
       toast.success("運用設定を保存しました");
       queryClient.invalidateQueries({ queryKey: ["circle", circleId] });
-      setSettingsSnapshot({ orderFlowMode, stockEnabled, staffEnabled, acceptedPayments, storeAreaId });
+      setSettingsSnapshot(draft);
     },
     onError: (error: any) => toast.error(error.message || "設定の保存に失敗しました"),
   });
@@ -251,8 +253,33 @@ function CircleSettingsContent() {
   // 未保存の変更があるかどうか (セクション単位)。変更が無ければ保存ボタンを disabled にする。
   const isFormDirty = JSON.stringify(form) !== JSON.stringify(formSnapshot);
   const isSettingsDirty =
-    JSON.stringify({ orderFlowMode, stockEnabled, staffEnabled, acceptedPayments, storeAreaId }) !==
-    JSON.stringify(settingsSnapshot);
+    JSON.stringify(settingsDraft) !== JSON.stringify(settingsSnapshot);
+
+  // 2026-10-16: 基本情報と運用設定の下書きを離脱確認から順に保存する。
+  useUnsavedChanges({
+    isDirty: isFormDirty || isSettingsDirty,
+    onSave: async () => {
+      if (isFormDirty) {
+        if (!form.name.trim()) throw new Error("サークル名を入力してください。");
+        await updateCircle.mutateAsync({
+          id: circleId,
+          name: form.name,
+          description: form.description,
+          iconImagePath: form.iconImagePath || null,
+          backgroundImagePath: form.backgroundImagePath || null,
+        });
+      }
+      if (isSettingsDirty) await updateSettings.mutateAsync(settingsDraft);
+    },
+    onDiscard: () => {
+      setForm(formSnapshot);
+      setOrderFlowMode(settingsSnapshot.orderFlowMode);
+      setStockEnabled(settingsSnapshot.stockEnabled);
+      setStaffEnabled(settingsSnapshot.staffEnabled);
+      setAcceptedPayments(settingsSnapshot.acceptedPayments);
+      setStoreAreaId(settingsSnapshot.storeAreaId);
+    },
+  });
 
   // 上位管理者(オーナー/イベント管理者/システム管理者)のみオーナー譲渡を実行できる
   const canTransfer =
@@ -479,7 +506,7 @@ function CircleSettingsContent() {
                 <span className="text-[10px] font-bold uppercase text-warning">未保存の変更があります</span>
               )}
               <Button
-                onClick={() => updateSettings.mutate()}
+                onClick={() => updateSettings.mutate(settingsDraft)}
                 disabled={!isSettingsDirty || updateSettings.isPending}
                 className="h-11 border-thick border-primary bg-primary font-mono text-xs font-bold text-primary-foreground rounded-none hover:bg-background hover:text-foreground uppercase px-6"
               >

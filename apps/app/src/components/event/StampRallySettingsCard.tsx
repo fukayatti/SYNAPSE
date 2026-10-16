@@ -8,6 +8,7 @@ import { Modal } from "@/components/ui/Modal";
 import { ToggleSwitch } from "@/components/ui/ToggleSwitch";
 import { circleApi, eventApi, type Circle, type Event, type StampRallyReward, type StampRallySettings } from "@/lib/api";
 import { toast } from "sonner";
+import { useUnsavedChanges } from "@/components/UnsavedNavigationGuard";
 
 type StoreArea = { id: string; name: string };
 type EventWithStoreAreas = Event & { storeAreas?: string | null };
@@ -153,12 +154,31 @@ export function StampRallySettingsCard({ eventId, event }: { eventId: string; ev
     },
     onSuccess: () => {
       toast.success("スタンプラリーの設定を保存しました");
-      setSettings({ ...draftSettings, requiredCount: parsedRequiredCount });
+      const saved = { ...draftSettings, requiredCount: parsedRequiredCount };
+      setSettings(saved);
+      setDraftSettings(saved);
+      setRequiredCountInput(String(parsedRequiredCount));
       setIsEditorOpen(false);
       queryClient.invalidateQueries({ queryKey: ["event", eventId] });
       queryClient.invalidateQueries({ queryKey: ["stamp-rally-usage", eventId] });
     },
     onError: (error: any) => toast.error(error?.message || "設定を保存できませんでした"),
+  });
+
+  const editorDirty = isEditorOpen && (
+    JSON.stringify(draftSettings) !== JSON.stringify(settings) ||
+    requiredCountInput !== String(settings.requiredCount)
+  );
+  const discardEditor = () => {
+    setDraftSettings(settings);
+    setRequiredCountInput(String(settings.requiredCount));
+    setIsEditorOpen(false);
+  };
+  // 2026-10-16: 条件編集ポップアップの下書きを画面遷移ガードへ登録する。
+  useUnsavedChanges({
+    isDirty: editorDirty,
+    onSave: () => save.mutateAsync().then(() => undefined),
+    onDiscard: discardEditor,
   });
 
   const openEditor = () => {
@@ -214,7 +234,7 @@ export function StampRallySettingsCard({ eventId, event }: { eventId: string; ev
 
       <Modal
         isOpen={isEditorOpen}
-        onClose={() => setIsEditorOpen(false)}
+        onClose={discardEditor}
         title="スタンプラリーの条件"
         subtitle="選択した会場エリア内の異なる店舗を利用するとスタンプが付きます。"
         maxWidth="lg"
@@ -368,7 +388,7 @@ export function StampRallySettingsCard({ eventId, event }: { eventId: string; ev
           {invalidSettings && <p className="text-xs text-error" role="alert">設定内容を確認してください。必要数は1〜100の整数、対象エリアは50件までです。スタンプラリーを有効にする場合は、必要数以上の店舗があるエリアと景品交換場所を設定してください。</p>}
           {circlesQuery.isError && <p className="text-xs text-error" role="alert">サークルの場所を読み込めませんでした。通信状態を確認してページを再読み込みしてください。</p>}
           <div className="flex justify-end gap-2 border-t-thin border-border pt-3">
-            <Button type="button" variant="outline" onClick={() => setIsEditorOpen(false)}>キャンセル</Button>
+            <Button type="button" variant="outline" onClick={discardEditor}>キャンセル</Button>
             <Button type="button" disabled={save.isPending || invalidSettings} onClick={() => save.mutate()}>
               <Save className="h-4 w-4" />{save.isPending ? "保存中…" : "保存"}
             </Button>

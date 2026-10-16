@@ -9,6 +9,7 @@ import { Settings, Save, Upload, Loader2, Palette, CreditCard, Plus, X, Ticket, 
 import { ToggleSwitch } from "@/components/ui/ToggleSwitch";
 import { toast } from "sonner";
 import { resolveAssetUrl } from "@/lib/asset-url";
+import { useUnsavedChanges } from "@/components/UnsavedNavigationGuard";
 
 // 開催状態の選択肢 (主催者が切り替えられるのは upcoming/live/ended。archived は保持期間としてシステム側概念)。
 const LIFECYCLE_OPTIONS: { value: EventLifecycleStatus; label: string; desc: string }[] = [
@@ -44,15 +45,22 @@ export function SettingsTab({ eventId, event }: SettingsTabProps) {
 
   // 支払い方法 (2026-07-12): テーマ保存とは独立して管理・保存する。
   const [payments, setPayments] = useState<string[]>([]);
+  const [savedPayments, setSavedPayments] = useState<string[]>([]);
   const [newPayment, setNewPayment] = useState("");
   useEffect(() => {
-    if (event) setPayments(parseEventPaymentMethods(event.paymentMethods));
+    if (event) {
+      const nextPayments = parseEventPaymentMethods(event.paymentMethods);
+      setPayments(nextPayments);
+      setSavedPayments(nextPayments);
+    }
   }, [event]);
   const savePayments = useMutation({
-    mutationFn: () => eventApi.setPaymentMethods(eventId, payments),
-    onSuccess: () => {
+    mutationFn: (nextPayments: string[]) => eventApi.setPaymentMethods(eventId, nextPayments),
+    onSuccess: (_result, nextPayments) => {
       toast.success("支払い方法を保存しました");
       queryClient.invalidateQueries({ queryKey: ["event", eventId] });
+      setPayments(nextPayments);
+      setSavedPayments(nextPayments);
     },
     onError: (e: any) => toast.error(e?.message || "保存に失敗しました"),
   });
@@ -163,6 +171,7 @@ export function SettingsTab({ eventId, event }: SettingsTabProps) {
   // 未保存の変更があるかどうか (セクション単位)。素直に「変更がなければ保存ボタンを disabled にする」方式。
   const isBasicDirty = JSON.stringify(basicForm) !== JSON.stringify(basicSnapshot);
   const isThemeDirty = JSON.stringify(themeForm) !== JSON.stringify(themeSnapshot);
+  const isPaymentsDirty = JSON.stringify(payments) !== JSON.stringify(savedPayments);
 
   // 「基本情報・ロゴ」の保存。このボタンで送るのは基本情報+ロゴのフィールドのみ (テーマ色は送らない)。
   const updateBasicMutation = useMutation({
@@ -236,6 +245,27 @@ export function SettingsTab({ eventId, event }: SettingsTabProps) {
   const handleSaveTheme = () => {
     updateThemeMutation.mutate(themeForm);
   };
+
+  // 2026-10-16: 支払い方法・基本情報・テーマの下書きを一つの離脱保存処理へ集約する。
+  useUnsavedChanges({
+    isDirty: isPaymentsDirty || isBasicDirty || isThemeDirty,
+    onSave: async () => {
+      if (isPaymentsDirty) {
+        if (invalidPayments) throw new Error("支払い方法は重複のない1〜20件で登録してください。");
+        await savePayments.mutateAsync(payments);
+      }
+      if (isBasicDirty) {
+        if (!basicForm.eventName.trim()) throw new Error("イベント名は必須です。");
+        await updateBasicMutation.mutateAsync(basicForm);
+      }
+      if (isThemeDirty) await updateThemeMutation.mutateAsync(themeForm);
+    },
+    onDiscard: () => {
+      setPayments(savedPayments);
+      setBasicForm(basicSnapshot);
+      setThemeForm(themeSnapshot);
+    },
+  });
 
   const setColor = (key: keyof typeof DEFAULT_THEME, value: string) =>
     setThemeForm((prev) => ({ ...prev, [key]: value }));
@@ -341,7 +371,7 @@ export function SettingsTab({ eventId, event }: SettingsTabProps) {
           </div>
           <p className="text-[10px] text-muted-foreground">{payments.length}/20件。支払い方法は30文字まで登録できます。</p>
           <div className="flex justify-end">
-            <Button onClick={() => savePayments.mutate()} disabled={savePayments.isPending || invalidPayments}>
+            <Button onClick={() => savePayments.mutate(payments)} disabled={savePayments.isPending || invalidPayments}>
               <Save className="h-4 w-4 mr-1.5" /> {savePayments.isPending ? "保存中..." : "支払い方法を保存"}
             </Button>
           </div>

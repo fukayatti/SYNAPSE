@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils";
 import { circleApi, eventApi, parseCircleSettings } from "@/lib/api";
 import { useAuth } from "@/hooks/useCircleAuth";
 import { useFocusTrap } from "@/hooks/useFocusTrap";
+import { useGuardedNavigation } from "@/components/UnsavedNavigationGuard";
 import {
   LayoutDashboard,
   UtensilsCrossed,
@@ -86,6 +87,7 @@ export default function DashboardLayout({
   eventId,
 }: DashboardLayoutProps) {
   const location = useLocation();
+  const requestGuardedNavigation = useGuardedNavigation();
   // 2026-07-16: スマホ用メニューは以前アコーディオンでページ内に展開しており、
   // 開閉でページの高さが変わってスマホでタップ後にレイアウトが動き見失う体験だった。
   // CLAUDE.md の「入力フォームはモーダルで開く」と同じ思想で、画面左からスライドインする
@@ -401,7 +403,8 @@ export default function DashboardLayout({
                     const handleItemClick = () => {
                       setIsMobileMenuOpen(false);
                       if (type !== "circle" && item.tab && onTabChange) {
-                        onTabChange(item.tab);
+                        // 2026-10-16: システム/イベントのタブ切り替えも未保存確認を通す。
+                        requestGuardedNavigation(() => onTabChange(item.tab!));
                       }
                     };
 
@@ -473,7 +476,7 @@ export default function DashboardLayout({
                     return (
                       <button
                         key={idx}
-                        onClick={() => item.tab && onTabChange && onTabChange(item.tab)}
+                        onClick={() => item.tab && onTabChange && requestGuardedNavigation(() => onTabChange(item.tab!))}
                         className={baseClass}
                       >
                         <Icon className="h-4 w-4 shrink-0" />

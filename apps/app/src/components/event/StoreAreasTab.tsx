@@ -7,7 +7,8 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { ErrorState } from "@/components/ui/ErrorState";
 import { circleApi, eventApi, parseStoreAreas, type Circle, type Event, type EventStoreArea } from "@/lib/api";
-import { groupCirclesByStoreArea, parseCircleStoreAreaId } from "@/lib/store-areas";
+import { parseCircleStoreAreaId } from "@/lib/store-areas";
+import { useUnsavedChanges } from "@/components/UnsavedNavigationGuard";
 
 type StoreArea = EventStoreArea;
 
@@ -34,28 +35,92 @@ export function StoreAreasTab({
   const initialAreas = useMemo(() => parseStoreAreas(event.storeAreas), [event.storeAreas]);
   const [areas, setAreas] = useState<StoreArea[]>(initialAreas);
   const [savedAreas, setSavedAreas] = useState<StoreArea[]>(initialAreas);
+  const initialAssignments = useMemo(() => Object.fromEntries(
+    (circles ?? []).map((circle) => [circle.id, parseCircleStoreAreaId(circle.settings) ?? ""]),
+  ), [circles]);
+  const [assignmentDrafts, setAssignmentDrafts] = useState<Record<string, string>>(initialAssignments);
+  const [savedAssignments, setSavedAssignments] = useState<Record<string, string>>(initialAssignments);
 
   useEffect(() => {
     setAreas(initialAreas);
     setSavedAreas(initialAreas);
   }, [initialAreas]);
 
-  const saveAreas = useMutation({
-    mutationFn: (nextAreas: StoreArea[]) => eventApi.setStoreAreas(eventId, nextAreas),
-    onSuccess: (_result, nextAreas) => {
-      const normalized = nextAreas.map((area) => ({ ...area, name: area.name.trim() }));
-      setAreas(normalized);
-      setSavedAreas(normalized);
+  useEffect(() => {
+    setSavedAssignments(initialAssignments);
+    setAssignmentDrafts((current) => {
+      const hadUnsavedChanges = JSON.stringify(current) !== JSON.stringify(savedAssignments);
+      return hadUnsavedChanges ? { ...initialAssignments, ...current } : initialAssignments;
+    });
+    // 2026-10-16: 保存前の手元の割り当てを再取得で失わず、新規サークルだけ補う。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialAssignments]);
+
+  const areasChanged = JSON.stringify(areas) !== JSON.stringify(savedAreas);
+  const assignmentsChanged = JSON.stringify(assignmentDrafts) !== JSON.stringify(savedAssignments);
+  const hasUnsavedChanges = areasChanged || assignmentsChanged;
+
+  const assignmentGroups = useMemo(() => {
+    const groups = areas.map((area) => ({ area, circles: [] as Circle[] }));
+    const unassigned = { area: null, circles: [] as Circle[] };
+    for (const circle of circles ?? []) {
+      const areaId = assignmentDrafts[circle.id] ?? parseCircleStoreAreaId(circle.settings) ?? "";
+      const group = groups.find((candidate) => candidate.area.id === areaId);
+      (group ?? unassigned).circles.push(circle);
+    }
+    return [...groups, unassigned];
+  }, [areas, circles, assignmentDrafts]);
+
+  const saveChanges = useMutation({
+    mutationFn: async () => {
+      if (hasInvalidAreas) throw new Error("エリア名を入力してください。重複した名前は使えません。");
+      const normalizedAreas = areas.map((area) => ({ ...area, name: area.name.trim() }));
+
+      // 2026-10-16: エリアIDの新規登録を先に確定し、その後に割り当てを保存する。
+      // APIが別々のため一括保存は段階実行し、失敗分だけ次回保存できるよう成功分の基準値を更新する。
+      if (JSON.stringify(normalizedAreas) !== JSON.stringify(savedAreas)) {
+        await eventApi.setStoreAreas(eventId, normalizedAreas);
+        void queryClient.invalidateQueries({ queryKey: ["event", eventId] });
+      }
+      // 2026-10-16: 前後の空白だけを直した編集も保存後に下書き表示へ残さない。
+      setAreas(normalizedAreas);
+      setSavedAreas(normalizedAreas);
+
+      const changedCircles = (circles ?? []).filter((circle) =>
+        (assignmentDrafts[circle.id] ?? "") !== (savedAssignments[circle.id] ?? ""),
+      );
+      const results = await Promise.allSettled(changedCircles.map((circle) =>
+        circleApi.setStoreArea(circle.id, assignmentDrafts[circle.id] || null),
+      ));
+      const succeeded = Object.fromEntries(changedCircles.flatMap((circle, index) =>
+        results[index].status === "fulfilled" ? [[circle.id, assignmentDrafts[circle.id] ?? ""]] : [],
+      ));
+      if (Object.keys(succeeded).length > 0) {
+        setSavedAssignments((current) => ({ ...current, ...succeeded }));
+      }
+      if (results.some((result) => result.status === "rejected")) {
+        const failedCount = results.filter((result) => result.status === "rejected").length;
+        void queryClient.invalidateQueries({ queryKey: ["circles", eventId] });
+        throw new Error(`${failedCount}件のサークル割り当てを保存できませんでした。未保存の項目を確認して再度保存してください。`);
+      }
+
       void queryClient.invalidateQueries({ queryKey: ["event", eventId] });
-      toast.success("店舗エリアを保存しました");
+      void queryClient.invalidateQueries({ queryKey: ["circles", eventId] });
     },
-    onError: (error: any) => toast.error(error?.message || "店舗エリアを保存できませんでした"),
+    onSuccess: () => toast.success("店舗エリアとサークルの割り当てを保存しました"),
+    onError: (error: any) => toast.error(error?.message || "変更を保存できませんでした"),
   });
 
-  const assignmentGroups = useMemo(
-    () => groupCirclesByStoreArea(circles ?? [], event.storeAreas),
-    [circles, event.storeAreas],
-  );
+  // 2026-10-16: エリアと割り当てを同じ保存/破棄単位として遷移ガードへ登録する。
+  useUnsavedChanges({
+    isDirty: hasUnsavedChanges,
+    onSave: () => saveChanges.mutateAsync().then(() => undefined),
+    onDiscard: () => {
+      setAreas(savedAreas);
+      setAssignmentDrafts(savedAssignments);
+    },
+  });
+
   const activeStampAreaIds = useMemo(() => {
     try {
       const settings = JSON.parse(event.stampRallySettings || "{}") as { enabled?: unknown; targetAreaIds?: unknown };
@@ -77,8 +142,6 @@ export function StoreAreasTab({
     seenNames.add(key);
   }
   const hasInvalidAreas = areas.some((area) => duplicateNames.has(area.id));
-  const areasChanged = JSON.stringify(areas) !== JSON.stringify(savedAreas);
-
   const addArea = () => setAreas((current) => [...current, { id: crypto.randomUUID(), name: "" }]);
   const updateAreaName = (id: string, name: string) => {
     setAreas((current) => current.map((area) => area.id === id ? { ...area, name } : area));
@@ -104,7 +167,7 @@ export function StoreAreasTab({
           <div className="flex items-center justify-between gap-3 border-b-thin border-border pb-2">
             <div>
               <h3 className="text-xs font-bold">エリアの登録</h3>
-              <p className="mt-1 text-[10px] text-muted-foreground">例：本館1階、屋外広場</p>
+              <p className="mt-1 text-[10px] text-muted-foreground">例：本館1階、屋外広場。エリアとサークルの割り当てはまとめて保存できます。</p>
             </div>
             <Button type="button" variant="outline" disabled={areas.length >= 50} onClick={addArea}>
               <Plus className="mr-1 h-4 w-4" /> エリアを追加
@@ -153,23 +216,13 @@ export function StoreAreasTab({
             <p role="alert" className="text-xs text-destructive">エリア名を入力してください。重複した名前は使えません。</p>
           )}
           <p className="text-[10px] text-muted-foreground">{areas.length}/50件。エリア名は60文字まで登録できます。</p>
-          <div className="flex justify-end border-t-thin border-border pt-3">
-            <Button
-              type="button"
-              disabled={!areasChanged || hasInvalidAreas || saveAreas.isPending}
-              onClick={() => saveAreas.mutate(areas)}
-            >
-              <Save className="mr-1 h-4 w-4" />
-              {saveAreas.isPending ? "保存中…" : "エリアを保存"}
-            </Button>
-          </div>
         </CardContent>
       </Card>
 
       <section className="space-y-3" aria-labelledby="circle-area-heading">
         <div className="border-b-thin border-border pb-2">
           <h3 id="circle-area-heading" className="text-xs font-bold">サークルのエリア設定</h3>
-          <p className="mt-1 text-[10px] text-muted-foreground">登録したエリアを保存すると選択できるようになります。変更はサークルごとに保存できます。未設定のサークルは一覧の最後に表示されます。</p>
+          <p className="mt-1 text-[10px] text-muted-foreground">登録したエリアと各サークルの割り当てを編集し、ページ下部のボタンから一度に保存できます。未設定のサークルは一覧の最後に表示されます。</p>
         </div>
 
         {areas.length === 0 ? (
@@ -191,7 +244,13 @@ export function StoreAreasTab({
                 {group.circles.length > 0 ? (
                   <div className="grid gap-2 md:grid-cols-2">
                     {group.circles.map((circle) => (
-                      <CircleAreaAssignment key={circle.id} circle={circle} eventId={eventId} areas={parseStoreAreas(event.storeAreas)} />
+                      <CircleAreaAssignment
+                        key={circle.id}
+                        circle={circle}
+                        areas={areas}
+                        selectedAreaId={assignmentDrafts[circle.id] ?? parseCircleStoreAreaId(circle.settings) ?? ""}
+                        onAreaChange={(areaId) => setAssignmentDrafts((current) => ({ ...current, [circle.id]: areaId }))}
+                      />
                     ))}
                   </div>
                 ) : (
@@ -202,26 +261,35 @@ export function StoreAreasTab({
           </div>
         )}
       </section>
+
+      <div className="sticky bottom-3 z-10 flex items-center justify-between gap-3 border-thick border-border bg-background p-3 shadow-none">
+        <p className="text-[11px] text-muted-foreground" role="status">
+          {hasUnsavedChanges ? "未保存の変更があります" : "すべて保存されています"}
+        </p>
+        <Button
+          type="button"
+          disabled={!hasUnsavedChanges || hasInvalidAreas || saveChanges.isPending}
+          onClick={() => saveChanges.mutate()}
+        >
+          <Save className="mr-1 h-4 w-4" />
+          {saveChanges.isPending ? "保存中…" : "変更を保存"}
+        </Button>
+      </div>
     </div>
   );
 }
 
-function CircleAreaAssignment({ circle, eventId, areas }: { circle: Circle; eventId: string; areas: StoreArea[] }) {
-  const queryClient = useQueryClient();
-  const currentAreaId = parseCircleStoreAreaId(circle.settings);
-  const [selectedAreaId, setSelectedAreaId] = useState(currentAreaId ?? "");
-
-  useEffect(() => setSelectedAreaId(currentAreaId ?? ""), [currentAreaId]);
-
-  const saveAssignment = useMutation({
-    mutationFn: () => circleApi.setStoreArea(circle.id, selectedAreaId || null),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["circles", eventId] });
-      toast.success(`${circle.name}のエリアを保存しました`);
-    },
-    onError: (error: any) => toast.error(error?.message || "エリアを保存できませんでした"),
-  });
-
+function CircleAreaAssignment({
+  circle,
+  areas,
+  selectedAreaId,
+  onAreaChange,
+}: {
+  circle: Circle;
+  areas: StoreArea[];
+  selectedAreaId: string;
+  onAreaChange: (areaId: string) => void;
+}) {
   return (
     <div className="flex flex-wrap items-center gap-2 border-thin border-border bg-background p-3">
       <span className="min-w-0 flex-1 truncate text-xs font-bold" title={circle.name}>{circle.name}</span>
@@ -229,21 +297,12 @@ function CircleAreaAssignment({ circle, eventId, areas }: { circle: Circle; even
       <select
         id={`circle-area-${circle.id}`}
         value={selectedAreaId}
-        onChange={(event) => setSelectedAreaId(event.target.value)}
+        onChange={(event) => onAreaChange(event.target.value)}
         className="h-9 min-w-36 border-[2px] border-border bg-background px-2 text-xs"
       >
         <option value="">エリア未設定</option>
         {areas.map((area) => <option key={area.id} value={area.id}>{area.name}</option>)}
       </select>
-      <Button
-        type="button"
-        size="sm"
-        variant="outline"
-        disabled={selectedAreaId === (currentAreaId ?? "") || saveAssignment.isPending}
-        onClick={() => saveAssignment.mutate()}
-      >
-        {saveAssignment.isPending ? "保存中…" : "保存"}
-      </Button>
     </div>
   );
 }

@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/button";
 import { ToggleSwitch } from "@/components/ui/ToggleSwitch";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Package, UserCheck } from "lucide-react";
+import { useUnsavedChanges } from "@/components/UnsavedNavigationGuard";
 
 // イベント運営者が作成後も運用設定を調整できるよう、CircleCreateWizard と同じ設定をここで編集する。
 // メンバー権限は設定保存と別の mutation のままにし、誤操作や保存競合を避ける。
@@ -43,21 +44,27 @@ export function CircleManageModal({
 
   const settings = useMemo(() => parseCircleSettings(circle?.settings), [circle?.settings]);
   const [draft, setDraft] = useState<CircleSettings>(settings);
+  const [savedDraft, setSavedDraft] = useState<CircleSettings>(settings);
 
   useEffect(() => {
-    if (isOpen) setDraft(settings);
+    if (isOpen) {
+      setDraft(settings);
+      setSavedDraft(settings);
+    }
   }, [isOpen, circle?.id, settings]);
 
   // 2026-10-16: 作成ウィザードで選べる運用条件は運営側でもまとめて保存し、複数の即時更新が競合するのを防ぐ。
   const saveSettings = useMutation({
-    mutationFn: () => circleApi.updateSettings(circleId!, {
-      ...draft,
+    mutationFn: (nextDraft: CircleSettings) => circleApi.updateSettings(circleId!, {
+      ...nextDraft,
       // イベント側で支払方法を削除済みなら、保存時に旧値を残さない。
-      acceptedPayments: draft.acceptedPayments.filter((method) =>
+      acceptedPayments: nextDraft.acceptedPayments.filter((method) =>
         parseEventPaymentMethods(event?.paymentMethods).includes(method)
       ),
     }),
-    onSuccess: () => {
+    onSuccess: (_result, nextDraft) => {
+      setDraft(nextDraft);
+      setSavedDraft(nextDraft);
       toast.success("サークルの運用設定を保存しました");
       queryClient.invalidateQueries({ queryKey: ["circles", circle?.eventId] });
       queryClient.invalidateQueries({ queryKey: ["circle", circleId] });
@@ -79,6 +86,19 @@ export function CircleManageModal({
       queryClient.invalidateQueries({ queryKey: ["circle-members", circleId] });
     },
     onError: (e: any) => toast.error(e?.message || "ロールの更新に失敗しました"),
+  });
+
+  // 2026-10-16: イベント運営者が編集するサークル運用設定も画面遷移ガードに登録する。
+  useUnsavedChanges({
+    isDirty: isOpen && !!circle && JSON.stringify(draft) !== JSON.stringify(savedDraft),
+    onSave: async () => {
+      if (!circleId || !event) throw new Error("サークル情報を読み込んでから保存してください。");
+      await saveSettings.mutateAsync(draft);
+    },
+    onDiscard: () => {
+      setDraft(savedDraft);
+      onClose();
+    },
   });
 
   if (!circle) return null;
@@ -172,7 +192,7 @@ export function CircleManageModal({
             type="button"
             className="w-full"
             disabled={saveSettings.isPending || !event}
-            onClick={() => saveSettings.mutate()}
+            onClick={() => saveSettings.mutate(draft)}
           >
             {saveSettings.isPending ? "保存中…" : "運用設定を保存"}
           </Button>

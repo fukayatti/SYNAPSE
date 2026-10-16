@@ -9,6 +9,7 @@ import { ErrorState } from "@/components/ui/ErrorState";
 import { ToggleSwitch } from "@/components/ui/ToggleSwitch";
 import { toast } from "sonner";
 import { Wrench, Save } from "lucide-react";
+import { useUnsavedChanges } from "@/components/UnsavedNavigationGuard";
 
 export function SystemSettingsTab() {
   const queryClient = useQueryClient();
@@ -26,11 +27,15 @@ export function SystemSettingsTab() {
 
   const [maintenance, setMaintenance] = useState({ enabled: false, message: "" });
   const [retentionDays, setRetentionDays] = useState("365");
+  const [savedMaintenance, setSavedMaintenance] = useState({ enabled: false, message: "" });
+  const [savedRetentionDays, setSavedRetentionDays] = useState("365");
 
   useEffect(() => {
     if (data) {
       setMaintenance(data.maintenance);
       setRetentionDays(String(data.cleanup.retentionDays));
+      setSavedMaintenance(data.maintenance);
+      setSavedRetentionDays(String(data.cleanup.retentionDays));
     }
   }, [data]);
 
@@ -39,17 +44,31 @@ export function SystemSettingsTab() {
     parsedRetentionDays >= (data?.cleanup.minDays ?? 30) &&
     parsedRetentionDays <= (data?.cleanup.maxDays ?? 3650);
 
+  const currentSettings = { maintenance, cleanup: { retentionDays: parsedRetentionDays } };
+  const isDirty = JSON.stringify(maintenance) !== JSON.stringify(savedMaintenance) || retentionDays !== savedRetentionDays;
   const save = useMutation({
-    mutationFn: () => adminApi.updateSettings({
-      maintenance,
-      cleanup: { retentionDays: parsedRetentionDays },
-    }),
-    onSuccess: () => {
+    mutationFn: (settings: typeof currentSettings) => adminApi.updateSettings(settings),
+    onSuccess: (_result, settings) => {
       queryClient.invalidateQueries({ queryKey: ["adminSettings"] });
       queryClient.invalidateQueries({ queryKey: ["systemPublic"] });
+      setSavedMaintenance(settings.maintenance);
+      setSavedRetentionDays(String(settings.cleanup.retentionDays));
       toast.success("システム設定を保存しました");
     },
     onError: (e: any) => toast.error(e.message || "保存に失敗しました"),
+  });
+
+  // 2026-10-16: システム設定の下書きを離脱確認の保存/破棄対象にする。
+  useUnsavedChanges({
+    isDirty: isDirty && !!data,
+    onSave: async () => {
+      if (!retentionValid) throw new Error(`${data?.cleanup.minDays ?? 30}〜${data?.cleanup.maxDays ?? 3650}日の整数を入力してください。`);
+      await save.mutateAsync(currentSettings);
+    },
+    onDiscard: () => {
+      setMaintenance(savedMaintenance);
+      setRetentionDays(savedRetentionDays);
+    },
   });
 
   if (isLoading || !data) {
@@ -125,7 +144,7 @@ export function SystemSettingsTab() {
 
       <div className="flex justify-end">
         <Button
-          onClick={() => save.mutate()}
+          onClick={() => save.mutate(currentSettings)}
           disabled={save.isPending || !retentionValid}
           className="h-11 border-thick border-primary bg-primary font-mono text-xs font-bold text-primary-foreground rounded-none hover:bg-background hover:text-foreground uppercase px-6"
         >

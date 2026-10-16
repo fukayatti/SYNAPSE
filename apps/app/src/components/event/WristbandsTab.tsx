@@ -25,6 +25,7 @@ import {
   FileUp,
 } from "lucide-react";
 import { toast } from "sonner";
+import { useUnsavedChanges } from "@/components/UnsavedNavigationGuard";
 import { QrScannerModal } from "@/components/pos/qr-scanner-modal";
 import { Modal } from "@/components/ui/Modal";
 import { QRCodeSVG } from "qrcode.react";
@@ -413,6 +414,34 @@ export function WristbandsTab({ eventId, hasPhysicalWristband = true }: Wristban
       editFavoriteDate !== (selectedUser.user.favoriteDate || "") ||
       String(editDisplayId) !== String(selectedUser.user.displayId ?? "") ||
       editUserStatus !== (selectedUser.user.status || "available"));
+
+  const saveProfile = async () => {
+    if (!selectedUser?.user) return;
+    if (editDisplayId === "") throw new Error("呼出IDを入力してください。");
+    await updateProfileMutation.mutateAsync({
+      userId: selectedUser.user.id,
+      nickname: editNickname.trim() || null,
+      favoriteDate: editFavoriteDate.trim() || null,
+      displayId: Number(editDisplayId),
+      status: editUserStatus,
+    });
+  };
+
+  // 2026-10-16: 来場者プロフィールの編集も画面遷移前に同じ保存処理へ接続する。
+  useUnsavedChanges({
+    isDirty: isDetailsModalOpen && isProfileDirty,
+    onSave: saveProfile,
+    onDiscard: () => {
+      if (selectedUser?.user) {
+        setEditNickname(selectedUser.user.nickname || "");
+        setEditFavoriteDate(selectedUser.user.favoriteDate || "");
+        setEditDisplayId(selectedUser.user.displayId ?? "");
+        setEditUserStatus(selectedUser.user.status || "available");
+      }
+      setIsDetailsModalOpen(false);
+      setSelectedUser(null);
+    },
+  });
 
   // 詳細編集モーダルを閉じる。未保存の変更があれば確認を挟み、破棄を選んだ場合のみ閉じる。
   const closeDetailsModal = () => {
@@ -1461,19 +1490,7 @@ export function WristbandsTab({ eventId, hasPhysicalWristband = true }: Wristban
             {/* フッター: プロフィール保存を閉じるの隣に配置。保存せず離脱したい場合は「閉じる」で破棄して閉じる (2026-07-14) */}
             <div className="flex justify-end gap-2 pt-4 border-t border-border">
               <Button
-                onClick={() => {
-                  if (editDisplayId === "") {
-                    toast.error("呼出IDを入力してください");
-                    return;
-                  }
-                  updateProfileMutation.mutate({
-                    userId: selectedUser.user.id,
-                    nickname: editNickname.trim() || null,
-                    favoriteDate: editFavoriteDate.trim() || null,
-                    displayId: Number(editDisplayId),
-                    status: editUserStatus,
-                  });
-                }}
+                onClick={() => void saveProfile().catch(() => undefined)}
                 disabled={updateProfileMutation.isPending}
                 className="border-thick border-primary bg-primary text-primary-foreground hover:bg-background hover:text-foreground h-9 text-xs font-bold rounded-none shadow-none px-5 flex items-center justify-center gap-1"
               >

@@ -1,5 +1,5 @@
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   CircleAuthGuard,
@@ -44,6 +44,7 @@ import {
   Search,
 } from "lucide-react";
 import { toast } from "sonner";
+import { useUnsavedChanges } from "@/components/UnsavedNavigationGuard";
 
 // 2026-10-08: 直接追加APIと同じく、ブラウザー標準の email 判定で誤入力を送信前に止める。
 function isValidEmailAddress(value: string): boolean {
@@ -97,6 +98,7 @@ function MembersContent() {
     userName: "",
     role: "circle_staff" as Role,
   });
+  const emptyMember = { userId: "", userEmail: "", userName: "", role: "circle_staff" as Role };
 
   const [inviteSettings, setInviteSettings] = useState({
     role: "circle_staff" as Role,
@@ -104,6 +106,7 @@ function MembersContent() {
     expiresInHours: 24,
     targetEmail: "",
   });
+  const savedInviteSettingsRef = useRef(inviteSettings);
 
   // API呼び出し
   const {
@@ -168,7 +171,7 @@ function MembersContent() {
       createdBy: string;
       targetEmail?: string;
     }) => membershipApi.createInvite(input),
-    onSuccess: (data) => {
+    onSuccess: (data, variables) => {
       refetchTokens();
       // 招待作成後すぐ共有できるよう、生成されたリンクをクリップボードへコピーする。
       // 従来は「作成しました」だけで、リンクは下の一覧までスクロールして copy し直す必要があり
@@ -181,6 +184,12 @@ function MembersContent() {
         toast.success("招待を作成しました");
       }
       setInviteSettings((prev) => ({ ...prev, targetEmail: "" }));
+      savedInviteSettingsRef.current = {
+        role: variables.role,
+        maxUses: variables.maxUses ?? 0,
+        expiresInHours: variables.expiresInHours ?? 24,
+        targetEmail: "",
+      };
       setShowInviteForm(false);
     },
   });
@@ -282,6 +291,50 @@ function MembersContent() {
       targetEmail: inviteSettings.targetEmail || undefined,
     });
   };
+
+  // 2026-10-16: メンバー追加と招待発行の入力もページ遷移時に保存/破棄できるよう登録する。
+  useUnsavedChanges({
+    isDirty: showAddForm && JSON.stringify(newMember) !== JSON.stringify(emptyMember),
+    onSave: async () => {
+      if (!circleId || !isValidEmailAddress(newMember.userEmail) || !newMember.userName.trim()) {
+        throw new Error("有効なメールアドレスと名前を入力してください。");
+      }
+      await addMemberMutation.mutateAsync({
+        userEmail: newMember.userEmail,
+        userName: newMember.userName,
+        circleId,
+        role: newMember.role,
+      });
+    },
+    onDiscard: () => {
+      setNewMember(emptyMember);
+      setShowAddForm(false);
+    },
+  });
+  useUnsavedChanges({
+    isDirty: showInviteForm && JSON.stringify(inviteSettings) !== JSON.stringify(savedInviteSettingsRef.current),
+    onSave: async () => {
+      if (!circleId) throw new Error("サークル情報を読み込んでから招待してください。");
+      if (inviteSettings.targetEmail && !isValidEmailAddress(inviteSettings.targetEmail)) {
+        throw new Error("招待先メールアドレスを確認してください。");
+      }
+      if (inviteSettings.expiresInHours < 1 || inviteSettings.expiresInHours > 168 || inviteSettings.maxUses < 0 || inviteSettings.maxUses > 100) {
+        throw new Error("使用回数は0〜100回、有効期限は1〜168時間で入力してください。");
+      }
+      await createInviteMutation.mutateAsync({
+        circleId,
+        role: inviteSettings.role,
+        maxUses: inviteSettings.maxUses === 0 ? null : Math.min(100, Math.max(1, inviteSettings.maxUses)),
+        expiresInHours: Math.max(1, inviteSettings.expiresInHours || 24),
+        createdBy: userEmail || "",
+        targetEmail: inviteSettings.targetEmail || undefined,
+      });
+    },
+    onDiscard: () => {
+      setInviteSettings(savedInviteSettingsRef.current);
+      setShowInviteForm(false);
+    },
+  });
 
   const copyInviteLink = (token: string) => {
     // 単一ドメイン化 (2026-07-07): 招待受諾ページは /circle/invite/:token に移設

@@ -14,6 +14,7 @@ import { FormField, FormSelect, FormSubmitButton } from "@/components/ui/FormFie
 import { Label } from "@/components/ui/label";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { toast } from "sonner";
+import { useUnsavedChanges } from "@/components/UnsavedNavigationGuard";
 import { Calendar, Trash2, Settings2, Save, Eye, Search, Coins, Plus, RotateCcw, ChevronLeft, ChevronRight } from "lucide-react";
 
 // SaaS 運営: イベント/契約管理 (2026-07-12 Phase C / 2026-07-15 契約金額・入金履歴で拡充)。
@@ -46,6 +47,7 @@ export function SaasEventsTab() {
     nextBillingDate: "",
     contractNotes: "",
   });
+  const [formSnapshot, setFormSnapshot] = useState(form);
   const [impersonatingId, setImpersonatingId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(0);
@@ -162,7 +164,7 @@ export function SaasEventsTab() {
   });
 
   const openEdit = (e: AdminEvent) => {
-    setForm({
+    const nextForm = {
       eventName: e.eventName,
       plan: e.plan,
       maxCircles: e.maxCircles,
@@ -170,7 +172,9 @@ export function SaasEventsTab() {
       billingAmount: e.billingAmount ?? 0,
       nextBillingDate: toDateInput(e.nextBillingAt),
       contractNotes: e.contractNotes ?? "",
-    });
+    };
+    setForm(nextForm);
+    setFormSnapshot(nextForm);
     setPay({ amount: 0, method: "銀行振込", date: "", note: "" });
     setEditing(e);
   };
@@ -190,6 +194,41 @@ export function SaasEventsTab() {
       },
     });
   };
+
+  const defaultPaymentDraft = { amount: 0, method: "銀行振込", date: "", note: "" };
+  const isContractDirty = !!editing && JSON.stringify(form) !== JSON.stringify(formSnapshot);
+  const isPaymentDirty = !!editing && JSON.stringify(pay) !== JSON.stringify(defaultPaymentDraft);
+  // 2026-10-16: 契約編集と入金記録の入力を離脱確認からも同じ保存処理へ送る。
+  useUnsavedChanges({
+    isDirty: isContractDirty || isPaymentDirty,
+    onSave: async () => {
+      if (!editing) return;
+      if (isContractDirty) {
+        if (!form.eventName.trim()) throw new Error("イベント名は必須です。");
+        await update.mutateAsync({
+          id: editing.id,
+          data: {
+            eventName: form.eventName.trim(),
+            plan: form.plan,
+            maxCircles: form.maxCircles,
+            billingStatus: form.billingStatus,
+            billingAmount: form.billingAmount,
+            nextBillingAt: form.nextBillingDate ? new Date(form.nextBillingDate).toISOString() : null,
+            contractNotes: form.contractNotes || null,
+          },
+        });
+      }
+      if (isPaymentDirty) {
+        if (pay.amount < 1 || !pay.date) throw new Error("入金額と入金日を入力してください。");
+        await addPayment.mutateAsync();
+      }
+    },
+    onDiscard: () => {
+      setEditing(null);
+      setForm(formSnapshot);
+      setPay(defaultPaymentDraft);
+    },
+  });
 
   // 検索/状態フィルタ
   const shown = (events ?? []).filter((e) => {
