@@ -150,7 +150,7 @@ export function CirclesTab({
       </div>
 
       {circlesLoading ? (
-        <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,18rem),1fr))] gap-4">
+        <div className="grid grid-cols-2 gap-2 sm:gap-4 lg:grid-cols-3">
           {Array.from({ length: 3 }).map((_, i) => (
             <Skeleton key={i} className="h-40" />
           ))}
@@ -166,29 +166,30 @@ export function CirclesTab({
                 <span className="text-[10px] text-muted-foreground">{group.circles.length}サークル</span>
               </h3>
               {group.circles.length > 0 ? (
-                <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,18rem),1fr))] gap-4">
+                <div className="grid grid-cols-2 gap-2 sm:gap-4 lg:grid-cols-3">
+                  {/* 2026-10-16: カードを画面いっぱいの1列にせず、スマートフォンでも2列で並べる。 */}
                   {group.circles.map((cir) => (
             <Card
               key={cir.id}
-              className="border-thick border-border rounded-none bg-background flex flex-col justify-between shadow-none hover:border-neutral-800 transition-all p-3"
+              className="flex min-w-0 flex-col justify-between rounded-none border-thick border-border bg-background p-2 shadow-none transition-all hover:border-neutral-800 sm:p-3"
             >
               <div>
                 <div className="flex justify-between items-start border-b-thin border-border pb-2 mb-2">
-                  <CardTitle className="min-w-0 flex-1 text-xs font-bold uppercase tracking-wide flex items-center gap-1.5 break-words">
+                  <CardTitle className="flex min-w-0 flex-1 items-center gap-1.5 break-words text-[11px] font-bold uppercase tracking-wide sm:text-xs">
                     <Building2 className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
                     {cir.name}
                   </CardTitle>
                   <div className="flex gap-1 shrink-0">
                     <button
                       aria-label={`${cir.name}を編集`}
-                      className="flex h-10 w-10 items-center justify-center text-muted-foreground hover:text-primary transition-all rounded-none cursor-pointer border-thick border-transparent hover:border-border hover:bg-muted focus-visible:border-border"
+                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-none border-thick border-transparent text-muted-foreground transition-all hover:border-border hover:bg-muted hover:text-primary focus-visible:border-border sm:h-10 sm:w-10"
                       onClick={() => handleOpenEdit(cir)}
                     >
                       <Edit className="h-3.5 w-3.5" />
                     </button>
                     <button
                       aria-label={`${cir.name}を削除`}
-                      className="flex h-10 w-10 items-center justify-center text-destructive hover:text-neutral-800 transition-all rounded-none cursor-pointer border-thick border-transparent hover:border-border hover:bg-muted focus-visible:border-border"
+                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-none border-thick border-transparent text-destructive transition-all hover:border-border hover:bg-muted hover:text-neutral-800 focus-visible:border-border sm:h-10 sm:w-10"
                       onClick={() => handleOpenDelete(cir)}
                     >
                       <Trash2 className="h-3.5 w-3.5" />

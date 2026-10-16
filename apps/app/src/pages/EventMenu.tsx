@@ -206,7 +206,8 @@ function EventMenuContent({
         </h2>
 
         {circlesLoading ? (
-          <div className="grid gap-3 sm:grid-cols-2">
+          <div className="grid grid-cols-2 gap-2 sm:gap-3">
+            {/* 2026-10-16: 読み込み中の枠もスマートフォンでは2列に合わせる。 */}
             {[1, 2, 3, 4].map((i) => (
               <Skeleton key={i} className="h-24" />
             ))}
@@ -221,44 +222,45 @@ function EventMenuContent({
                   <span>{group.area?.name ?? "エリア未設定"}</span>
                   <span className="text-[10px] text-muted-foreground">{group.circles.length}店舗</span>
                 </h3>
-                <div className="grid gap-3 sm:grid-cols-2">
+                {/* 2026-10-16: 画面を有効に使うため、スマートフォンでも店舗を2列で一覧できるようにする。 */}
+                <div className="grid grid-cols-2 gap-2 sm:gap-3">
                   {group.circles.map((circle) => (
               <button
                 key={circle.id}
                 type="button"
                 onClick={() => onBrowseCircle(circle.id)}
-                className="group text-left border-thick border-border bg-background hover:bg-muted transition-all p-3 flex items-center gap-3 cursor-pointer"
+                className="group flex min-w-0 w-full cursor-pointer items-center gap-2 border-thick border-border bg-background p-2 text-left transition-colors hover:bg-muted sm:gap-3 sm:p-3"
               >
                 {circle.iconImagePath ? (
                   <img
                     src={resolveAssetUrl(circle.iconImagePath)}
                     alt={circle.name}
-                    className="h-12 w-12 object-cover border-thick border-border shrink-0"
+                    className="h-10 w-10 shrink-0 border-thick border-border object-cover sm:h-12 sm:w-12"
                   />
                 ) : (
-                  <span className="flex h-12 w-12 items-center justify-center border-thick border-border bg-muted shrink-0">
+                  <span className="flex h-10 w-10 shrink-0 items-center justify-center border-thick border-border bg-muted sm:h-12 sm:w-12">
                     <Store className="h-5 w-5 text-muted-foreground" />
                   </span>
                 )}
                 <div className="min-w-0 flex-1">
-                  <div className="text-sm font-black uppercase tracking-tight truncate">
+                  <div className="break-words text-xs font-black uppercase leading-snug tracking-tight sm:text-sm">
                     {circle.name}
                   </div>
                   {circle.description && (
-                    <div className="text-[11px] text-muted-foreground truncate">
+                    <div className="truncate text-[10px] text-muted-foreground sm:text-[11px]">
                       {circle.description}
                     </div>
                   )}
                   {(() => {
                     const areaId = parseCircleSettings(circle.settings).storeAreaId;
                     const areaName = storeAreas.find((area) => area.id === areaId)?.name;
-                    return areaName ? <div className="mt-1 text-[10px] font-bold">出店場所: {areaName}</div> : null;
+                    return areaName ? <div className="mt-1 break-words text-[9px] font-bold sm:text-[10px]">出店場所: {areaName}</div> : null;
                   })()}
                   {(() => {
                     const report = activeWaitTimeReport(circle.settings);
-                    return <div className="mt-1 text-[10px] font-bold">待ち時間: {report ? `約${report.minutes}分（${report.minutesAgo}分前）` : "未報告"}</div>;
+                    return <div className="mt-1 break-words text-[9px] font-bold sm:text-[10px]">待ち時間: {report ? `約${report.minutes}分（${report.minutesAgo}分前）` : "未報告"}</div>;
                   })()}
-                  <div className="mt-1 inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-wider">
+                  <div className="mt-1 inline-flex flex-wrap items-center gap-1 text-[9px] font-black uppercase tracking-wider sm:text-[10px]">
                     メニューを見る
                     <ArrowRight className="h-3 w-3 transition-transform group-hover:translate-x-1" />
                   </div>
