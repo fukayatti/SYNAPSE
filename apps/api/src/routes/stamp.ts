@@ -30,11 +30,13 @@ type LegacyArea = {
   rewardTitle?: string;
   rewardDescription?: string;
 };
+type StampRallyReward = { id: string; name: string; stockQuantity: number | null };
 type StampRallySettings = {
   enabled: boolean;
   targetAreaIds: string[];
   requiredCount: number;
   rewardTitle: string;
+  rewards: StampRallyReward[];
   redemptionLocation: string;
   rulesUrl: string;
   legacyAreas: LegacyArea[];
@@ -61,6 +63,7 @@ function parseStampRallySettings(raw: string | null | undefined): StampRallySett
     targetAreaIds: [],
     requiredCount: 3,
     rewardTitle: "景品交換",
+    rewards: [{ id: "default", name: "景品交換", stockQuantity: null }],
     redemptionLocation: "",
     rulesUrl: "",
     legacyAreas: [],
@@ -75,6 +78,23 @@ function parseStampRallySettings(raw: string | null | undefined): StampRallySett
           Array.isArray(area.circleIds) && area.circleIds.every((id: unknown) => typeof id === "string")
         )
       : [];
+    const rewardTitle = typeof value.rewardTitle === "string"
+      ? value.rewardTitle
+      : (legacyAreas[0]?.rewardTitle || defaults.rewardTitle);
+    const rewards = Array.isArray(value.rewards)
+      ? value.rewards.flatMap((reward): StampRallyReward[] => {
+          if (!reward || typeof reward !== "object") return [];
+          const item = reward as Record<string, unknown>;
+          if (typeof item.id !== "string" || typeof item.name !== "string" || !item.name.trim()) return [];
+          return [{
+            id: item.id,
+            name: item.name.trim(),
+            stockQuantity: Number.isInteger(item.stockQuantity) && Number(item.stockQuantity) >= 0
+              ? Number(item.stockQuantity)
+              : null,
+          }];
+        })
+      : [{ id: "default", name: rewardTitle, stockQuantity: null }];
     return {
       enabled: value.enabled === true,
       targetAreaIds: Array.isArray(value.targetAreaIds)
@@ -83,9 +103,8 @@ function parseStampRallySettings(raw: string | null | undefined): StampRallySett
       requiredCount: Number.isInteger(value.requiredCount) && Number(value.requiredCount) > 0
         ? Number(value.requiredCount)
         : (legacyAreas[0]?.requiredCount ?? defaults.requiredCount),
-      rewardTitle: typeof value.rewardTitle === "string"
-        ? value.rewardTitle
-        : (legacyAreas[0]?.rewardTitle || defaults.rewardTitle),
+      rewardTitle,
+      rewards: rewards.length > 0 ? rewards : [{ id: "default", name: rewardTitle, stockQuantity: null }],
       redemptionLocation: typeof value.redemptionLocation === "string"
         ? value.redemptionLocation
         : (legacyAreas[0]?.rewardDescription || ""),
@@ -184,6 +203,12 @@ async function getRallyProgress(db: AppEnv["Variables"]["db"], eventId: string, 
   if (!eventRow) return null;
 
   const settings = parseStampRallySettings(eventRow.stampRallySettings);
+  // 2026-10-16: 1イベント来場者IDを共有する有効な家族バンド数を、世帯の交換上限として扱う。
+  const familyRows = await db.select({ count: sql<number>`count(*)` }).from(wristband).where(and(
+    eq(wristband.userId, eventUserId),
+    or(eq(wristband.status, "active"), eq(wristband.status, "smartphone")),
+  ));
+  const familyMemberCount = familyRows[0]?.count ?? 0;
   const configuredAreas = parseStoreAreas(eventRow.storeAreas);
   const circles = await db.select({
     id: circle.id,
@@ -324,17 +349,27 @@ async function getRallyProgress(db: AppEnv["Variables"]["db"], eventId: string, 
   const isQualified = useLegacyAreas
     ? areas.some((area) => area.circles.filter((item) => item.stamped).length >= (area.requiredCount ?? Infinity))
     : settings.enabled && stampedCircleIds.length >= settings.requiredCount;
-  const redemptions = await db.select({ createdAt: stampRallyRedemption.createdAt })
+  const redemptionTotals = await db.select({
+    quantity: sql<number>`coalesce(sum(${stampRallyRedemption.quantity}), 0)`,
+  })
     .from(stampRallyRedemption).where(and(
       eq(stampRallyRedemption.eventId, eventId),
       eq(stampRallyRedemption.eventUserId, eventUserId),
-    )).limit(1);
+    ));
   // 2026-10-15 (#123): 旧形式で既に記録された同じ eventUser ID も引き継ぐ。
   // eventUser IDはイベントごとに別IDのため、他イベントの交換記録は影響しない。
-  const legacyRedemptions = redemptions.length === 0
+  const legacyRedemptions = (redemptionTotals[0]?.quantity ?? 0) === 0
     ? await db.select({ createdAt: rewardRedemption.createdAt }).from(rewardRedemption)
         .where(eq(rewardRedemption.userId, eventUserId)).limit(1)
     : [];
+  const latestRedemptions = redemptionTotals[0]?.quantity
+    ? await db.select({ createdAt: stampRallyRedemption.createdAt }).from(stampRallyRedemption).where(and(
+        eq(stampRallyRedemption.eventId, eventId),
+        eq(stampRallyRedemption.eventUserId, eventUserId),
+      )).orderBy(desc(stampRallyRedemption.createdAt)).limit(1)
+    : [];
+  const redeemedCount = Math.max(redemptionTotals[0]?.quantity ?? 0, legacyRedemptions.length);
+  const remainingCount = Math.max(0, familyMemberCount - redeemedCount);
 
   return {
     enabled: settings.enabled && (hasNewTargeting || useLegacyAreas),
@@ -346,9 +381,13 @@ async function getRallyProgress(db: AppEnv["Variables"]["db"], eventId: string, 
     requiredCount: settings.requiredCount,
     eligible: settings.enabled && isQualified,
     rewardTitle: settings.rewardTitle,
+    familyMemberCount,
+    redeemedCount,
+    remainingCount,
+    rewards: settings.rewards,
     redemptionLocation: settings.redemptionLocation,
     rulesUrl: settings.rulesUrl,
-    redeemedAt: redemptions[0]?.createdAt ?? legacyRedemptions[0]?.createdAt ?? null,
+    redeemedAt: latestRedemptions[0]?.createdAt ?? legacyRedemptions[0]?.createdAt ?? null,
   };
 }
 
@@ -364,6 +403,10 @@ async function getVisitorRally(db: AppEnv["Variables"]["db"], visitor: { id: str
     requiredCount: 3,
     eligible: false,
     rewardTitle: "景品交換",
+    familyMemberCount: 0,
+    redeemedCount: 0,
+    remainingCount: 0,
+    rewards: [],
     redemptionLocation: "",
     rulesUrl: "",
     redeemedAt: null,
@@ -375,19 +418,37 @@ async function recordRedemption(
   eventId: string,
   eventUserId: string,
   staffId: string,
+  rewardId: string,
+  quantity: number,
 ) {
   const progress = await getRallyProgress(db, eventId, eventUserId);
   if (!progress?.enabled || !progress.eligible) {
     return { error: "この来場者は景品交換の条件を満たしていません" } as const;
   }
-  if (progress.redeemedAt) return { error: "このイベントでは既に景品交換を記録しています" } as const;
+  if (quantity > progress.remainingCount) return { error: "家族人数を超える個数は交換できません" } as const;
+  const reward = progress.rewards.find((item) => item.id === rewardId) ??
+    (rewardId === "default" ? progress.rewards[0] : undefined);
+  if (!reward) return { error: "選択された景品は登録されていません" } as const;
+  if (reward.stockQuantity !== null) {
+    const stockRows = await db.select({ quantity: sql<number>`coalesce(sum(${stampRallyRedemption.quantity}), 0)` })
+      .from(stampRallyRedemption).where(and(
+        eq(stampRallyRedemption.eventId, eventId),
+        eq(stampRallyRedemption.rewardId, reward.id),
+      ));
+    if ((stockRows[0]?.quantity ?? 0) + quantity > reward.stockQuantity) {
+      return { error: "この景品の登録在庫を超える個数は交換できません" } as const;
+    }
+  }
   const inserted = await db.insert(stampRallyRedemption).values({
     id: ulid(),
     eventId,
     eventUserId,
     staffId,
+    rewardId: reward.id,
+    rewardName: reward.name,
+    quantity,
   }).onConflictDoNothing().returning({ id: stampRallyRedemption.id, createdAt: stampRallyRedemption.createdAt });
-  if (inserted.length === 0) return { error: "このイベントでは既に景品交換を記録しています" } as const;
+  if (inserted.length === 0) return { error: "景品交換を記録できませんでした。再照会してください" } as const;
   return { redemption: inserted[0] } as const;
 }
 
@@ -398,7 +459,7 @@ stampRoutes.get("/visitor/:code", async (c) => {
   const code = c.req.param("code");
   const visitor = await resolveVisitorFromCode(db, code);
   if (!visitor) {
-    return c.json({ enabled: false, legacy: false, areas: [], stampedCircleIds: [], stampedCount: 0, targetCircleCount: 0, requiredCount: 3, eligible: false, rewardTitle: "景品交換", redemptionLocation: "", rulesUrl: "", redeemedAt: null });
+    return c.json({ enabled: false, legacy: false, areas: [], stampedCircleIds: [], stampedCount: 0, targetCircleCount: 0, requiredCount: 3, eligible: false, rewardTitle: "景品交換", familyMemberCount: 0, redeemedCount: 0, remainingCount: 0, rewards: [], redemptionLocation: "", rulesUrl: "", redeemedAt: null });
   }
   return c.json(await getVisitorRally(db, visitor));
 });
@@ -415,10 +476,14 @@ stampRoutes.get("/event/:eventId/lookup/:code", async (c) => {
   return c.json({ visitor, progress: await getVisitorRally(db, visitor) });
 });
 
-// イベントスタッフ向け景品交換記録。DBの複合一意制約で同時操作も含め二重登録を防ぐ。
+// イベントスタッフ向け景品交換記録。家族枠・景品在庫の残数を確認して数量を記録する。
 stampRoutes.post(
   "/event/:eventId/redeem",
-  zBody(z.object({ code: z.string().trim().min(1).max(256) })),
+  zBody(z.object({
+    code: z.string().trim().min(1).max(256),
+    rewardId: z.string().trim().min(1).max(64).default("default"),
+    quantity: z.number().int().min(1).max(500).default(1),
+  })),
   async (c) => {
     const db = c.get("db");
     const eventId = c.req.param("eventId");
@@ -429,7 +494,8 @@ stampRoutes.post(
     if (!visitor) apiError("NOT_FOUND", "このイベントの来場者が見つかりません");
     const session = await getSession(c);
     if (!session?.user) apiError("FORBIDDEN", "ログインが必要です");
-    const result = await recordRedemption(db, eventId, visitor.id, session.user.id || session.user.email.toLowerCase());
+    const input = c.req.valid("json");
+    const result = await recordRedemption(db, eventId, visitor.id, session.user.id || session.user.email.toLowerCase(), input.rewardId, input.quantity);
     if ("error" in result && result.error) apiError("BAD_REQUEST", result.error);
     return c.json({ success: true, redemption: result.redemption }, 201);
   },
@@ -441,19 +507,82 @@ stampRoutes.get("/event/:eventId/redemptions", async (c) => {
   if (!(await hasPermission(c, null, "event:write", eventId))) {
     apiError("FORBIDDEN", "このイベントの景品交換記録を閲覧する権限がありません");
   }
-  const redemptions = await db.select({
+  const settingsRows = await db.select({ stampRallySettings: event.stampRallySettings }).from(event)
+    .where(and(eq(event.id, eventId), isNull(event.deletedAt))).limit(1);
+  const rewards = parseStampRallySettings(settingsRows[0]?.stampRallySettings).rewards;
+  const rewardNames = new Map(rewards.map((reward) => [reward.id, reward.name]));
+  const summaryRows = await db.select({
+    rewardId: stampRallyRedemption.rewardId,
+    rewardName: stampRallyRedemption.rewardName,
+    quantity: sql<number>`sum(${stampRallyRedemption.quantity})`,
+  }).from(stampRallyRedemption).where(eq(stampRallyRedemption.eventId, eventId))
+    .groupBy(stampRallyRedemption.rewardId, stampRallyRedemption.rewardName);
+  const history = await db.select({
     id: stampRallyRedemption.id,
     createdAt: stampRallyRedemption.createdAt,
     staffId: stampRallyRedemption.staffId,
     eventUserId: eventUser.id,
     displayId: eventUser.displayId,
     nickname: eventUser.nickname,
+    rewardId: stampRallyRedemption.rewardId,
+    rewardName: stampRallyRedemption.rewardName,
+    quantity: stampRallyRedemption.quantity,
   }).from(stampRallyRedemption)
     .innerJoin(eventUser, eq(stampRallyRedemption.eventUserId, eventUser.id))
     .where(eq(stampRallyRedemption.eventId, eventId))
     .orderBy(desc(stampRallyRedemption.createdAt))
     .limit(50);
-  return c.json(redemptions);
+  // 2026-10-16: 0029以前の交換記録も新しい集計に含め、既存履歴や家族枠を失わない。
+  const recordedVisitors = new Set((await db.select({ eventUserId: stampRallyRedemption.eventUserId })
+    .from(stampRallyRedemption).where(eq(stampRallyRedemption.eventId, eventId)))
+    .map((row) => row.eventUserId));
+  const legacyHistory = await db.select({
+    id: rewardRedemption.id,
+    createdAt: rewardRedemption.createdAt,
+    staffId: rewardRedemption.staffId,
+    eventUserId: eventUser.id,
+    displayId: eventUser.displayId,
+    nickname: eventUser.nickname,
+  }).from(rewardRedemption).innerJoin(eventUser, eq(rewardRedemption.userId, eventUser.id))
+    .where(eq(eventUser.eventId, eventId)).orderBy(desc(rewardRedemption.createdAt));
+  const legacyRewardName = rewardNames.get("default") || rewards[0]?.name || "景品交換";
+  const summaryByReward = new Map<string, { rewardId: string; rewardName: string; quantity: number }>();
+  for (const row of summaryRows) {
+    const current = summaryByReward.get(row.rewardId);
+    summaryByReward.set(row.rewardId, {
+      rewardId: row.rewardId,
+      rewardName: row.rewardName || current?.rewardName || rewardNames.get(row.rewardId) || "景品交換",
+      quantity: (current?.quantity ?? 0) + row.quantity,
+    });
+  }
+  for (const row of legacyHistory) {
+    if (recordedVisitors.has(row.eventUserId)) continue;
+    const current = summaryByReward.get("default");
+    summaryByReward.set("default", {
+      rewardId: "default",
+      rewardName: legacyRewardName,
+      quantity: (current?.quantity ?? 0) + 1,
+    });
+  }
+  const recentHistory = [
+    ...history.map((row) => ({
+      ...row,
+      rewardName: row.rewardName || rewardNames.get(row.rewardId) || "景品交換",
+    })),
+    ...legacyHistory.filter((row) => !recordedVisitors.has(row.eventUserId)).map((row) => ({
+      ...row,
+      id: `legacy-${row.id}`,
+      rewardId: "default",
+      rewardName: legacyRewardName,
+      quantity: 1,
+    })),
+  ].sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime()).slice(0, 50);
+  return c.json({
+    rewards,
+    totalQuantity: [...summaryByReward.values()].reduce((total, row) => total + row.quantity, 0),
+    summary: [...summaryByReward.values()],
+    history: recentHistory,
+  });
 });
 
 // 旧APIを利用するクライアント向け互換経路。イベントを来場者IDから特定したうえで
@@ -470,7 +599,7 @@ stampRoutes.post(
     }
     const session = await getSession(c);
     if (!session?.user) apiError("FORBIDDEN", "ログインが必要です");
-    const result = await recordRedemption(db, visitor.eventId, visitor.id, session.user.id || session.user.email.toLowerCase());
+    const result = await recordRedemption(db, visitor.eventId, visitor.id, session.user.id || session.user.email.toLowerCase(), "default", 1);
     if ("error" in result && result.error) apiError("BAD_REQUEST", result.error);
     return c.json({ success: true, redemption: result.redemption }, 201);
   },

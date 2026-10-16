@@ -160,6 +160,12 @@ eventRoutes.put(
       targetAreaIds: z.array(z.string().min(1).max(64)).max(50).optional(),
       requiredCount: z.number().int().min(1).max(100).optional(),
       rewardTitle: z.string().trim().max(100).optional(),
+      // 2026-10-16: 景品別の在庫・交換数を照合し、複数景品を受付できるカタログ。
+      rewards: z.array(z.object({
+        id: z.string().trim().min(1).max(64),
+        name: z.string().trim().min(1).max(100),
+        stockQuantity: z.number().int().min(0).max(500_000).nullable(),
+      })).min(1).max(20).optional(),
       redemptionLocation: z.string().trim().max(500).optional(),
       rulesUrl: z.string().trim().max(2048).optional(),
       // 旧保存形式。新しい画面は targetAreaIds / requiredCount を送る。
@@ -227,6 +233,13 @@ eventRoutes.put(
         }
       }).length;
       const requiredCount = settings.requiredCount ?? 3;
+      const rewards = settings.rewards;
+      if (rewards) {
+        if (new Set(rewards.map((reward) => reward.id)).size !== rewards.length ||
+          new Set(rewards.map((reward) => reward.name.toLocaleLowerCase())).size !== rewards.length) {
+          apiError("BAD_REQUEST", "景品のIDと名前は重複できません");
+        }
+      }
       if (settings.enabled && (targetAreaIds.length === 0 || targetCircleCount < requiredCount)) {
         apiError("BAD_REQUEST", "有効化するには対象エリアと必要数以上の店舗を指定してください");
       }
@@ -237,7 +250,8 @@ eventRoutes.put(
         enabled: settings.enabled,
         targetAreaIds,
         requiredCount,
-        rewardTitle: settings.rewardTitle || "景品交換",
+        rewardTitle: rewards?.[0]?.name || settings.rewardTitle || "景品交換",
+        ...(rewards ? { rewards } : {}),
         redemptionLocation: settings.redemptionLocation || "",
         rulesUrl: settings.rulesUrl || "",
       };

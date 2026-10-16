@@ -578,8 +578,15 @@ export interface StampRallySettings {
   targetAreaIds: string[];
   requiredCount: number;
   rewardTitle: string;
+  rewards?: StampRallyReward[];
   redemptionLocation: string;
   rulesUrl: string;
+}
+
+export interface StampRallyReward {
+  id: string;
+  name: string;
+  stockQuantity: number | null;
 }
 
 export interface StampRallyCircle {
@@ -610,6 +617,10 @@ export interface VisitorStampRally {
   requiredCount: number;
   eligible: boolean;
   rewardTitle: string;
+  familyMemberCount: number;
+  redeemedCount: number;
+  remainingCount: number;
+  rewards: StampRallyReward[];
   redemptionLocation: string;
   rulesUrl: string;
   redeemedAt: string | null;
@@ -628,6 +639,16 @@ export interface StampRallyRedemption {
   eventUserId: string;
   displayId: number;
   nickname: string | null;
+  rewardId: string;
+  rewardName: string;
+  quantity: number;
+}
+
+export interface StampRallyRedemptionHistory {
+  rewards: StampRallyReward[];
+  totalQuantity: number;
+  summary: Array<{ rewardId: string; rewardName: string; quantity: number }>;
+  history: StampRallyRedemption[];
 }
 
 export interface VisitorStampRallyArea extends StampRallyArea {}
@@ -643,13 +664,13 @@ export const stampRallyApi = {
     fetchApi<VisitorStampRally>(`/api/stamps/visitor/${encodeURIComponent(code)}`),
   lookup: (eventId: string, code: string) =>
     fetchApi<StaffStampRallyLookup>(`/api/stamps/event/${encodeURIComponent(eventId)}/lookup/${encodeURIComponent(code)}`),
-  redeem: (eventId: string, code: string) =>
+  redeem: (eventId: string, input: { code: string; rewardId: string; quantity: number }) =>
     fetchApi<{ success: boolean; redemption: { id: string; createdAt: string } }>(`/api/stamps/event/${encodeURIComponent(eventId)}/redeem`, {
       method: "POST",
-      body: { code },
+      body: input,
     }),
   redemptions: (eventId: string) =>
-    fetchApi<StampRallyRedemption[]>(`/api/stamps/event/${encodeURIComponent(eventId)}/redemptions`),
+    fetchApi<StampRallyRedemptionHistory>(`/api/stamps/event/${encodeURIComponent(eventId)}/redemptions`),
 };
 
 export type EventLifecycleStatus = "upcoming" | "live" | "ended" | "archived";

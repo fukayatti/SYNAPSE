@@ -6,12 +6,12 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Modal } from "@/components/ui/Modal";
 import { ToggleSwitch } from "@/components/ui/ToggleSwitch";
-import { circleApi, eventApi, type Circle, type Event, type StampRallySettings } from "@/lib/api";
+import { circleApi, eventApi, type Circle, type Event, type StampRallyReward, type StampRallySettings } from "@/lib/api";
 import { toast } from "sonner";
 
 type StoreArea = { id: string; name: string };
 type EventWithStoreAreas = Event & { storeAreas?: string | null };
-type ParsedSettings = StampRallySettings & { legacy: boolean };
+type ParsedSettings = StampRallySettings & { legacy: boolean; rewards: StampRallyReward[] };
 
 function parseStoreAreas(raw?: string | null): StoreArea[] {
   try {
@@ -32,6 +32,7 @@ function parseSettings(raw?: string | null): ParsedSettings {
     targetAreaIds: [],
     requiredCount: 3,
     rewardTitle: "景品交換",
+    rewards: [{ id: "default", name: "景品交換", stockQuantity: null }],
     redemptionLocation: "",
     rulesUrl: "",
     legacy: false,
@@ -41,6 +42,25 @@ function parseSettings(raw?: string | null): ParsedSettings {
     const legacyAreas = Array.isArray(parsed.areas) ? parsed.areas : [];
     const legacy = legacyAreas.length > 0 && !Array.isArray(parsed.targetAreaIds);
     const firstLegacy = legacyAreas[0] as Record<string, unknown> | undefined;
+    const rewardTitle = typeof parsed.rewardTitle === "string"
+      ? parsed.rewardTitle
+      : (typeof firstLegacy?.rewardTitle === "string" ? firstLegacy.rewardTitle : empty.rewardTitle);
+    const rewards = Array.isArray(parsed.rewards)
+      ? parsed.rewards.flatMap((reward): StampRallyReward[] => {
+          if (!reward || typeof reward !== "object") return [];
+          const item = reward as Record<string, unknown>;
+          if (typeof item.id !== "string" || typeof item.name !== "string" || !item.name.trim()) return [];
+          return [{
+            id: item.id,
+            name: item.name,
+            stockQuantity: item.stockQuantity === null || item.stockQuantity === undefined
+              ? null
+              : Number.isInteger(item.stockQuantity) && Number(item.stockQuantity) >= 0
+                ? Number(item.stockQuantity)
+                : null,
+          }];
+        })
+      : [{ id: "default", name: rewardTitle, stockQuantity: null }];
     return {
       enabled: parsed.enabled === true,
       targetAreaIds: Array.isArray(parsed.targetAreaIds)
@@ -49,9 +69,8 @@ function parseSettings(raw?: string | null): ParsedSettings {
       requiredCount: Number.isInteger(parsed.requiredCount) && Number(parsed.requiredCount) > 0
         ? Number(parsed.requiredCount)
         : (Number.isInteger(firstLegacy?.requiredCount) ? Number(firstLegacy?.requiredCount) : empty.requiredCount),
-      rewardTitle: typeof parsed.rewardTitle === "string"
-        ? parsed.rewardTitle
-        : (typeof firstLegacy?.rewardTitle === "string" ? firstLegacy.rewardTitle : empty.rewardTitle),
+      rewardTitle,
+      rewards: rewards.length ? rewards : [{ id: "default", name: rewardTitle, stockQuantity: null }],
       redemptionLocation: typeof parsed.redemptionLocation === "string"
         ? parsed.redemptionLocation
         : (typeof firstLegacy?.rewardDescription === "string" ? firstLegacy.rewardDescription : ""),
@@ -98,9 +117,14 @@ export function StampRallySettingsCard({ eventId, event }: { eventId: string; ev
       return true;
     }
   })();
+  const invalidRewards = settings.rewards.length === 0 || settings.rewards.length > 20 ||
+    settings.rewards.some((reward) => !reward.name.trim() || reward.name.trim().length > 100 ||
+      (reward.stockQuantity !== null && (!Number.isInteger(reward.stockQuantity) || reward.stockQuantity < 0 || reward.stockQuantity > 500_000))) ||
+    new Set(settings.rewards.map((reward) => reward.id)).size !== settings.rewards.length ||
+    new Set(settings.rewards.map((reward) => reward.name.trim().toLocaleLowerCase())).size !== settings.rewards.length;
   const invalidSettings = settings.targetAreaIds.length > 50 ||
     new Set(settings.targetAreaIds).size !== settings.targetAreaIds.length ||
-    invalidRequiredCount || settings.rewardTitle.trim().length > 100 ||
+    invalidRequiredCount || invalidRewards ||
     settings.redemptionLocation.trim().length > 500 || settings.rulesUrl.trim().length > 2048 || invalidRulesUrl ||
     (settings.enabled && (
     settings.targetAreaIds.length === 0 ||
@@ -114,7 +138,8 @@ export function StampRallySettingsCard({ eventId, event }: { eventId: string; ev
         enabled: settings.enabled,
         targetAreaIds: settings.targetAreaIds,
         requiredCount: settings.requiredCount,
-        rewardTitle: settings.rewardTitle.trim() || "景品交換",
+        rewardTitle: settings.rewards[0]?.name.trim() || settings.rewardTitle.trim() || "景品交換",
+        rewards: settings.rewards.map((reward) => ({ ...reward, name: reward.name.trim() })),
         redemptionLocation: settings.redemptionLocation.trim(),
         rulesUrl: settings.rulesUrl.trim(),
       };
@@ -160,6 +185,7 @@ export function StampRallySettingsCard({ eventId, event }: { eventId: string; ev
                 ? `${settings.targetAreaIds.length}エリア / ${settings.requiredCount}店舗以上`
                 : "対象エリア未設定"}
             </p>
+            <p className="text-[10px] text-muted-foreground">景品 {settings.rewards.length}種類</p>
             <Button type="button" variant="outline" size="sm" onClick={() => setIsEditorOpen(true)}>
               <Settings2 className="h-4 w-4" />条件を設定
             </Button>
@@ -181,7 +207,7 @@ export function StampRallySettingsCard({ eventId, event }: { eventId: string; ev
         subtitle="選択した会場エリア内の異なる店舗を利用するとスタンプが付きます。"
         maxWidth="lg"
       >
-        <div className="space-y-4">
+        <div className="max-h-[70vh] space-y-4 overflow-y-auto pr-1">
           <fieldset className="space-y-2">
             <legend className="text-xs font-bold">対象エリア</legend>
             {storeAreas.length === 0 ? (
@@ -227,10 +253,72 @@ export function StampRallySettingsCard({ eventId, event }: { eventId: string; ev
             <span className="block text-[10px] text-muted-foreground">1〜100の整数を入力してください。対象エリア全体の異なる店舗を数えます。</span>
           </label>
 
-          <label className="block space-y-1">
-            <span className="text-xs font-bold">景品名</span>
-            <Input maxLength={100} value={settings.rewardTitle} onChange={(e) => setSettings((current) => ({ ...current, rewardTitle: e.target.value }))} />
-          </label>
+          <section className="space-y-2" aria-labelledby="stamp-reward-catalog-title">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h3 id="stamp-reward-catalog-title" className="text-xs font-bold">交換できる景品</h3>
+                <p className="text-[10px] text-muted-foreground">在庫数を空欄にすると上限なしで管理します。</p>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={settings.rewards.length >= 20}
+                onClick={() => setSettings((current) => ({
+                  ...current,
+                  rewards: [...current.rewards, { id: crypto.randomUUID(), name: "", stockQuantity: null }],
+                }))}
+              >
+                景品を追加
+              </Button>
+            </div>
+            <div className="space-y-2">
+              {settings.rewards.map((reward, index) => (
+                <div key={reward.id} className="grid grid-cols-1 gap-2 border-b-thin border-border py-2 sm:grid-cols-[minmax(0,1fr)_10rem_auto] sm:items-end">
+                  <label className="block space-y-1">
+                    <span className="text-[10px] font-bold">景品名 {index + 1}</span>
+                    <Input
+                      maxLength={100}
+                      value={reward.name}
+                      onChange={(event) => setSettings((current) => ({
+                        ...current,
+                        rewards: current.rewards.map((item) => item.id === reward.id ? { ...item, name: event.target.value } : item),
+                      }))}
+                      placeholder="例: オリジナル缶バッジ"
+                    />
+                  </label>
+                  <label className="block space-y-1">
+                    <span className="text-[10px] font-bold">在庫数</span>
+                    <Input
+                      type="number"
+                      min={0}
+                      max={500_000}
+                      value={reward.stockQuantity ?? ""}
+                      onChange={(event) => setSettings((current) => ({
+                        ...current,
+                        rewards: current.rewards.map((item) => item.id === reward.id
+                          ? { ...item, stockQuantity: event.target.value === "" ? null : Number(event.target.value) }
+                          : item),
+                      }))}
+                      placeholder="上限なし"
+                    />
+                  </label>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={settings.rewards.length <= 1}
+                    onClick={() => setSettings((current) => ({
+                      ...current,
+                      rewards: current.rewards.filter((item) => item.id !== reward.id),
+                    }))}
+                    aria-label={`${reward.name || `景品 ${index + 1}`}を削除`}
+                  >
+                    削除
+                  </Button>
+                </div>
+              ))}
+            </div>
+          </section>
 
           <label className="block space-y-1">
             <span className="text-xs font-bold">景品交換場所の案内</span>
