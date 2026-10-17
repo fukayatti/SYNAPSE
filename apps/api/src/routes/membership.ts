@@ -856,39 +856,33 @@ membershipRoutes.post(
       apiError("BAD_REQUEST", "既にメンバーとして登録されています");
     }
 
-    // トークンの使用回数を条件付きで更新する（TOCTOU対策）。
-    // D1 は対話的トランザクション(BEGIN)非対応のため、
-    // `used_count < max_uses` (または上限なし) を満たす場合のみ更新されるようにし、
-    // 更新0件なら他リクエストと競合して上限に達したとみなし中断する。
-    const updateResult = await db
-      .update(inviteToken)
-      .set({ usedCount: foundToken.usedCount + 1 })
-      .where(
-        and(
-          eq(inviteToken.id, foundToken.id),
-          foundToken.maxUses !== null
-            ? lt(inviteToken.usedCount, foundToken.maxUses)
-            : undefined
-        )
-      );
-
-    const changes = (updateResult as unknown as { meta?: { changes?: number } })?.meta?.changes ?? 0;
-    if (changes === 0) {
-      apiError("BAD_REQUEST", "招待トークンの使用回数上限に達しました");
-    }
-
-    // メンバーシップを作成
-    // 2026-07-07 (Phase 3a): 独自 PIN 認証の廃止に伴い pin 保存を撤去。
     const membershipId = ulid();
-    await db.insert(membership).values({
-      id: membershipId,
-      userEmail,
-      userName: input.userName,
-      circleId: foundToken.circleId,
-      eventId: foundToken.eventId,
-      role: foundToken.role,
-      isActive: true,
-    });
+    const inviteUseGuardId = ulid();
+    try {
+      // 2026-10-17: D1 batch は各文を1トランザクションで実行する。ガードが招待条件を
+      // 同じトランザクション内で再確認し、メンバー作成失敗時にも使用数をrollbackする。
+      await c.env.DB.batch([
+        c.env.DB.prepare(`INSERT INTO order_write_guard (id, valid) SELECT ?, CASE WHEN EXISTS (
+          SELECT 1 FROM invite_token WHERE id=? AND expires_at>? AND (max_uses IS NULL OR used_count<max_uses)
+            AND (target_email IS NULL OR lower(target_email)=?)
+            AND NOT EXISTS (SELECT 1 FROM membership WHERE user_email=?
+              AND ((? IS NOT NULL AND circle_id=?) OR (? IS NOT NULL AND event_id=?)))
+        ) THEN 1 ELSE 0 END`).bind(inviteUseGuardId, foundToken.id, Date.now(), userEmail,
+          userEmail, foundToken.circleId, foundToken.circleId, foundToken.eventId, foundToken.eventId),
+        c.env.DB.prepare("UPDATE invite_token SET used_count=used_count+1 WHERE id=? AND (max_uses IS NULL OR used_count<max_uses)")
+          .bind(foundToken.id),
+        c.env.DB.prepare(`INSERT INTO membership (id,user_email,user_name,circle_id,event_id,role,is_active)
+          VALUES (?,?,?,?,?,?,1)`).bind(membershipId, userEmail, input.userName, foundToken.circleId,
+            foundToken.eventId, foundToken.role),
+        c.env.DB.prepare("DELETE FROM order_write_guard WHERE id=?").bind(inviteUseGuardId),
+      ]);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message.includes("order_write_guard_valid") || message.includes("membership_user_") || message.includes("UNIQUE constraint failed: membership.user_email")) {
+        apiError("BAD_REQUEST", "招待の使用上限に達したか、既にメンバーとして登録されています");
+      }
+      throw error;
+    }
 
     return c.json({ membershipId, kind: inviteKind(foundToken) }, 201);
   }
@@ -1180,40 +1174,35 @@ membershipRoutes.post(
         apiError("BAD_REQUEST", "既にメンバーとして登録されています");
       }
 
-      // 2026-07-05: トークンの使用回数を条件付きで更新する（TOCTOU対策）。
-      // D1 は対話的トランザクション非対応のため、`used_count < max_uses` を
-      // 満たす場合のみ更新されるようにし、更新0件なら他リクエストと競合して
-      // 上限に達したとみなし中断する。メンバーシップ作成より前に確定させる。
-      const updateResult = await db
-        .update(inviteToken)
-        .set({ usedCount: foundToken.usedCount + 1 })
-        .where(
-          and(
-            eq(inviteToken.id, foundToken.id),
-            foundToken.maxUses !== null
-              ? lt(inviteToken.usedCount, foundToken.maxUses)
-              : undefined
-          )
-        );
-
-      const changes = (updateResult as unknown as { meta?: { changes?: number } })?.meta?.changes ?? 0;
-      if (changes === 0) {
-        apiError("BAD_REQUEST", "招待の上限に達しています");
+      const membershipId = ulid();
+      const inviteUseGuardId = ulid();
+      try {
+        // 2026-10-17: 通知承認でも招待消費・所属作成・通知既読化を一括確定し、
+        // 途中の書き込み失敗で使用数だけが減る状態を防ぐ。
+        await c.env.DB.batch([
+          c.env.DB.prepare(`INSERT INTO order_write_guard (id, valid) SELECT ?, CASE WHEN EXISTS (
+            SELECT 1 FROM invite_token WHERE id=? AND expires_at>? AND (max_uses IS NULL OR used_count<max_uses)
+              AND (target_email IS NULL OR lower(target_email)=?)
+              AND NOT EXISTS (SELECT 1 FROM membership WHERE user_email=?
+                AND ((? IS NOT NULL AND circle_id=?) OR (? IS NOT NULL AND event_id=?)))
+          ) THEN 1 ELSE 0 END`).bind(inviteUseGuardId, foundToken.id, Date.now(), email,
+            email, foundToken.circleId, foundToken.circleId, foundToken.eventId, foundToken.eventId),
+          c.env.DB.prepare("UPDATE invite_token SET used_count=used_count+1 WHERE id=? AND (max_uses IS NULL OR used_count<max_uses)")
+            .bind(foundToken.id),
+          c.env.DB.prepare(`INSERT INTO membership (id,user_email,user_name,circle_id,event_id,role,is_active)
+            VALUES (?,?,?,?,?,?,1)`).bind(membershipId, email, input.userName || session.user.name || "メンバー",
+              foundToken.circleId, foundToken.eventId, foundToken.role),
+          c.env.DB.prepare("UPDATE notification SET status='read' WHERE id=? AND user_email=?").bind(id, email),
+          c.env.DB.prepare("DELETE FROM order_write_guard WHERE id=?").bind(inviteUseGuardId),
+        ]);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (message.includes("order_write_guard_valid") || message.includes("membership_user_") || message.includes("UNIQUE constraint failed: membership.user_email")) {
+          apiError("BAD_REQUEST", "招待の使用上限に達したか、既にメンバーとして登録されています");
+        }
+        throw error;
       }
-
-      // メンバーシップ作成
-      // 2026-07-07 (Phase 3a): 独自 PIN 認証の廃止に伴い pin 保存を撤去。
-      await db.insert(membership).values({
-        id: ulid(),
-        userEmail: email,
-        userName: input.userName || session.user.name || "メンバー",
-        circleId: foundToken.circleId,
-        eventId: foundToken.eventId,
-        role: foundToken.role,
-        isActive: true,
-      });
-
-      // (使用回数は上でメンバーシップ作成前に確定更新済みのため、ここでは何もしない)
+      return c.json({ success: true });
     }
 
     // 通知を既読（回答済）にする

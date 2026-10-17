@@ -344,68 +344,48 @@ circleRoutes.post(
       apiError("BAD_REQUEST", "同じ名前のサークルが既に存在します");
     }
 
-    // 招待経由の場合は、作成を確定する直前に招待を TOCTOU 安全に消費する
-    // (used_count < max_uses を満たす場合のみ +1。0件更新なら上限到達で中断)。
-    if (hostInvite) {
-      const upd = await db
-        .update(inviteToken)
-        .set({ usedCount: hostInvite.usedCount + 1 })
-        .where(
-          and(
-            eq(inviteToken.id, hostInvite.id),
-            hostInvite.maxUses !== null
-              ? lt(inviteToken.usedCount, hostInvite.maxUses)
-              : undefined
-          )
-        );
-      const changes = (upd as unknown as { meta?: { changes?: number } })?.meta?.changes ?? 0;
-      if (changes === 0) {
-        apiError("BAD_REQUEST", "招待の使用回数上限に達しました");
-      }
-    }
-
-    // サークルと代表者メンバーシップを作成
-    // 2026-07-04: Cloudflare D1 は HTTP 経由の対話的トランザクション (BEGIN TRANSACTION) をサポートしておらず、
-    // db.transaction() を実行すると "Failed query: begin" エラーで 500 になるため、順次実行に変更。
-    // 2026-07-13 (リグレッション修正): 一時 db.transaction() 化していたが上記の理由で 500 を再発させたため
-    // 逐次実行＋補償削除に戻す。
-    await db.insert(circle).values({
-      id,
-      eventId: input.eventId,
-      name: input.name,
-      description: input.description,
-      iconImagePath: input.iconImagePath ?? null,
-      backgroundImagePath: input.backgroundImagePath ?? null,
-      settings: JSON.stringify({
-        orderFlowMode: input.settings?.orderFlowMode ?? "pending",
-        extensions: {
-          stock: input.settings?.extensions?.stock ?? false,
-          staff: input.settings?.extensions?.staff ?? false,
-        },
-        acceptedPayments,
-        storeAreaId: selectedAreaId,
-      }),
-      // 招待経由なら、どの circle_host 招待から作られたかを記録する (2026-07-14 P2-5 使用内訳)。
-      createdFromInviteId: hostInvite?.id ?? null,
-    });
-
-    // 2026-07-06 (M5): D1 はトランザクション非対応のため、membership insert が
-    // 失敗すると代表者不在のサークルが残ってしまう。失敗時は先に作成した circle 行を
-    // 補償削除してからエラーを返す。
-    // 2026-07-07 (Phase 3a): 代表者は常に作成者本人 (session.user.email)。
     const membershipId = ulid();
+    const inviteUseGuardId = hostInvite ? ulid() : null;
+    const circleSettings = JSON.stringify({
+      orderFlowMode: input.settings?.orderFlowMode ?? "pending",
+      mobileOrderEnabled: input.settings?.mobileOrderEnabled ?? false,
+      extensions: {
+        stock: input.settings?.extensions?.stock ?? false,
+        staff: input.settings?.extensions?.staff ?? false,
+      },
+      acceptedPayments,
+      storeAreaId: selectedAreaId,
+    });
+    const statements = [];
+    if (hostInvite && inviteUseGuardId) {
+      // 2026-10-17: D1 batch を単一トランザクションとして使い、招待消費・サークル・
+      // 代表者メンバーシップを一緒に確定する。失敗時は三つともrollbackされる。
+      statements.push(c.env.DB.prepare(`INSERT INTO order_write_guard (id, valid) SELECT ?, CASE WHEN EXISTS (
+        SELECT 1 FROM invite_token WHERE id=? AND circle_id IS NULL AND event_id=? AND role='circle_manager'
+          AND expires_at>? AND (max_uses IS NULL OR used_count<max_uses)
+      ) THEN 1 ELSE 0 END`).bind(inviteUseGuardId, hostInvite.id, input.eventId, Date.now()));
+      statements.push(c.env.DB.prepare("UPDATE invite_token SET used_count=used_count+1 WHERE id=? AND (max_uses IS NULL OR used_count<max_uses)")
+        .bind(hostInvite.id));
+    }
+    statements.push(c.env.DB.prepare(`INSERT INTO circle
+      (id,event_id,name,description,icon_image_path,background_image_path,settings,created_from_invite_id)
+      VALUES (?,?,?,?,?,?,?,?)`).bind(id, input.eventId, input.name, input.description ?? null,
+        input.iconImagePath ?? null, input.backgroundImagePath ?? null, circleSettings, hostInvite?.id ?? null));
+    // 2026-07-07 (Phase 3a): 代表者は常に作成者本人 (session.user.email)。
+    statements.push(c.env.DB.prepare(`INSERT INTO membership (id,user_email,user_name,circle_id,role,is_active)
+      VALUES (?,?,?,?, 'circle_manager',1)`).bind(membershipId, email,
+        session.user.name || `${input.name} 代表者`, id));
+    if (inviteUseGuardId) {
+      statements.push(c.env.DB.prepare("DELETE FROM order_write_guard WHERE id=?").bind(inviteUseGuardId));
+    }
     try {
-      await db.insert(membership).values({
-        id: membershipId,
-        userEmail: session.user.email.toLowerCase(), // メールアドレスは小文字で保存
-        userName: session.user.name || `${input.name} 代表者`,
-        circleId: id,
-        role: "circle_manager",
-        isActive: true,
-      });
-    } catch (e) {
-      await db.delete(circle).where(eq(circle.id, id));
-      apiError("INTERNAL", "サークルの作成に失敗しました");
+      await c.env.DB.batch(statements);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message.includes("order_write_guard_valid")) {
+        apiError("BAD_REQUEST", "招待の使用回数上限に達したか、有効期限が切れています");
+      }
+      throw error;
     }
 
     return c.json({ id }, 201);
