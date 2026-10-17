@@ -16,6 +16,7 @@ import {
   wristband,
   orderCommit,
   coupon,
+  discount,
 } from "@fesflow/db";
 import { eq, and, or, desc, inArray, sql } from "drizzle-orm";
 import { ulid } from "ulidx";
@@ -23,6 +24,7 @@ import { hasPermission } from "../utils/auth";
 import { commitOrder, committedOrder, orderCommand } from "../services/order-commit";
 import { updateOrderStatus } from "../services/order-status";
 import { validateToppingCategorySelection } from "../utils/topping-wizard";
+import { calculateDiscount } from "../utils/discount";
 import type { AppEnv } from "../types";
 
 const orderRoutes = new Hono<AppEnv>();
@@ -393,6 +395,32 @@ const handleCreateOrder = async (
         registerDiscountPercent = registerCoupon.discountPercent;
       }
 
+      let appliedDiscount: { id: string; discountApplied: number } | undefined;
+      let registerDiscount: { kind: "percentage" | "amount"; value: number } | undefined;
+      if (input.discountId) {
+        if (input.registerCouponId) {
+          apiError("BAD_REQUEST", "クーポンと割引は同時に適用できません");
+        }
+        if (source !== "pos") {
+          apiError("BAD_REQUEST", "割引はサークルのレジ注文でのみ利用できます");
+        }
+        if (!(await hasPermission(c, input.circleId, "order:write"))) {
+          apiError("FORBIDDEN", "レジ割引を適用する権限がありません");
+        }
+        const rows = await db.select().from(discount).where(eq(discount.id, input.discountId)).limit(1);
+        const selectedDiscount = rows[0];
+        if (!selectedDiscount || selectedDiscount.circleId !== input.circleId || selectedDiscount.status !== "active") {
+          apiError("BAD_REQUEST", "このレジで利用できる割引ではありません");
+        }
+        if ((selectedDiscount.kind !== "percentage" && selectedDiscount.kind !== "amount") ||
+          !Number.isInteger(selectedDiscount.value) || selectedDiscount.value <= 0 ||
+          (selectedDiscount.kind === "percentage" && selectedDiscount.value > 100)) {
+          apiError("BAD_REQUEST", "割引の設定が不正です");
+        }
+        registerDiscount = { kind: selectedDiscount.kind, value: selectedDiscount.value };
+        appliedDiscount = { id: selectedDiscount.id, discountApplied: 0 };
+      }
+
       // 開催状態・利用停止・来場者BANは同じJOIN結果で確認し、いずれも注文確定時にも再検証する。
       const eventRow = context.event;
       if (!eventRow?.id || eventRow.deletedAt) {
@@ -594,6 +622,12 @@ const handleCreateOrder = async (
         appliedRegisterCoupon = { ...appliedRegisterCoupon, discountApplied };
       }
 
+      if (appliedDiscount && registerDiscount) {
+        const discountApplied = calculateDiscount(totalPrice, registerDiscount.kind, registerDiscount.value);
+        totalPrice = Math.max(0, totalPrice - discountApplied);
+        appliedDiscount = { ...appliedDiscount, discountApplied };
+      }
+
       // 2026-10-03: 在庫減算は注文/明細と同じD1 batchで実施する。逐次補償は不要。
       // 支払い方法の解決 (2026-07-12): 明示指定を優先し、無ければサークルの対応方法が
       // ちょうど1つのときだけそれを補完する (単一方法はレジで選択させないため)。
@@ -615,6 +649,7 @@ const handleCreateOrder = async (
         cashierId, source, peopleCount: input.peopleCount,
         totalPrice, paymentMethod: resolvedPayment, status: orderFlowMode,
         registerCoupon: appliedRegisterCoupon,
+        discount: appliedDiscount,
         items: orderItems.map((item) => ({ ...item,
           toppings: (item.toppingIds ?? []).map((id) => {
             const t = toppings.find((row) => row.id === id)!;

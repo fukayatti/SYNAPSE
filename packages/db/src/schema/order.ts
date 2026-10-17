@@ -262,6 +262,50 @@ export const orderCoupon = sqliteTable(
   ],
 );
 
+// 2026-10-17: 店頭値引きは来場者配布用クーポンと別管理にし、レジからだけ選べる設定として保持する。
+export const discount = sqliteTable(
+  "discount",
+  {
+    id: text("id").primaryKey().$defaultFn(() => ulid()),
+    circleId: text("circle_id")
+      .notNull()
+      .references(() => circle.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    kind: text("kind").notNull(), // percentage / amount
+    value: integer("value").notNull(), // 割合なら整数％、金額なら円
+    status: text("status").notNull().default("active"), // active / disabled
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+      .notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (table) => [
+    index("discount_circle_status_idx").on(table.circleId, table.status),
+    check("discount_kind_valid", sql`${table.kind} IN ('percentage', 'amount')`),
+    check("discount_value_valid", sql`(${table.kind} = 'percentage' AND ${table.value} BETWEEN 1 AND 100) OR (${table.kind} = 'amount' AND ${table.value} > 0)`),
+  ]
+);
+
+// 割引額を注文時点の値で残し、後から設定が変わっても確定済み会計の記録を保つ。
+export const orderDiscount = sqliteTable(
+  "order_discount",
+  {
+    id: text("id").primaryKey().$defaultFn(() => ulid()),
+    orderId: text("order_id").notNull().references(() => order.id, { onDelete: "cascade" }),
+    discountId: text("discount_id").notNull().references(() => discount.id),
+    discountApplied: integer("discount_applied").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`).notNull(),
+  },
+  (table) => [
+    uniqueIndex("order_discount_order_unique").on(table.orderId),
+    index("order_discount_discount_idx").on(table.discountId),
+  ],
+);
+
 // 事前オーダーテーブル
 export const preOrder = sqliteTable(
   "pre_order",
