@@ -1,4 +1,4 @@
-import { membership, circle, event } from "@fesflow/db";
+import { membership, circle, event, account } from "@fesflow/db";
 import { eq, and } from "drizzle-orm";
 import { ulid } from "ulidx";
 import { Context } from "hono";
@@ -19,6 +19,17 @@ export async function getSession(c: Context<AppEnv>) {
   });
 }
 
+// 2026-10-17: 初期管理者の自動昇格は、検証済みGoogleアカウントだけに限定する。
+// 開発用メールログインのセッションは維持しつつ、メール一致だけでの管理者昇格を防ぐ。
+export async function isVerifiedGoogleUser(c: Context<AppEnv>, user: { id: string; emailVerified: boolean }) {
+  if (user.emailVerified !== true) return false;
+  const rows = await c.get("db").select({ id: account.id }).from(account).where(and(
+    eq(account.userId, user.id),
+    eq(account.providerId, "google"),
+  )).limit(1);
+  return rows.length > 0;
+}
+
 
 export async function getAdminSession(c: Context<AppEnv>) {
   const db = c.get("db");
@@ -37,13 +48,11 @@ export async function getAdminSession(c: Context<AppEnv>) {
   // 旧 getEnv().INITIAL_SUPER_ADMIN_EMAIL → c.env から直接参照 (Phase5: getEnv 廃止)
   const initialAdminEmail = c.env.INITIAL_SUPER_ADMIN_EMAIL;
 
-  // 2026-07-06: 初期管理者メールアドレスへの自動昇格は emailVerified === true の場合に限定する (監査 C1)。
-  // better-auth はメール検証なしでもサインアップ・ログインできるため、検証前は
-  // 「文字列が一致しただけ」の任意人物が super_admin になれてしまっていた。
+  // 2026-10-17: 初期管理者メールアドレスへの自動昇格は検証済みGoogleログインに限定する。
   if (
     initialAdminEmail &&
     email.toLowerCase() === initialAdminEmail.toLowerCase() &&
-    session.user.emailVerified === true
+    await isVerifiedGoogleUser(c, session.user)
   ) {
     const existing = await db
       .select()

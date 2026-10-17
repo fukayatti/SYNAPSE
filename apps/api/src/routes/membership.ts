@@ -3,12 +3,13 @@ import { zBody } from "../z-validator";
 import { apiError } from "../http-error";
 import { z } from "zod";
 import { membership, inviteToken, circle, event, notification } from "@fesflow/db";
-import { eq, and, inArray, gt, isNull, lt } from "drizzle-orm";
+import { eq, and, inArray, gt, isNull } from "drizzle-orm";
 import { nanoid, customAlphabet } from "nanoid";
 import { ulid } from "ulidx";
 import { Context } from "hono";
 import { effectiveCircleRole } from "@fesflow/config";
 import { requireAuth } from "../middleware/auth";
+import { isVerifiedGoogleUser } from "../utils/auth";
 import type { AppEnv } from "../types";
 
 // 招待の手入力コード生成。紛らわしい文字 (0/O, 1/I/L 等) を除いた 8 桁。
@@ -165,13 +166,13 @@ async function checkMemberWritePermission(
   const initialAdminEmail = c.env.INITIAL_SUPER_ADMIN_EMAIL;
 
   // 1. super_admin / system_manager (システムレベルの管理者) は何でも可能
-  // 2026-07-06 (C1): initialAdminEmail 一致だけでの system admin 昇格は、
-  // メール未検証でも成立してしまう抜け道だった。session.user.emailVerified === true
-  // の場合に限定する（未検証なら下の通常の super_admin メンバーシップ判定に委ねる）。
-  const emailVerified =
-    (session.user as { emailVerified?: boolean }).emailVerified === true;
+  // 2026-10-17: 初期管理者の直接権限も、検証済みGoogleログインだけに限る。
   let isSystemAdmin = false;
-  if (initialAdminEmail && email === initialAdminEmail.toLowerCase() && emailVerified) {
+  if (
+    initialAdminEmail &&
+    email === initialAdminEmail.toLowerCase() &&
+    await isVerifiedGoogleUser(c, session.user)
+  ) {
     isSystemAdmin = true;
   } else {
     const systemMembers = await db
@@ -296,7 +297,11 @@ membershipRoutes.get("/my", async (c) => {
 
   // 旧 getEnv().INITIAL_SUPER_ADMIN_EMAIL → c.env から直接参照 (Phase5: getEnv 廃止)
   const initialAdminEmail = c.env.INITIAL_SUPER_ADMIN_EMAIL;
-  if (initialAdminEmail && userEmail.toLowerCase() === initialAdminEmail.toLowerCase()) {
+  if (
+    initialAdminEmail &&
+    userEmail.toLowerCase() === initialAdminEmail.toLowerCase() &&
+    await isVerifiedGoogleUser(c, session.user)
+  ) {
     const existing = await db
       .select()
       .from(membership)
@@ -771,9 +776,7 @@ membershipRoutes.get("/invite/lookup", async (c) => {
 //   作成できた（なりすまし/権限昇格チェーン）ため、セッション必須化し、
 //   メンバーシップの userEmail は必ずセッションのメールを使う。
 //   targetEmail 指定付きトークンは、そのメールのセッションでしか使えないようにする。
-// (2) usedCount 更新が「読んで+1して書く」楽観更新でガードが無く、
-//   同時アクセスで maxUses を超過しうる(TOCTOU)ため、メンバーシップ作成前に
-//   `WHERE used_count < max_uses` 付き条件UPDATEを行い、更新0件なら中断する。
+// (2) 2026-10-17: 招待使用数は保存済み値を使わずDB内で加算し、上限条件と同じUPDATEで確定する。
 membershipRoutes.post(
   "/invite/accept",
   zBody(
