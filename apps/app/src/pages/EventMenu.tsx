@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { eventApi, circleApi, activeWaitTimeReport } from "@/lib/api";
+import { eventApi, circleApi, activeWaitTimeReport, parseCircleSettings, parseStoreAreas } from "@/lib/api";
 import { useVisitor } from "@/hooks/useVisitor";
 import { EventTheme } from "@/components/EventTheme";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -10,6 +10,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { Store, ArrowRight, QrCode, Calendar, ChevronRight } from "lucide-react";
 import { resolveAssetUrl } from "@/lib/asset-url";
 import { findVisitorRouteItem } from "@/lib/visitor-route";
+import { groupCirclesByStoreArea } from "@/lib/store-areas";
 
 /**
  * イベント メニュー横断閲覧 (2026-07-06)。
@@ -121,10 +122,21 @@ function EventMenuContent({
   });
 
   const theme = useMemo(() => event ?? null, [event]);
+  const storeAreas = useMemo(() => parseStoreAreas(event?.storeAreas), [event?.storeAreas]);
+  const safeOfficialWebsiteUrl = useMemo(() => {
+    try {
+      const url = new URL(event?.officialWebsiteUrl || "");
+      return url.protocol === "https:" || url.protocol === "http:" ? url.href : null;
+    } catch {
+      return null;
+    }
+  }, [event?.officialWebsiteUrl]);
 
   const uniqueCircles = circles
     ? Array.from(new Map(circles.map(c => [c.id, c])).values())
     : undefined;
+  const circleGroups = groupCirclesByStoreArea(uniqueCircles ?? [], event?.storeAreas)
+    .filter((group) => group.circles.length > 0);
 
   return (
     <EventTheme theme={theme} className="min-h-screen bg-background text-foreground">
@@ -148,11 +160,16 @@ function EventMenuContent({
             <div className="text-[10px] font-black uppercase tracking-widest opacity-80">
               出店メニュー
             </div>
-            <h1 className="font-headline text-2xl sm:text-3xl font-black uppercase tracking-tight truncate">
+            <h1 className="break-words font-headline text-2xl leading-tight sm:text-3xl font-black uppercase tracking-tight">
               {eventLoading ? "読み込み中…" : event?.eventName || "イベント"}
             </h1>
             {event?.description && (
               <p className="text-xs opacity-80 truncate">{event.description}</p>
+            )}
+            {safeOfficialWebsiteUrl && (
+              <a href={safeOfficialWebsiteUrl} target="_blank" rel="noopener noreferrer" className="mt-2 inline-flex text-xs font-bold underline underline-offset-2">
+                イベント公式サイト
+              </a>
             )}
           </div>
         </div>
@@ -189,7 +206,8 @@ function EventMenuContent({
         </h2>
 
         {circlesLoading ? (
-          <div className="grid gap-3 sm:grid-cols-2">
+          <div className="grid grid-cols-2 gap-2 sm:gap-3">
+            {/* 2026-10-16: 読み込み中の枠もスマートフォンでは2列に合わせる。 */}
             {[1, 2, 3, 4].map((i) => (
               <Skeleton key={i} className="h-24" />
             ))}
@@ -197,44 +215,60 @@ function EventMenuContent({
         ) : circlesError ? (
           <ErrorState error={circlesErrorObj} onRetry={() => refetchCircles()} />
         ) : uniqueCircles && uniqueCircles.length > 0 ? (
-          <div className="grid gap-3 sm:grid-cols-2">
-            {uniqueCircles.map((circle) => (
+          <div className="space-y-5">
+            {circleGroups.map((group) => (
+              <section key={group.area?.id ?? "unassigned"} className="space-y-2">
+                <h3 className="flex items-center justify-between border-b-thin border-border pb-2 text-xs font-bold">
+                  <span>{group.area?.name ?? "エリア未設定"}</span>
+                  <span className="text-[10px] text-muted-foreground">{group.circles.length}店舗</span>
+                </h3>
+                {/* 2026-10-16: 画面を有効に使うため、スマートフォンでも店舗を2列で一覧できるようにする。 */}
+                <div className="grid grid-cols-2 gap-2 sm:gap-3">
+                  {group.circles.map((circle) => (
               <button
                 key={circle.id}
                 type="button"
                 onClick={() => onBrowseCircle(circle.id)}
-                className="group text-left border-thick border-border bg-background hover:bg-muted transition-all p-3 flex items-center gap-3 cursor-pointer"
+                className="group flex min-w-0 w-full cursor-pointer items-center gap-2 border-thick border-border bg-background p-2 text-left transition-colors hover:bg-muted sm:gap-3 sm:p-3"
               >
                 {circle.iconImagePath ? (
                   <img
                     src={resolveAssetUrl(circle.iconImagePath)}
                     alt={circle.name}
-                    className="h-12 w-12 object-cover border-thick border-border shrink-0"
+                    className="h-10 w-10 shrink-0 border-thick border-border object-cover sm:h-12 sm:w-12"
                   />
                 ) : (
-                  <span className="flex h-12 w-12 items-center justify-center border-thick border-border bg-muted shrink-0">
+                  <span className="flex h-10 w-10 shrink-0 items-center justify-center border-thick border-border bg-muted sm:h-12 sm:w-12">
                     <Store className="h-5 w-5 text-muted-foreground" />
                   </span>
                 )}
                 <div className="min-w-0 flex-1">
-                  <div className="text-sm font-black uppercase tracking-tight truncate">
+                  <div className="break-words text-xs font-black uppercase leading-snug tracking-tight sm:text-sm">
                     {circle.name}
                   </div>
                   {circle.description && (
-                    <div className="text-[11px] text-muted-foreground truncate">
+                    <div className="truncate text-[10px] text-muted-foreground sm:text-[11px]">
                       {circle.description}
                     </div>
                   )}
                   {(() => {
-                    const report = activeWaitTimeReport(circle.settings);
-                    return <div className="mt-1 text-[10px] font-bold">待ち時間: {report ? `約${report.minutes}分（${report.minutesAgo}分前）` : "未報告"}</div>;
+                    const areaId = parseCircleSettings(circle.settings).storeAreaId;
+                    const areaName = storeAreas.find((area) => area.id === areaId)?.name;
+                    return areaName ? <div className="mt-1 break-words text-[9px] font-bold sm:text-[10px]">出店場所: {areaName}</div> : null;
                   })()}
-                  <div className="mt-1 inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-wider">
+                  {(() => {
+                    const report = activeWaitTimeReport(circle.settings);
+                    return <div className="mt-1 break-words text-[9px] font-bold sm:text-[10px]">待ち時間: {report ? `約${report.minutes}分（${report.minutesAgo}分前）` : "未報告"}</div>;
+                  })()}
+                  <div className="mt-1 inline-flex flex-wrap items-center gap-1 text-[9px] font-black uppercase tracking-wider sm:text-[10px]">
                     メニューを見る
                     <ArrowRight className="h-3 w-3 transition-transform group-hover:translate-x-1" />
                   </div>
                 </div>
               </button>
+                  ))}
+                </div>
+              </section>
             ))}
           </div>
         ) : (
@@ -248,7 +282,7 @@ function EventMenuContent({
               to="/visitor/mypage"
               className="inline-flex items-center gap-1 text-[11px] font-black uppercase tracking-wider underline hover:text-accent"
             >
-              マイページ (注文履歴・スタンプ)
+              マイQRを見る
               <ChevronRight className="h-3.5 w-3.5" />
             </Link>
           </div>

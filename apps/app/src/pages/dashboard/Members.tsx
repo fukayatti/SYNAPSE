@@ -1,5 +1,6 @@
 
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   CircleAuthGuard,
@@ -42,8 +43,10 @@ import {
   Ban,
   RotateCcw,
   Search,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
+import { useUnsavedChanges } from "@/components/UnsavedNavigationGuard";
 
 // 2026-10-08: 直接追加APIと同じく、ブラウザー標準の email 判定で誤入力を送信前に止める。
 function isValidEmailAddress(value: string): boolean {
@@ -59,9 +62,9 @@ function MembersContent() {
   // 一度だけ読む独自 state だと、同一パス上でのスペース切り替え後に古いサークル名の
   // ままになる。useAuth() (authChange 購読) から直接取得するよう統一する。
   const { circleId, role, userEmail, circleName: authCircleName, advancedPermissions } = useAuth();
-  // 高度な権限管理 OFF のイベントでは、サークル内は全員同権限なのでロールを選ばせない
-  // (circle_manager への昇格は API でも event_manager 限定のため、選ばせてもエラーになる)。
-  // イベント管理者は常にロールを調整できる (2026-10-05)。
+  // 2026-10-16: 高度な権限管理 OFF では circle_staff が実効上 circle_manager 相当となるため、
+  // オーナーとイベント管理者にロール選択を表示する。circle_admin の付与は既存APIの許可範囲内。
+  // circle_staff へ与える実効権限と、ロール変更できる操作者の判定は分けて扱う。
   // 「ロールと権限」の説明は、拡張機能「スタッフ管理」が OFF なら staff:* (名簿の閲覧/編集/削除) を
   // 載せない。OFF ではスタッフ管理ページ自体が出ず、権限を持っていても使えないため (2026-10-05)。
   // クエリキーは DashboardLayout と共通 (["circle", circleId]) なので追加リクエストにならない。
@@ -71,7 +74,9 @@ function MembersContent() {
     enabled: !!circleId,
   });
   const staffExtensionEnabled = parseCircleSettings(circleData?.settings).extensions.staff;
-  const canChooseRole = advancedPermissions !== false || role === ROLES.EVENT_MANAGER;
+  // 2026-10-16: 高度な権限管理がOFFでも、オーナーとイベント管理者はcircle_adminを付与できる。
+  // circle_staff の実効権限変換と、メンバーを編集できる実ロールの判定は別の責務として扱う。
+  const canChooseRole = role === ROLES.CIRCLE_MANAGER || role === ROLES.EVENT_MANAGER;
   const circleName = authCircleName ?? "サークルダッシュボード";
   const queryClient = useQueryClient();
   const [showAddForm, setShowAddForm] = useState(false);
@@ -97,6 +102,7 @@ function MembersContent() {
     userName: "",
     role: "circle_staff" as Role,
   });
+  const emptyMember = { userId: "", userEmail: "", userName: "", role: "circle_staff" as Role };
 
   const [inviteSettings, setInviteSettings] = useState({
     role: "circle_staff" as Role,
@@ -104,6 +110,7 @@ function MembersContent() {
     expiresInHours: 24,
     targetEmail: "",
   });
+  const savedInviteSettingsRef = useRef(inviteSettings);
 
   // API呼び出し
   const {
@@ -136,6 +143,15 @@ function MembersContent() {
     queryKey: ["roles"],
     queryFn: () => membershipApi.getRoles(),
   });
+  // 2026-10-16: 権限の差を把握しやすいよう、既存のロール API が返す権限を比較表にする。
+  // スタッフ管理拡張が無効な場合は従来どおり staff:* を表から除く。
+  const comparisonRoles = [ROLES.CIRCLE_MANAGER, ROLES.CIRCLE_ADMIN, ROLES.CIRCLE_STAFF];
+  const comparableRoleData = (rolesData ?? []).filter((roleInfo) =>
+    comparisonRoles.includes(roleInfo.role as typeof comparisonRoles[number]),
+  );
+  const permissionRows = [...new Set(comparableRoleData.flatMap((roleInfo) => roleInfo.permissions))]
+    .filter((permission) => staffExtensionEnabled || !permission.startsWith("staff:"))
+    .sort((a, b) => (PERMISSION_NAMES[a] || a).localeCompare(PERMISSION_NAMES[b] || b, "ja"));
 
   const addMemberMutation = useMutation({
     mutationFn: (input: {
@@ -164,11 +180,11 @@ function MembersContent() {
       eventId?: string;
       role: Role;
       expiresInHours?: number;
-      maxUses?: number;
+      maxUses?: number | null;
       createdBy: string;
       targetEmail?: string;
     }) => membershipApi.createInvite(input),
-    onSuccess: (data) => {
+    onSuccess: (data, variables) => {
       refetchTokens();
       // 招待作成後すぐ共有できるよう、生成されたリンクをクリップボードへコピーする。
       // 従来は「作成しました」だけで、リンクは下の一覧までスクロールして copy し直す必要があり
@@ -181,6 +197,12 @@ function MembersContent() {
         toast.success("招待を作成しました");
       }
       setInviteSettings((prev) => ({ ...prev, targetEmail: "" }));
+      savedInviteSettingsRef.current = {
+        role: variables.role,
+        maxUses: variables.maxUses ?? 0,
+        expiresInHours: variables.expiresInHours ?? 24,
+        targetEmail: "",
+      };
       setShowInviteForm(false);
     },
   });
@@ -275,13 +297,57 @@ function MembersContent() {
     createInviteMutation.mutate({
       circleId,
       role: inviteSettings.role,
-      // 空欄(0)のまま送られても妥当な下限に丸める
-      maxUses: Math.max(1, inviteSettings.maxUses || 1),
+      // 2026-10-15 Issue #122: 0回は無制限を表すため、APIへ null を明示して保存する。
+      maxUses: inviteSettings.maxUses === 0 ? null : Math.min(100, Math.max(1, inviteSettings.maxUses)),
       expiresInHours: Math.max(1, inviteSettings.expiresInHours || 24),
       createdBy: userEmail || "",
       targetEmail: inviteSettings.targetEmail || undefined,
     });
   };
+
+  // 2026-10-16: メンバー追加と招待発行の入力もページ遷移時に保存/破棄できるよう登録する。
+  useUnsavedChanges({
+    isDirty: showAddForm && JSON.stringify(newMember) !== JSON.stringify(emptyMember),
+    onSave: async () => {
+      if (!circleId || !isValidEmailAddress(newMember.userEmail) || !newMember.userName.trim()) {
+        throw new Error("有効なメールアドレスと名前を入力してください。");
+      }
+      await addMemberMutation.mutateAsync({
+        userEmail: newMember.userEmail,
+        userName: newMember.userName,
+        circleId,
+        role: newMember.role,
+      });
+    },
+    onDiscard: () => {
+      setNewMember(emptyMember);
+      setShowAddForm(false);
+    },
+  });
+  useUnsavedChanges({
+    isDirty: showInviteForm && JSON.stringify(inviteSettings) !== JSON.stringify(savedInviteSettingsRef.current),
+    onSave: async () => {
+      if (!circleId) throw new Error("サークル情報を読み込んでから招待してください。");
+      if (inviteSettings.targetEmail && !isValidEmailAddress(inviteSettings.targetEmail)) {
+        throw new Error("招待先メールアドレスを確認してください。");
+      }
+      if (inviteSettings.expiresInHours < 1 || inviteSettings.expiresInHours > 168 || inviteSettings.maxUses < 0 || inviteSettings.maxUses > 100) {
+        throw new Error("使用回数は0〜100回、有効期限は1〜168時間で入力してください。");
+      }
+      await createInviteMutation.mutateAsync({
+        circleId,
+        role: inviteSettings.role,
+        maxUses: inviteSettings.maxUses === 0 ? null : Math.min(100, Math.max(1, inviteSettings.maxUses)),
+        expiresInHours: Math.max(1, inviteSettings.expiresInHours || 24),
+        createdBy: userEmail || "",
+        targetEmail: inviteSettings.targetEmail || undefined,
+      });
+    },
+    onDiscard: () => {
+      setInviteSettings(savedInviteSettingsRef.current);
+      setShowInviteForm(false);
+    },
+  });
 
   const copyInviteLink = (token: string) => {
     // 単一ドメイン化 (2026-07-07): 招待受諾ページは /circle/invite/:token に移設
@@ -426,19 +492,22 @@ function MembersContent() {
             value={inviteSettings.targetEmail}
             onChange={(e) => setInviteSettings({ ...inviteSettings, targetEmail: e.target.value })}
           />
-          {/* 編集中に 1 未満へ丸めると打ち直しがつっかえるため、空欄(0)を許容する。
-              実際の下限は送信時 (handleCreateInvite) に 1 以上へ丸める。 */}
           <FormField
             id="max-uses"
-            label="最大使用回数"
+            label={`最大使用回数${inviteSettings.maxUses === 0 ? "（無制限）" : ""}`}
             type="number"
+            min={0}
             max={100}
             value={inviteSettings.maxUses}
+            placeholder={inviteSettings.maxUses === 0 ? "無制限" : "1"}
             onChange={(e) => {
               const n = parseInt(e.target.value);
               setInviteSettings({ ...inviteSettings, maxUses: Number.isNaN(n) ? 0 : Math.max(0, n) });
             }}
           />
+          <p className="-mt-1 text-[10px] text-muted-foreground" aria-live="polite">
+            0を入力すると無制限です（現在: {inviteSettings.maxUses === 0 ? "無制限" : `${inviteSettings.maxUses}回`}）。
+          </p>
           <FormField
             id="expires"
             label="有効期限（時間、最大168時間/7日間）"
@@ -493,7 +562,7 @@ function MembersContent() {
                       <Badge variant="warning">上限到達</Badge>
                     ) : null}
                     <span className="text-sm text-muted-foreground">
-                      使用: {token.usedCount}/{token.maxUses || "∞"}
+                      使用: {token.usedCount}/{token.maxUses == null || token.maxUses === 0 ? "無制限" : token.maxUses}
                     </span>
                     <span className="text-sm text-muted-foreground">
                       期限:{" "}
@@ -696,28 +765,70 @@ function MembersContent() {
       <Card>
         <CardHeader>
           <CardTitle>ロールと権限</CardTitle>
-          <CardDescription>サークル内の各ロールで利用できる機能</CardDescription>
+          <CardDescription>✓ は利用可、× は利用不可です。メンバーの追加・変更などはロールの権限表に加え、実ロールによるオーナー判定も適用されます。</CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="grid gap-4 md:grid-cols-2">
-            {rolesData &&
-              rolesData.filter((roleInfo) => roleInfo.role === "circle_manager" || roleInfo.role === "circle_admin" || roleInfo.role === "circle_staff").map((roleInfo) => (
-                <div
-                  key={roleInfo.role}
-                  className="p-4 border-thick border-border space-y-2"
-                >
-                  <div className="flex items-center gap-2">
-                    <Badge variant={getRoleBadgeVariant(roleInfo.role)}>
-                      {ROLE_NAMES[roleInfo.role as RoleType] || roleInfo.role}
-                    </Badge>
-                  </div>
-                  <p className="text-sm text-muted-foreground leading-relaxed">
-                    権限: {roleInfo.permissions
-                      .filter((p) => staffExtensionEnabled || !p.startsWith("staff:"))
-                      .map(p => PERMISSION_NAMES[p] || p).join("、 ") || "なし"}
-                  </p>
-                </div>
-              ))}
+          {advancedPermissions === false && (
+            <div className="mb-4 border-l-thick border-warning pl-3 text-sm leading-relaxed" role="note">
+              高度な権限管理が OFF の場合、circle_staff は通常機能の権限判定で circle_manager 相当になります。メンバー管理などの操作では、実ロールに基づきオーナーまたはイベント管理者かどうかを別途確認します。
+              オーナーまたはイベント管理者は、この画面から circle_admin（管理者）を付与できます。
+              {role === ROLES.EVENT_MANAGER && (
+                <p className="mt-2">
+                  ロールごとに権限を分ける場合は
+                  <Link to="/event/dashboard" className="ml-1 text-info underline underline-offset-2">
+                    イベント管理を開き
+                  </Link>
+                  、左メニューの「管理」→「イベント設定」→「高度な権限管理」を ON にしてください。
+                </p>
+              )}
+            </div>
+          )}
+          {/* 2026-10-16: 表を横スクロールしても、各行の権限名を追えるよう左端を固定する。 */}
+          <div className="max-w-full overflow-x-auto">
+            <table className="w-full min-w-[640px] border-collapse text-left text-xs font-mono" aria-label="ロール別の権限">
+              <thead>
+                <tr className="border-b-thick border-border">
+                  <th scope="col" className="sticky left-0 z-20 border-r-thin border-border bg-background p-3">権限</th>
+                  {comparisonRoles.map((roleName) => (
+                    <th key={roleName} scope="col" className="p-3 text-center">
+                      {ROLE_NAMES[roleName]}
+                      {roleName === ROLES.CIRCLE_STAFF && advancedPermissions === false && (
+                        <span className="block text-[10px] font-normal text-muted-foreground">通常機能: {ROLE_NAMES[ROLES.CIRCLE_MANAGER]}相当</span>
+                      )}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {permissionRows.map((permission) => (
+                  <tr key={permission} className="border-b-thin border-border">
+                    <th scope="row" className="sticky left-0 z-10 border-r-thin border-border bg-background p-3 font-normal">
+                      {PERMISSION_NAMES[permission] || permission}
+                    </th>
+                    {comparisonRoles.map((roleName) => {
+                      const effectiveRoleName = roleName === ROLES.CIRCLE_STAFF && advancedPermissions === false
+                        ? ROLES.CIRCLE_MANAGER
+                        : roleName;
+                      const roleInfo = comparableRoleData.find((item) => item.role === effectiveRoleName);
+                      const allowed = roleInfo?.permissions.includes(permission) ?? false;
+                      return (
+                        <td key={roleName} className="p-3 text-center" aria-label={allowed ? "利用可" : "利用不可"}>
+                          {allowed ? (
+                            <Check className="mx-auto h-4 w-4 text-success" aria-hidden="true" />
+                          ) : (
+                            <X className="mx-auto h-4 w-4 text-muted-foreground" aria-hidden="true" />
+                          )}
+                          <span className="sr-only">{allowed ? "利用可" : "利用不可"}</span>
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+                {permissionRows.length === 0 && (
+                  <tr><td colSpan={comparisonRoles.length + 1} className="p-4 text-center text-muted-foreground">権限情報を読み込めません</td></tr>
+                )}
+              </tbody>
+            </table>
           </div>
         </CardContent>
       </Card>

@@ -66,7 +66,7 @@ export function CircleFormModal({ eventId, isOpen, onClose, circle }: CircleForm
       <Modal
         isOpen={isOpen}
         onClose={handleOverlayClose}
-        title={isEdit ? `[サークル編集: ${circle?.name}]` : "[新規サークル登録]"}
+        title={isEdit ? `「${circle?.name}」を編集` : "サークルを登録"}
       >
         {isEdit && <EditModeBanner saveStatus={saveStatus} />}
 
@@ -112,7 +112,7 @@ export function CircleFormModal({ eventId, isOpen, onClose, circle }: CircleForm
 
       <UnsavedChangesDialog
         isOpen={isConfirmOpen}
-        title="[確認: 保存されていないサークル登録があります]"
+        title="入力内容を保存せずに閉じますか？"
         description="サークル追加を完了するには「保存して閉じる」を押してください。破棄する場合は「保存せず閉じる」を選択してください。"
         onConfirm={handleSaveAndClose}
         onDiscard={handleDiscardAndClose}

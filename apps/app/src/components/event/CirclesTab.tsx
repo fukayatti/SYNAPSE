@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import { circleApi, activeWaitTimeReport, recentWaitTimeReports } from "@/lib/api";
+import { circleApi, type Event } from "@/lib/api";
 import { Card, CardTitle, CardContent, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -12,13 +12,16 @@ import { toast } from "sonner";
 
 // モーダル
 import { CircleFormModal } from "./CircleFormModal";
+import { CircleCreateWizard } from "@/components/circle/CircleCreateWizard";
 import { CircleCreateLinkModal } from "./CircleCreateLinkModal";
 import { CircleManageModal } from "./CircleManageModal";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { getAuthInfo, saveAuthInfo, useAuth } from "@/hooks/useCircleAuth";
+import { groupCirclesByStoreArea } from "@/lib/store-areas";
 
 interface CirclesTabProps {
   eventId: string;
+  eventData?: Event;
   circles: any[] | undefined;
   circlesLoading: boolean;
   /** サークル一覧取得の isError (省略時はエラー分岐を表示しない) */
@@ -29,6 +32,7 @@ interface CirclesTabProps {
 
 export function CirclesTab({
   eventId,
+  eventData,
   circles,
   circlesLoading,
   circlesError,
@@ -40,6 +44,7 @@ export function CirclesTab({
   const { role: effectiveRole, eventId: effectiveEventId } = useAuth();
 
   const [isFormOpen, setIsFormOpen] = useState(false);
+  const [isCreateWizardOpen, setIsCreateWizardOpen] = useState(false);
   const [selectedCircle, setSelectedCircle] = useState<any | null>(null);
   const [isCreateLinkOpen, setIsCreateLinkOpen] = useState(false);
 
@@ -64,8 +69,12 @@ export function CirclesTab({
   });
 
   const handleOpenAdd = () => {
+    if (!eventData) {
+      toast.error("イベント情報の読み込み後にもう一度お試しください");
+      return;
+    }
     setSelectedCircle(null);
-    setIsFormOpen(true);
+    setIsCreateWizardOpen(true);
   };
 
   const handleOpenEdit = (circle: any) => {
@@ -92,6 +101,27 @@ export function CirclesTab({
   const uniqueCircles = circles
     ? Array.from(new Map(circles.map(c => [c.id, c])).values())
     : undefined;
+  const circleGroups = groupCirclesByStoreArea(uniqueCircles ?? [], eventData?.storeAreas);
+
+  if (isCreateWizardOpen && eventData) {
+    return (
+      <div className="space-y-5 p-2 sm:p-5">
+        <CircleCreateWizard
+          event={eventData}
+          onCancel={() => setIsCreateWizardOpen(false)}
+          onCreated={(id, name) => {
+            queryClient.invalidateQueries({ queryKey: ["circles", eventId] });
+            const authInfo = getAuthInfo();
+            if (authInfo && effectiveRole === "event_manager" && effectiveEventId === eventId) {
+              saveAuthInfo({ ...authInfo, circleId: id, circleName: name, eventId });
+              window.sessionStorage.setItem("circleName", name);
+            }
+            navigate("/circle/dashboard/menu", { replace: true });
+          }}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6 font-mono text-foreground">
@@ -100,18 +130,18 @@ export function CirclesTab({
           <Building2 className="h-4 w-4" />
           サークル一覧 ({uniqueCircles?.length || 0})
         </h2>
-        <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+        <div className="grid w-full gap-2 sm:w-auto sm:grid-cols-2">
           <Button
             onClick={() => setIsCreateLinkOpen(true)}
             variant="outline"
-            className="w-full rounded-none border-thick h-8 text-[11px] uppercase font-bold transition-all shadow-none px-3 sm:w-auto"
+            className="h-auto min-h-10 w-full whitespace-normal rounded-none border-thick px-3 text-[11px] font-bold uppercase leading-tight shadow-none transition-all sm:w-auto"
           >
             <Link2 className="mr-1.5 h-3.5 w-3.5" />
             サークル作成リンクを作成
           </Button>
           <Button
             onClick={handleOpenAdd}
-            className="w-full rounded-none border-thick border-primary bg-primary text-primary-foreground hover:bg-background hover:text-foreground h-8 text-[11px] uppercase font-bold transition-all shadow-none px-3 sm:w-auto"
+            className="h-auto min-h-10 w-full whitespace-normal rounded-none border-thick border-primary bg-primary px-3 text-[11px] font-bold uppercase leading-tight text-primary-foreground shadow-none transition-all hover:bg-background hover:text-foreground sm:w-auto"
           >
             <Plus className="mr-1.5 h-3.5 w-3.5" />
             新規追加
@@ -120,7 +150,7 @@ export function CirclesTab({
       </div>
 
       {circlesLoading ? (
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+        <div className="grid grid-cols-2 gap-2 sm:gap-4 lg:grid-cols-3">
           {Array.from({ length: 3 }).map((_, i) => (
             <Skeleton key={i} className="h-40" />
           ))}
@@ -128,27 +158,38 @@ export function CirclesTab({
       ) : circlesError ? (
         <ErrorState error={error} onRetry={onRetry} />
       ) : uniqueCircles && uniqueCircles.length > 0 ? (
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {uniqueCircles.map((cir) => (
+        <div className="space-y-5">
+          {circleGroups.map((group) => (
+            <section key={group.area?.id ?? "unassigned"} className="space-y-2">
+              <h3 className="flex items-center justify-between border-b-thin border-border pb-2 text-xs font-bold">
+                <span>{group.area?.name ?? "エリア未設定"}</span>
+                <span className="text-[10px] text-muted-foreground">{group.circles.length}サークル</span>
+              </h3>
+              {group.circles.length > 0 ? (
+                <div className="grid grid-cols-2 gap-2 sm:gap-4 lg:grid-cols-3">
+                  {/* 2026-10-16: カードを画面いっぱいの1列にせず、スマートフォンでも2列で並べる。 */}
+                  {group.circles.map((cir) => (
             <Card
               key={cir.id}
-              className="border-thick border-border rounded-none bg-background flex flex-col justify-between shadow-none hover:border-neutral-800 transition-all p-3"
+              className="flex min-w-0 flex-col justify-between rounded-none border-thick border-border bg-background p-2 shadow-none transition-all hover:border-neutral-800 sm:p-3"
             >
               <div>
                 <div className="flex justify-between items-start border-b-thin border-border pb-2 mb-2">
-                  <CardTitle className="text-xs font-bold uppercase tracking-wide flex items-center gap-1.5 truncate max-w-[80%]">
+                  <CardTitle className="flex min-w-0 flex-1 items-center gap-1.5 break-words text-[11px] font-bold uppercase tracking-wide sm:text-xs">
                     <Building2 className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
                     {cir.name}
                   </CardTitle>
                   <div className="flex gap-1 shrink-0">
                     <button
-                      className="p-0.5 text-muted-foreground hover:text-primary transition-all rounded-none cursor-pointer border-thick border-transparent hover:border-border hover:bg-muted"
+                      aria-label={`${cir.name}を編集`}
+                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-none border-thick border-transparent text-muted-foreground transition-all hover:border-border hover:bg-muted hover:text-primary focus-visible:border-border sm:h-10 sm:w-10"
                       onClick={() => handleOpenEdit(cir)}
                     >
                       <Edit className="h-3.5 w-3.5" />
                     </button>
                     <button
-                      className="p-0.5 text-destructive hover:text-neutral-800 transition-all rounded-none cursor-pointer border-thick border-transparent hover:border-border hover:bg-muted"
+                      aria-label={`${cir.name}を削除`}
+                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-none border-thick border-transparent text-destructive transition-all hover:border-border hover:bg-muted hover:text-neutral-800 focus-visible:border-border sm:h-10 sm:w-10"
                       onClick={() => handleOpenDelete(cir)}
                     >
                       <Trash2 className="h-3.5 w-3.5" />
@@ -156,56 +197,22 @@ export function CirclesTab({
                   </div>
                 </div>
                 {cir.description && (
-                  <p className="text-[10px] text-muted-foreground truncate mb-3">{cir.description}</p>
+                  <p className="mb-3 break-words text-[10px] text-muted-foreground">{cir.description}</p>
                 )}
-                {(() => {
-                  const report = activeWaitTimeReport(cir.settings);
-                  return <p className="mb-3 text-[10px] font-bold">待ち時間: {report ? `約${report.minutes}分（${report.minutesAgo}分前）` : "未報告"}</p>;
-                })()}
-                {(() => {
-                  // 2026-10-07 (#9): 中央から直近の待ち時間と平均を見て、報告値の変化を把握できるようにする。
-                  const reports = recentWaitTimeReports(cir.settings);
-                  if (reports.length === 0) return null;
-                  const average = Math.round(reports.reduce((sum, item) => sum + item.minutes, 0) / reports.length);
-                  const maxMinutes = Math.max(10, ...reports.map((item) => item.minutes));
-                  return (
-                    <div className="mb-4" aria-label="待ち時間の推移">
-                      <div className="mb-1 flex items-center justify-between text-[9px] text-muted-foreground">
-                        <span>直近 {reports.length} 回の推移</span>
-                        <span>平均 約{average}分</span>
-                      </div>
-                      <div className="flex h-12 items-end gap-1" role="img" aria-label={`直近${reports.length}回の待ち時間: ${reports.map((item) => `${item.minutes}分`).join("、")}`}>
-                        {reports.map((item) => {
-                          const height = Math.max(3, Math.round((item.minutes / maxMinutes) * 24));
-                          const reportedDate = new Date(item.reportedAt);
-                          const timeLabel = reportedDate.toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" });
-                          return (
-                            <div key={item.reportedAt} className="flex min-w-0 flex-1 flex-col items-center justify-end gap-0.5" title={`${reportedDate.toLocaleString("ja-JP")} · 約${item.minutes}分`}>
-                              <span className="text-[8px] tabular-nums">{item.minutes}</span>
-                              <div className="w-full bg-info/70" style={{ height: `${height}px` }} />
-                              <span className="text-[8px] text-muted-foreground">{timeLabel}</span>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  );
-                })()}
                 <div className="text-[10px] text-muted-foreground space-y-1 font-mono mb-4">
                   {/* 2026-07-07 (Phase 3b): サークル作成がセルフサービス化されたため
                       「代表者」= 作成時に circle_manager になったユーザーを表示する
                       (PIN/管理者代理作成の概念は廃止)。 */}
                   <p>管理者: {cir.managerName || "未設定"}</p>
-                  {cir.managerEmail && <p className="truncate">メール: {cir.managerEmail}</p>}
-                  <p className="opacity-50 text-[8px]">ID: {cir.id}</p>
+                  {cir.managerEmail && <p className="break-all">メール: {cir.managerEmail}</p>}
                 </div>
               </div>
               
-              <div className="flex gap-2">
+              <div className="grid grid-cols-1 gap-2 min-[420px]:grid-cols-2">
                 <Button
                   variant="outline"
                   size="sm"
-                  className="flex-1 border-thick border-border hover:bg-neutral-100 rounded-none uppercase font-bold tracking-wider text-[10px] h-8 shadow-none"
+                  className="h-10 w-full border-thick border-border rounded-none text-[10px] font-bold uppercase tracking-wider shadow-none hover:bg-neutral-100"
                   onClick={() => setManageCircle(cir)}
                 >
                   <Settings2 className="h-3.5 w-3.5 mr-1" /> 運営
@@ -213,13 +220,19 @@ export function CirclesTab({
                 <Button
                   variant="outline"
                   size="sm"
-                  className="flex-1 border-thick border-border hover:bg-neutral-100 rounded-none uppercase font-bold tracking-wider text-[10px] h-8 shadow-none"
+                  className="h-10 w-full border-thick border-border rounded-none text-[10px] font-bold uppercase tracking-wider shadow-none hover:bg-neutral-100"
                   onClick={() => handleSwitchToCircle(cir)}
                 >
                   管理へ切替
                 </Button>
               </div>
             </Card>
+                  ))}
+                </div>
+              ) : (
+                <p className="border-thin border-border p-3 text-[10px] text-muted-foreground">このエリアのサークルはまだありません。</p>
+              )}
+            </section>
           ))}
         </div>
       ) : (
@@ -248,6 +261,7 @@ export function CirclesTab({
       {/* サークル運営管理モーダル (拡張機能ON/OFF + ロール調整) */}
       <CircleManageModal
         circle={manageCircle}
+        event={eventData}
         isOpen={!!manageCircle}
         onClose={() => setManageCircle(null)}
       />
@@ -255,8 +269,8 @@ export function CirclesTab({
       {/* 削除確認ダイアログ (破壊的操作のため ConfirmDialog を使用) */}
       <ConfirmDialog
         isOpen={isDeleteOpen}
-        title="[確認: サークルの削除]"
-        description={`本当にサークル「${circleToDelete?.name}」を削除してよろしいですか？この操作はサークルに紐づくメニューや売上データもすべて削除されます。`}
+        title="サークルを削除しますか？"
+        description={`サークル「${circleToDelete?.name}」を一覧から削除します。関連するメニューや運営画面も利用できなくなります。`}
         confirmLabel="削除する"
         isPending={deleteCircleMutation.isPending}
         onConfirm={() => circleToDelete && deleteCircleMutation.mutate(circleToDelete.id)}

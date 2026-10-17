@@ -33,6 +33,7 @@ export default function CouponRedeem() {
         title: data.title,
         kind: data.kind,
         discountAmount: data.discountAmount,
+        discountPercent: data.discountPercent,
         freeUnits: data.freeUnits,
         menuIds: data.menuIds,
         toppingIds: data.toppingIds,
@@ -62,7 +63,9 @@ export default function CouponRedeem() {
               「{result.title}」—{" "}
               {result.kind === "free_topping"
                 ? "対象トッピングが無料"
-                : `¥${result.discountAmount?.toLocaleString()}引き`}
+                : result.kind === "cart_percentage"
+                  ? `カート全体から${result.discountPercent}%引き`
+                  : `¥${result.discountAmount?.toLocaleString()}引き`}
               <br />
               メニュー画面の「クーポン」欄から、使うかどうかを選んで注文してください(自動では適用されません)。
             </p>

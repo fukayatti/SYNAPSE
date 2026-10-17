@@ -2,7 +2,7 @@
 import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { CircleAuthGuard, getAuthInfo, useAuth } from "@/hooks/useCircleAuth";
-import { menuApi, toppingApi, orderApi, circleApi, eventApi, wristbandApi, preOrderApi, parseCircleSettings, parseEventPaymentMethods, activeWaitTimeReport, type MenuWithToppings, type Topping } from "@/lib/api";
+import { menuApi, toppingApi, orderApi, circleApi, eventApi, wristbandApi, preOrderApi, couponApi, parseCircleSettings, parseEventPaymentMethods, activeWaitTimeReport, type MenuWithToppings, type Topping } from "@/lib/api";
 import { extractIdFromCode, cn } from "@/lib/utils";
 import { undoableAction } from "@/lib/toast-undo";
 import { ModSandbox } from "@/components/ModSandbox";
@@ -28,6 +28,8 @@ import { useOrderSubmission } from "@/features/orders/use-order-submission";
 import type { CreateOrderInput } from "@fesflow/config/order-contract";
 import { ToppingSelection, parseToppingCategoryMaximums, parseToppingCategoryMinimums } from "@/components/menu/ToppingSelection";
 import { MenuCategoryFilter, menuCategoryKey } from "@/components/menu/MenuCategoryFilter";
+import { parseJapaneseAllergens, type JapaneseAllergen } from "@fesflow/config/allergens";
+import { getCartAllergyWarnings, OrderAllergyWarning } from "@/features/orders/allergy-check";
 
 // カートは「行 (line)」単位。同じメニューでもトッピング構成が違えば別行として持てるように
 // menuId ではなく lineId をキーにする (トッピングあり/なしを同時注文したい要件のため)。
@@ -150,6 +152,9 @@ function MenuCard({
           className="w-full h-10 sm:h-11 border-thick border-border bg-primary text-primary-foreground font-mono text-xs sm:text-sm font-bold uppercase rounded-none hover:bg-background hover:text-foreground transition-all"
           onClick={menu.toppingWizardEnabled && availableToppings.length > 0 ? openToppingWizard : handleAdd}
           disabled={menu.soldOut || (!menu.toppingWizardEnabled && !selectionReady)}
+          aria-label={menu.toppingWizardEnabled && availableToppings.length > 0
+            ? `${menu.name}のトッピングを選択`
+            : `${menu.name}をカートに追加。トッピング込み ¥${(menu.price + selectedExtra).toLocaleString()}`}
         >
           {menu.toppingWizardEnabled && availableToppings.length > 0
             ? "選択"
@@ -200,6 +205,7 @@ function MenuCard({
 // カート本体。デスクトップのサイドバーとモバイルのスライドアップの両方で使い回す。
 function CartBody({
   cart,
+  idPrefix,
   menuMap,
   peopleCount,
   activeCustomer,
@@ -211,15 +217,19 @@ function CartBody({
   onSubmit,
   onClear,
   total,
-  preOrderCouponApplied,
+  isPreOrder,
+  registerCoupons,
+  registerCouponId,
+  onSetRegisterCoupon,
   paymentMethods,
   paymentMethod,
   onSetPayment,
 }: {
   cart: CartLine[];
+  idPrefix: "desktop" | "mobile";
   menuMap: Map<string, MenuWithToppings>;
   peopleCount: number;
-  activeCustomer: { userId: string; wristbandId: string | null } | null;
+  activeCustomer: { userId: string; wristbandId: string | null; familyBandCount: number; allergies: JapaneseAllergen[] | null } | null;
   submitting: boolean;
   onToggleTopping: (lineId: string, topping: Topping) => void;
   onUpdateQuantity: (lineId: string, delta: number) => void;
@@ -228,7 +238,10 @@ function CartBody({
   onSubmit: () => void;
   onClear: () => void;
   total: number;
-  preOrderCouponApplied: boolean;
+  isPreOrder: boolean;
+  registerCoupons: { id: string; title: string; discountPercent: number | null }[];
+  registerCouponId: string;
+  onSetRegisterCoupon: (id: string) => void;
   // 支払い方法 (2026-07-12)。要素が2つ以上のときだけ選択UIを出す。
   paymentMethods: string[];
   paymentMethod: string;
@@ -236,6 +249,9 @@ function CartBody({
 }) {
   // 支払い方法が2つ以上あるのに未選択なら確定を止める。
   const needsPayment = paymentMethods.length > 1 && !paymentMethod;
+  // 2026-10-16: カート操作の状態を読み上げ可能にし、数量変更後の合計と選択状態を追えるようにする。
+  const peopleCountId = `${idPrefix}-people-count`;
+  const allergyWarnings = getCartAllergyWarnings(cart, menuMap, activeCustomer?.allergies ?? null);
   return (
     // 2026-07-16: 親 (aside / モバイルのスライドアップパネル) は max-height + overflow-hidden で
     // 高さの上限を持つコンテナ。ここを h-full ではなく flex-1 min-h-0 にすることで、
@@ -261,8 +277,11 @@ function CartBody({
                     <p className="font-bold text-sm truncate">{line.menuName}</p>
                     <p className="text-xs text-muted-foreground">¥{line.menuPrice.toLocaleString()}</p>
                   </div>
+                  {/* 2026-10-16: アイコンだけの操作にも商品名を含む読み上げ名を付ける。 */}
                   <button
+                    type="button"
                     onClick={() => onRemoveLine(line.lineId)}
+                    aria-label={`${line.menuName}をカートから削除`}
                     className="w-8 h-8 border-thin border-border flex items-center justify-center hover:bg-error hover:text-white shrink-0 transition-all"
                   >
                     <Trash2 className="h-3 w-3" />
@@ -273,7 +292,7 @@ function CartBody({
                 {allowed.length > 0 && (
                   <div className="space-y-1.5">
                     <p className="text-xs font-bold uppercase tracking-wider">トッピング:</p>
-                    <div className="flex flex-wrap gap-1.5">
+                    <div className="space-y-1.5">
                       {allowed.map((topping) => {
                         const on = line.toppings.some((t) => t.toppingId === topping.id);
                         return (
@@ -282,19 +301,22 @@ function CartBody({
                             type="button"
                             disabled={topping.soldOut}
                             onClick={() => onToggleTopping(line.lineId, topping)}
+                            aria-pressed={on}
                             className={cn(
-                              "flex items-center gap-1.5 border-thick rounded-none px-2 py-1 text-xs font-bold transition-all disabled:opacity-40 disabled:cursor-not-allowed",
+                              "flex min-h-10 w-full items-center justify-between gap-2 border-thick rounded-none px-2 py-1 text-left text-xs font-bold transition-all disabled:opacity-40 disabled:cursor-not-allowed",
                               on
                                 ? "border-primary bg-primary text-primary-foreground"
                                 : "border-border bg-background hover:bg-muted"
                             )}
                           >
-                            {topping.imagePath && (
-                              <img src={resolveAssetUrl(topping.imagePath)} alt="" className="h-5 w-5 object-cover border-thin border-current shrink-0" />
-                            )}
-                            <span>{topping.name}</span>
-                            <span className={on ? "opacity-80" : "text-muted-foreground"}>
-                              {topping.price >= 0 ? `+¥${topping.price}` : `-¥${Math.abs(topping.price)}`}
+                            <span className="flex min-w-0 items-center gap-2">
+                              {topping.imagePath && (
+                                <img src={resolveAssetUrl(topping.imagePath)} alt="" className="h-5 w-5 object-cover border-thin border-current shrink-0" />
+                              )}
+                              <span className="break-words">{topping.name}</span>
+                            </span>
+                            <span className={cn("shrink-0 tabular-nums", on ? "opacity-80" : "text-muted-foreground")}>
+                              {topping.price >= 0 ? `+¥${topping.price.toLocaleString()}` : `-¥${Math.abs(topping.price).toLocaleString()}`}
                             </span>
                           </button>
                         );
@@ -305,16 +327,20 @@ function CartBody({
 
                 {/* 数量 */}
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center border-thin border-border">
+                  <div className="flex items-center border-thin border-border" role="group" aria-label={`${line.menuName}の数量`}>
                     <button
+                      type="button"
                       onClick={() => onUpdateQuantity(line.lineId, -1)}
+                      aria-label={`${line.menuName}の数量を1減らす`}
                       className="w-10 h-10 flex items-center justify-center hover:bg-primary hover:text-primary-foreground transition-all border-r-thin border-border"
                     >
                       <Minus className="h-4 w-4" />
                     </button>
-                    <span className="w-10 text-center font-black text-lg">{line.quantity}</span>
+                    <span className="w-10 text-center font-black text-lg" aria-live="polite" aria-atomic="true">{line.quantity}</span>
                     <button
+                      type="button"
                       onClick={() => onUpdateQuantity(line.lineId, 1)}
+                      aria-label={`${line.menuName}の数量を1増やす`}
                       className="w-10 h-10 flex items-center justify-center hover:bg-primary hover:text-primary-foreground transition-all border-l-thin border-border"
                     >
                       <Plus className="h-4 w-4" />
@@ -333,11 +359,12 @@ function CartBody({
           これが無いと flex の既定 shrink:1 により極端なケースで確定ボタンごと潰れうる。 */}
       <div className="shrink-0 p-3 sm:p-4 border-t-thick border-border space-y-3 bg-background">
         <div className="flex items-center gap-3">
-          <Label htmlFor="peopleCount" className="font-mono text-xs uppercase tracking-wider whitespace-nowrap">来店人数</Label>
+          {/* 2026-10-16: PC用とモバイル用のカートが同時にDOMへあるため、入力IDを分けてラベル先を一意にする。 */}
+          <Label htmlFor={peopleCountId} className="font-mono text-xs uppercase tracking-wider whitespace-nowrap">来店人数</Label>
           {/* 入力中は 0/空を許容し、フォーカスを外した時に 1 未満なら 1 へ戻す
               (min=1 だと打ち直しのたびに値が押し戻されて入力しづらいため)。 */}
           <Input
-            id="peopleCount"
+            id={peopleCountId}
             type="number"
             inputMode="numeric"
             className="h-10 text-center font-bold border-thick border-border rounded-none"
@@ -346,13 +373,37 @@ function CartBody({
             onBlur={() => { if (peopleCount < 1) onSetPeople(1); }}
           />
         </div>
-        <div className="flex justify-between items-center border-thick border-border px-4 py-3 bg-muted">
+        {/* 2026-10-17: 来店人数はラベルで区別し、家族バンド数との関係を説明文で繰り返さない。 */}
+        {registerCoupons.length > 0 && (
+          <div className="space-y-1.5">
+            <Label htmlFor={`${idPrefix}-register-coupon`} className="font-mono text-xs uppercase tracking-wider">レジ専用割引券</Label>
+            <select
+              id={`${idPrefix}-register-coupon`}
+              value={registerCouponId}
+              onChange={(event) => onSetRegisterCoupon(event.target.value)}
+              disabled={isPreOrder}
+              className="h-10 w-full border-thick border-border bg-background px-2 text-sm font-bold disabled:opacity-50"
+            >
+              <option value="">適用しない</option>
+              {registerCoupons.map((coupon) => (
+                <option key={coupon.id} value={coupon.id}>{coupon.title} ({coupon.discountPercent}％引き)</option>
+              ))}
+            </select>
+            {isPreOrder && <p className="text-[10px] text-muted-foreground">事前注文には適用できません。</p>}
+            {!isPreOrder && registerCouponId && (() => {
+              const selected = registerCoupons.find((coupon) => coupon.id === registerCouponId);
+              const discount = selected?.discountPercent
+                ? Math.floor((checkoutTotal(cart, null) * selected.discountPercent) / 100)
+                : 0;
+              return discount > 0 ? <p className="text-xs font-bold text-primary">割引額: −¥{discount.toLocaleString()}</p> : null;
+            })()}
+          </div>
+        )}
+        <div className="flex justify-between items-center border-thick border-border px-4 py-3 bg-muted" role="status" aria-live="polite" aria-atomic="true">
           <span className="font-mono text-sm uppercase tracking-wider">合計金額</span>
           <span className="font-headline text-2xl sm:text-3xl font-black">¥{total.toLocaleString()}</span>
         </div>
-        {preOrderCouponApplied && (
-          <p className="text-xs text-muted-foreground">事前注文に適用済みのクーポンを反映した金額です。</p>
-        )}
+        {isPreOrder && <p className="text-xs text-muted-foreground">事前注文時に確定した金額です。</p>}
 
         {/* 支払い方法の選択 (対応が2つ以上のサークルのみ表示。1つなら自動採用) */}
         {paymentMethods.length > 1 && (
@@ -364,6 +415,7 @@ function CartBody({
                   key={m}
                   type="button"
                   onClick={() => onSetPayment(m)}
+                  aria-pressed={paymentMethod === m}
                   className={cn(
                     "border-thick rounded-none px-2 py-2.5 text-sm font-bold transition-all",
                     paymentMethod === m
@@ -379,22 +431,32 @@ function CartBody({
         )}
         {activeCustomer && (
           <div className="border-thick border-border bg-muted/20 p-2 text-xs font-mono">
-            選択中の顧客: [{activeCustomer.userId}]
-            {activeCustomer.wristbandId && ` (リストバンド: ${activeCustomer.wristbandId})`}
+            <div>来場者: {activeCustomer.wristbandId ?? activeCustomer.userId}</div>
+            <div className="mt-1 font-bold">登録バンド {activeCustomer.familyBandCount}本</div>
           </div>
         )}
-        {(!activeCustomer || cart.length === 0) && (
-          <div className="border-thick border-destructive bg-destructive/10 p-2 space-y-1 font-mono text-[10px] uppercase tracking-wider text-destructive">
-            {!activeCustomer && <p>[顧客未スキャン — リストバンド/QRをスキャンしてください]</p>}
-            {cart.length === 0 && <p>[カートが空です — 商品を選択してください]</p>}
-          </div>
-        )}
+        <OrderAllergyWarning
+          warnings={allergyWarnings}
+          familyAllergies={activeCustomer?.allergies ?? null}
+          enabled={!!activeCustomer && cart.length > 0}
+        />
+        {/* 2026-10-17: 不足状態は確定ボタンの文言に集約し、画面上部の案内と重ねない。 */}
         <Button
           className="w-full h-14 border-thick border-border bg-primary text-primary-foreground font-mono text-base font-black uppercase rounded-none hover:bg-background hover:text-foreground transition-all"
           onClick={onSubmit}
           disabled={cart.length === 0 || submitting || !activeCustomer || needsPayment}
         >
-          {submitting ? "注文中..." : needsPayment ? "支払い方法を選択" : "注文を確定する"}
+          {submitting
+            ? "確定中…"
+            : needsPayment
+              ? "支払い方法を選択"
+              : !activeCustomer
+                ? "来場者を確認"
+                : cart.length === 0
+                  ? "商品を選択"
+                  : isPreOrder
+                    ? "受取を確定"
+                    : "注文を確定する"}
         </Button>
         {cart.length > 0 && (
           <Button
@@ -425,10 +487,17 @@ function RegisterPageContent() {
   const [isCustomerQrModalOpen, setIsCustomerQrModalOpen] = useState(false);
   const [isCartPanelOpen, setIsCartPanelOpen] = useState(false);
   const [scannedCode, setScannedCode] = useState("");
-  const [activeCustomer, setActiveCustomer] = useState<{ userId: string; wristbandId: string | null } | null>(null);
+  const [activeCustomer, setActiveCustomer] = useState<{ userId: string; wristbandId: string | null; familyBandCount: number; allergies: JapaneseAllergen[] | null } | null>(null);
   const [activePreOrderId, setActivePreOrderId] = useState<string | null>(null);
   const [activePreOrderTotalPrice, setActivePreOrderTotalPrice] = useState<number | null>(null);
-  const [activePreOrderCouponApplied, setActivePreOrderCouponApplied] = useState(false);
+  const [registerCouponId, setRegisterCouponId] = useState("");
+  const { data: registerCoupons = [] } = useQuery({
+    queryKey: ["register-coupons", circleId],
+    queryFn: () => couponApi.registerOptions(circleId),
+    enabled: !!circleId,
+    refetchInterval: 60_000,
+  });
+  useEffect(() => setRegisterCouponId(""), [circleId]);
 
   const { data: circle } = useQuery({
     queryKey: ["circle", circleId],
@@ -444,7 +513,7 @@ function RegisterPageContent() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["circle", circleId] });
       queryClient.invalidateQueries({ queryKey: ["circles", circle?.eventId] });
-      toast.success("待ち時間を本部・来場者へ報告しました（30分間有効）");
+      toast.success("待ち時間を報告しました");
     },
     onError: (error: any) => toast.error(error.message || "待ち時間を報告できませんでした"),
   });
@@ -503,8 +572,10 @@ function RegisterPageContent() {
         setActiveCustomer({
           userId: data.user.id,
           wristbandId: data.wristband?.id || null,
+          familyBandCount: data.familyBandCount ?? 0,
+          allergies: parseJapaneseAllergens(data.user.allergies),
         });
-        toast.success(`顧客を特定しました: ${data.wristband?.id || data.user.id}`);
+        toast.success("来場者を確認しました");
         setScannedCode("");
       } else {
         toast.error("ユーザーが見つかりませんでした");
@@ -522,7 +593,6 @@ function RegisterPageContent() {
     if (!activeCustomer) {
       setActivePreOrderId(null);
       setActivePreOrderTotalPrice(null);
-      setActivePreOrderCouponApplied(false);
       return;
     }
 
@@ -537,9 +607,9 @@ function RegisterPageContent() {
         if (!isMounted) return;
         if (pendingOrders.length > 0) {
           const po = pendingOrders[0]!;
+          setRegisterCouponId("");
           setActivePreOrderId(po.id);
           setActivePreOrderTotalPrice(po.totalPrice);
-          setActivePreOrderCouponApplied((po.couponSlugs?.length ?? 0) > 0);
           setCart(
             po.items.map((item) => ({
               lineId: crypto.randomUUID(),
@@ -566,15 +636,15 @@ function RegisterPageContent() {
           });
         } else {
           setActivePreOrderId(null);
+          setRegisterCouponId("");
           setActivePreOrderTotalPrice(null);
-          setActivePreOrderCouponApplied(false);
         }
       } catch (err) {
         console.error("Failed to load pre-order items:", err);
         if (isMounted) {
           setActivePreOrderId(null);
+          setRegisterCouponId("");
           setActivePreOrderTotalPrice(null);
-          setActivePreOrderCouponApplied(false);
         }
       }
     };
@@ -592,6 +662,7 @@ function RegisterPageContent() {
     items: cart.map((line) => ({ menuId: line.menuId, quantity: line.quantity, toppingIds: line.toppings.map((t) => t.toppingId) })),
     paymentMethod: paymentMethod || undefined,
     cashierId: getAuthInfo()?.userEmail ?? undefined,
+    registerCouponId: activePreOrderId ? undefined : registerCouponId || undefined,
   } : null;
   const submitOrder = useOrderSubmission(orderInput);
   const createOrder = useMutation({
@@ -602,6 +673,7 @@ function RegisterPageContent() {
       setPeopleCount(1);
       setActiveCustomer(null); // 会計完了後に顧客情報をクリア
       setActivePreOrderId(null);
+      setRegisterCouponId("");
       setIsCartPanelOpen(false);
       // 支払い方法は次の会計で選び直す (単一方法は effect で再セットされる)
       setPaymentMethod("");
@@ -632,6 +704,7 @@ function RegisterPageContent() {
       setPeopleCount(1);
       setActiveCustomer(null);
       setActivePreOrderId(null);
+      setRegisterCouponId("");
       setIsCartPanelOpen(false);
       setPaymentMethod("");
     },
@@ -685,7 +758,13 @@ function RegisterPageContent() {
 
   // 2026-10-08: 店頭受取では事前注文に保存済みの合計を請求額として見せる。
   // 明細の現行価格を足すとクーポン値引きが消えて見え、画面表示とclaim後の記録額がずれる。
-  const getTotalPrice = () => checkoutTotal(cart, activePreOrderId ? activePreOrderTotalPrice : null);
+  const getTotalPrice = () => {
+    const subtotal = checkoutTotal(cart, activePreOrderId ? activePreOrderTotalPrice : null);
+    const selected = activePreOrderId ? null : registerCoupons.find((option) => option.id === registerCouponId);
+    return selected?.discountPercent
+      ? Math.max(0, subtotal - Math.floor((subtotal * selected.discountPercent) / 100))
+      : subtotal;
+  };
   const getTotalCount = () => cartCount(cart);
 
   const handleSubmitOrder = async () => {
@@ -709,14 +788,19 @@ function RegisterPageContent() {
 
   const clearCart = () => {
     const prev = cart;
+    const previousCouponId = registerCouponId;
     undoableAction({
       message: "カートをクリアしました",
       optimistic: () => {
         setCart([]);
         setActivePreOrderId(null);
+        setRegisterCouponId("");
       },
       commit: () => {}, // クライアントのみ (サーバ反映なし)
-      rollback: () => setCart(prev),
+      rollback: () => {
+        setCart(prev);
+        setRegisterCouponId(previousCouponId);
+      },
     });
   };
 
@@ -749,27 +833,18 @@ function RegisterPageContent() {
         isOpen={isCustomerQrModalOpen}
         onClose={() => setIsCustomerQrModalOpen(false)}
         mode="customer"
-        onCustomerScanned={(userId, wristbandId) => setActiveCustomer({ userId, wristbandId })}
+        onCustomerScanned={(userId, wristbandId, familyBandCount, allergies) => setActiveCustomer({ userId, wristbandId, familyBandCount, allergies: parseJapaneseAllergens(allergies) })}
       />
 
       {/* 横幅に余裕がある画面 (xl+) はカートを右サイドバー固定、狭い画面は下部バー+スライドアップ */}
       <div className="xl:flex xl:items-start xl:gap-4">
         {/* ===== メニュー一覧 (メインカラム) ===== */}
-        <div className="flex-1 min-w-0 p-3 sm:p-4 pb-32 xl:pb-4">
+        {/* 2026-10-16: モバイルの固定会計バーが商品ボタンを覆わないよう、バーと安全領域分の余白を予約する。 */}
+        <div className="flex-1 min-w-0 p-3 pb-[calc(10rem+env(safe-area-inset-bottom))] sm:p-4 sm:pb-[calc(11rem+env(safe-area-inset-bottom))] xl:pb-4">
           {/* ヘッダーバー */}
           <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 bg-primary p-3 sm:p-4 text-primary-foreground border-thick border-border mb-4">
-            <h1 className="font-mono text-lg sm:text-2xl font-black uppercase tracking-wider">
-              [レジ - 注文入力]
-            </h1>
+            <h1 className="font-mono text-lg sm:text-2xl font-black uppercase tracking-wider">[レジ]</h1>
             <div className="flex gap-2 flex-wrap">
-              <Button
-                variant="accent"
-                onClick={() => setIsCustomerQrModalOpen(true)}
-                className="h-10 sm:h-12 text-xs sm:text-sm uppercase tracking-wider"
-              >
-                <QrCode className="mr-1 sm:mr-2 h-4 w-4 sm:h-5 sm:w-5" />
-                [顧客スキャン(カメラ)]
-              </Button>
               {preOrderActive && (
                 <Button
                   variant="outline"
@@ -805,23 +880,23 @@ function RegisterPageContent() {
             </div>
           </div>
 
-          {/* 2026-10-07 (#9): 現場スタッフが10分刻みで待ち時間を報告し、30分後は自動的に未報告扱いにする。 */}
-          <section className="mb-4 border-thick border-border bg-muted/40 p-3 font-mono">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <h2 className="text-xs font-black uppercase tracking-wider">[待ち時間を本部・来場者へ報告]</h2>
+          {/* 2026-10-17: レジでは現在値と更新操作だけを短く示し、有効期限の説明を重ねない。 */}
+          <section className="mb-4 border-b-thin border-border pb-3 font-mono">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                <h2 className="text-xs font-black uppercase tracking-wider">待ち時間</h2>
                 {waitTimeReport ? (
-                  <p className="mt-1 text-[10px]">現在の報告: 約{waitTimeReport.minutes}分待ち（{waitTimeReport.minutesAgo}分前）</p>
+                  <p role="status" className="text-xs text-success">約{waitTimeReport.minutes}分待ち · {waitTimeReport.minutesAgo}分前</p>
                 ) : (
-                  <p className="mt-1 text-[10px] text-muted-foreground">現在の報告: 未報告（報告は30分間有効）</p>
+                  <p role="status" className="text-xs text-muted-foreground">未報告</p>
                 )}
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex w-full items-center gap-2 sm:w-auto">
                 <select
-                  aria-label="報告する待ち時間"
+                  aria-label="待ち時間"
                   value={waitMinutes}
                   onChange={(event) => setWaitMinutes(event.target.value)}
-                  className="h-10 border-thick border-border bg-background px-3 text-xs"
+                  className="h-10 min-w-0 flex-1 border-thick border-border bg-background px-3 text-xs sm:flex-initial"
                 >
                   {Array.from({ length: 25 }, (_, index) => index * 10).map((minutes) => (
                     <option key={minutes} value={minutes}>{minutes === 0 ? "待ち時間なし" : `${minutes}分待ち`}</option>
@@ -830,33 +905,31 @@ function RegisterPageContent() {
                 <Button
                   onClick={() => reportWaitTime.mutate()}
                   disabled={reportWaitTime.isPending}
-                  className="h-10 whitespace-nowrap text-xs"
+                  className="h-10 shrink-0 whitespace-nowrap text-xs"
                 >
-                  {reportWaitTime.isPending ? "報告中…" : "本部へ報告"}
+                  {reportWaitTime.isPending ? "報告中…" : "報告"}
                 </Button>
               </div>
             </div>
           </section>
 
-          {/* ===== 顧客未スキャン時: 画面中央に大きなカメラQRボタン ===== */}
+          {/* 2026-10-17: 来場者の確認操作を一か所に集約し、状態説明は主ボタンへ置き換える。 */}
           {!activeCustomer ? (
-            <div className="mb-4 border-thick border-border bg-muted/40 p-6 sm:p-10 flex flex-col items-center justify-center gap-4 text-center font-mono">
-              <p className="text-destructive font-black text-xs sm:text-sm uppercase tracking-wider animate-pulse">
-                【顧客未スキャン】注文の確定にはリストバンド / スマホQRのスキャンが必要です
-              </p>
-              <button
+            <div className="mb-4 flex flex-col items-center justify-center gap-4 border-thick border-border bg-muted/40 p-4 text-center font-mono sm:p-6">
+              <h2 className="text-sm font-black uppercase tracking-wider">来場者を確認</h2>
+              <Button
                 onClick={() => setIsCustomerQrModalOpen(true)}
-                className="flex flex-col items-center gap-3 border-heavy border-border bg-primary text-primary-foreground px-8 py-6 sm:px-12 sm:py-8 hover:bg-background hover:text-foreground transition-all"
+                className="flex h-auto min-h-20 w-full max-w-md flex-col gap-2 border-heavy px-8 py-5 text-base sm:w-auto"
               >
                 <ScanLine className="h-12 w-12 sm:h-16 sm:w-16" />
-                <span className="font-black uppercase tracking-widest text-base sm:text-xl">QRをスキャン</span>
-              </button>
-              {/* 手入力フォールバック */}
+                <span>QRを読み取る</span>
+              </Button>
               <div className="flex items-center gap-2 w-full max-w-md">
                 <Input
                   type="text"
-                  placeholder="または QR / リストバンドIDを入力..."
-                  className="h-10 border-thick border-border font-mono text-xs rounded-none bg-background focus-visible:ring-0 flex-1"
+                  aria-label="QRコードまたはリストバンドID"
+                  placeholder="QR / リストバンドID"
+                  className="h-11 min-w-0 flex-1 border-thick border-border bg-background font-mono text-xs focus-visible:ring-0"
                   value={scannedCode}
                   onChange={(e) => setScannedCode(e.target.value)}
                   onKeyDown={(e) => {
@@ -870,31 +943,40 @@ function RegisterPageContent() {
                   variant="outline"
                   disabled={lookupCustomer.isPending || !scannedCode.trim()}
                   onClick={() => lookupCustomer.mutate(scannedCode.trim())}
-                  className="h-10 border-thick border-border font-mono text-xs rounded-none bg-background hover:bg-primary hover:text-primary-foreground shrink-0"
+                  className="h-11 shrink-0 border-thick border-border font-mono text-xs"
                 >
-                  特定
+                  {lookupCustomer.isPending ? "確認中…" : "検索"}
                 </Button>
               </div>
             </div>
           ) : (
-            // スキャン済みは小さなステータスバーに畳む
-            <Card className="mb-4 bg-muted/40 rounded-none">
-              <CardContent className="p-3 flex items-center justify-between gap-4 font-mono">
-                <div className="flex items-center gap-2 text-success font-black text-xs sm:text-sm">
-                  <span className="w-2.5 h-2.5 bg-success rounded-full animate-pulse" />
-                  スキャン完了: ゲストID [{activeCustomer.userId}]
-                  {activeCustomer.wristbandId && ` (リストバンド: ${activeCustomer.wristbandId})`}
+            <Card className="mb-4 bg-muted/40">
+              <CardContent className="flex flex-col gap-3 p-3 font-mono sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex items-center gap-2 text-xs font-black text-success sm:text-sm">
+                  <span className="h-2.5 w-2.5 shrink-0 bg-success" />
+                  来場者確認済み
                 </div>
-                <Button
-                  variant="destructive"
-                  onClick={() => {
-                    setActiveCustomer(null);
-                    setActivePreOrderId(null);
-                  }}
-                  className="h-9 border-thick border-border font-mono text-xs rounded-none shrink-0"
-                >
-                  クリア
-                </Button>
+                <div className="flex shrink-0 items-center gap-2 self-end sm:self-auto">
+                  <Button
+                    variant="outline"
+                    onClick={() => setIsCustomerQrModalOpen(true)}
+                    className="h-9 border-thick border-border font-mono text-xs"
+                  >
+                    来場者を変更
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    aria-label="来場者を解除"
+                    onClick={() => {
+                      setActiveCustomer(null);
+                      setActivePreOrderId(null);
+                    }}
+                    className="h-9 w-9 shrink-0 border-thick border-border"
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
               </CardContent>
             </Card>
           )}
@@ -947,10 +1029,11 @@ function RegisterPageContent() {
           </div>
           <CartBody
             cart={cart}
+            idPrefix="desktop"
             menuMap={menuMap}
             peopleCount={peopleCount}
             activeCustomer={activeCustomer}
-            submitting={createOrder.isPending}
+            submitting={createOrder.isPending || claimOrder.isPending}
             onToggleTopping={toggleTopping}
             onUpdateQuantity={updateQuantity}
             onRemoveLine={removeLine}
@@ -958,7 +1041,10 @@ function RegisterPageContent() {
             onSubmit={handleSubmitOrder}
             onClear={clearCart}
             total={getTotalPrice()}
-            preOrderCouponApplied={!!activePreOrderId && activePreOrderCouponApplied}
+            isPreOrder={!!activePreOrderId}
+            registerCoupons={registerCoupons}
+            registerCouponId={registerCouponId}
+            onSetRegisterCoupon={setRegisterCouponId}
             paymentMethods={effectivePayments}
             paymentMethod={paymentMethod}
             onSetPayment={setPaymentMethod}
@@ -968,22 +1054,24 @@ function RegisterPageContent() {
 
       {/* ===== モバイル/タブレット: 固定カートフッターバー (xl 未満のみ) ===== */}
       {cart.length > 0 && (
-        <div className="xl:hidden fixed bottom-0 left-0 right-0 z-40 bg-primary text-primary-foreground border-t-heavy border-border">
+        <div className="xl:hidden fixed bottom-0 left-0 right-0 z-40 border-t-heavy border-border bg-primary pb-[env(safe-area-inset-bottom)] text-primary-foreground">
           <button
             onClick={() => setIsCartPanelOpen(true)}
-            className="w-full flex items-center justify-between px-4 py-3 sm:py-4 font-mono"
+            aria-label={`カートを開く。${getTotalCount()}点、合計${getTotalPrice().toLocaleString()}円`}
+            className="flex w-full items-center justify-between gap-2 px-3 py-3 font-mono sm:px-4 sm:py-4"
           >
-            <div className="flex items-center gap-3">
-              <span className="bg-background text-foreground px-2 py-0.5 text-xs font-black uppercase">
+            <div className="flex min-w-0 items-center gap-2 sm:gap-3">
+              <span className="shrink-0 bg-background px-2 py-0.5 text-xs font-black uppercase text-foreground" aria-live="polite" aria-atomic="true">
                 {getTotalCount()}点
               </span>
-              <span className="text-xl sm:text-2xl font-black">
+              <span className="truncate text-lg font-black tabular-nums sm:text-2xl">
                 ¥{getTotalPrice().toLocaleString()}
               </span>
             </div>
-            <span className="flex items-center gap-2 border-thick border-primary-foreground px-4 py-2 font-black uppercase text-sm tracking-wider hover:bg-primary-foreground hover:text-primary transition-all">
+            <span className="flex shrink-0 items-center gap-1 border-thick border-primary-foreground px-2 py-2 text-xs font-black uppercase tracking-wider transition-all hover:bg-primary-foreground hover:text-primary sm:gap-2 sm:px-4 sm:text-sm">
               <ShoppingCart className="h-4 w-4" />
-              カートを見る
+              <span className="sm:hidden">カート</span>
+              <span className="hidden sm:inline">カートを見る</span>
             </span>
           </button>
         </div>
@@ -1001,6 +1089,7 @@ function RegisterPageContent() {
               <h2 className="font-black text-lg uppercase">[カート確認]</h2>
               <button
                 onClick={() => setIsCartPanelOpen(false)}
+                aria-label="カートを閉じる"
                 className="w-10 h-10 border-thin border-primary-foreground flex items-center justify-center hover:bg-primary-foreground hover:text-primary transition-all"
               >
                 <X className="h-5 w-5" />
@@ -1008,10 +1097,11 @@ function RegisterPageContent() {
             </div>
             <CartBody
               cart={cart}
+              idPrefix="mobile"
               menuMap={menuMap}
               peopleCount={peopleCount}
               activeCustomer={activeCustomer}
-              submitting={createOrder.isPending}
+              submitting={createOrder.isPending || claimOrder.isPending}
               onToggleTopping={toggleTopping}
               onUpdateQuantity={updateQuantity}
               onRemoveLine={removeLine}
@@ -1019,7 +1109,10 @@ function RegisterPageContent() {
               onSubmit={handleSubmitOrder}
               onClear={clearCart}
               total={getTotalPrice()}
-              preOrderCouponApplied={!!activePreOrderId && activePreOrderCouponApplied}
+              isPreOrder={!!activePreOrderId}
+              registerCoupons={registerCoupons}
+              registerCouponId={registerCouponId}
+              onSetRegisterCoupon={setRegisterCouponId}
               paymentMethods={effectivePayments}
               paymentMethod={paymentMethod}
               onSetPayment={setPaymentMethod}

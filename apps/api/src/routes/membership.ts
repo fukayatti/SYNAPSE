@@ -3,12 +3,13 @@ import { zBody } from "../z-validator";
 import { apiError } from "../http-error";
 import { z } from "zod";
 import { membership, inviteToken, circle, event, notification } from "@fesflow/db";
-import { eq, and, inArray, gt, isNull, lt } from "drizzle-orm";
+import { eq, and, inArray, gt, isNull } from "drizzle-orm";
 import { nanoid, customAlphabet } from "nanoid";
 import { ulid } from "ulidx";
 import { Context } from "hono";
 import { effectiveCircleRole } from "@fesflow/config";
 import { requireAuth } from "../middleware/auth";
+import { isVerifiedGoogleUser } from "../utils/auth";
 import type { AppEnv } from "../types";
 
 // 招待の手入力コード生成。紛らわしい文字 (0/O, 1/I/L 等) を除いた 8 桁。
@@ -165,13 +166,13 @@ async function checkMemberWritePermission(
   const initialAdminEmail = c.env.INITIAL_SUPER_ADMIN_EMAIL;
 
   // 1. super_admin / system_manager (システムレベルの管理者) は何でも可能
-  // 2026-07-06 (C1): initialAdminEmail 一致だけでの system admin 昇格は、
-  // メール未検証でも成立してしまう抜け道だった。session.user.emailVerified === true
-  // の場合に限定する（未検証なら下の通常の super_admin メンバーシップ判定に委ねる）。
-  const emailVerified =
-    (session.user as { emailVerified?: boolean }).emailVerified === true;
+  // 2026-10-17: 初期管理者の直接権限も、検証済みGoogleログインだけに限る。
   let isSystemAdmin = false;
-  if (initialAdminEmail && email === initialAdminEmail.toLowerCase() && emailVerified) {
+  if (
+    initialAdminEmail &&
+    email === initialAdminEmail.toLowerCase() &&
+    await isVerifiedGoogleUser(c, session.user)
+  ) {
     isSystemAdmin = true;
   } else {
     const systemMembers = await db
@@ -296,7 +297,11 @@ membershipRoutes.get("/my", async (c) => {
 
   // 旧 getEnv().INITIAL_SUPER_ADMIN_EMAIL → c.env から直接参照 (Phase5: getEnv 廃止)
   const initialAdminEmail = c.env.INITIAL_SUPER_ADMIN_EMAIL;
-  if (initialAdminEmail && userEmail.toLowerCase() === initialAdminEmail.toLowerCase()) {
+  if (
+    initialAdminEmail &&
+    userEmail.toLowerCase() === initialAdminEmail.toLowerCase() &&
+    await isVerifiedGoogleUser(c, session.user)
+  ) {
     const existing = await db
       .select()
       .from(membership)
@@ -636,7 +641,7 @@ membershipRoutes.post(
       eventId: z.string().optional(),
       role: z.enum(ROLES),
       expiresInHours: z.number().min(1).max(168).default(24), // 1時間〜7日
-      maxUses: z.number().min(1).max(100).optional(),
+      maxUses: z.number().int().min(1).max(100).nullable().optional(),
       createdBy: z.string().optional(), // 作成者のメールアドレス (互換性のためオプショナル化)
       targetEmail: z.string().optional(), // 招待相手 of メールアドレス
     })
@@ -771,9 +776,7 @@ membershipRoutes.get("/invite/lookup", async (c) => {
 //   作成できた（なりすまし/権限昇格チェーン）ため、セッション必須化し、
 //   メンバーシップの userEmail は必ずセッションのメールを使う。
 //   targetEmail 指定付きトークンは、そのメールのセッションでしか使えないようにする。
-// (2) usedCount 更新が「読んで+1して書く」楽観更新でガードが無く、
-//   同時アクセスで maxUses を超過しうる(TOCTOU)ため、メンバーシップ作成前に
-//   `WHERE used_count < max_uses` 付き条件UPDATEを行い、更新0件なら中断する。
+// (2) 2026-10-17: 招待使用数は保存済み値を使わずDB内で加算し、上限条件と同じUPDATEで確定する。
 membershipRoutes.post(
   "/invite/accept",
   zBody(
@@ -853,39 +856,33 @@ membershipRoutes.post(
       apiError("BAD_REQUEST", "既にメンバーとして登録されています");
     }
 
-    // トークンの使用回数を条件付きで更新する（TOCTOU対策）。
-    // D1 は対話的トランザクション(BEGIN)非対応のため、
-    // `used_count < max_uses` (または上限なし) を満たす場合のみ更新されるようにし、
-    // 更新0件なら他リクエストと競合して上限に達したとみなし中断する。
-    const updateResult = await db
-      .update(inviteToken)
-      .set({ usedCount: foundToken.usedCount + 1 })
-      .where(
-        and(
-          eq(inviteToken.id, foundToken.id),
-          foundToken.maxUses !== null
-            ? lt(inviteToken.usedCount, foundToken.maxUses)
-            : undefined
-        )
-      );
-
-    const changes = (updateResult as unknown as { meta?: { changes?: number } })?.meta?.changes ?? 0;
-    if (changes === 0) {
-      apiError("BAD_REQUEST", "招待トークンの使用回数上限に達しました");
-    }
-
-    // メンバーシップを作成
-    // 2026-07-07 (Phase 3a): 独自 PIN 認証の廃止に伴い pin 保存を撤去。
     const membershipId = ulid();
-    await db.insert(membership).values({
-      id: membershipId,
-      userEmail,
-      userName: input.userName,
-      circleId: foundToken.circleId,
-      eventId: foundToken.eventId,
-      role: foundToken.role,
-      isActive: true,
-    });
+    const inviteUseGuardId = ulid();
+    try {
+      // 2026-10-17: D1 batch は各文を1トランザクションで実行する。ガードが招待条件を
+      // 同じトランザクション内で再確認し、メンバー作成失敗時にも使用数をrollbackする。
+      await c.env.DB.batch([
+        c.env.DB.prepare(`INSERT INTO order_write_guard (id, valid) SELECT ?, CASE WHEN EXISTS (
+          SELECT 1 FROM invite_token WHERE id=? AND expires_at>? AND (max_uses IS NULL OR used_count<max_uses)
+            AND (target_email IS NULL OR lower(target_email)=?)
+            AND NOT EXISTS (SELECT 1 FROM membership WHERE user_email=?
+              AND ((? IS NOT NULL AND circle_id=?) OR (? IS NOT NULL AND event_id=?)))
+        ) THEN 1 ELSE 0 END`).bind(inviteUseGuardId, foundToken.id, Date.now(), userEmail,
+          userEmail, foundToken.circleId, foundToken.circleId, foundToken.eventId, foundToken.eventId),
+        c.env.DB.prepare("UPDATE invite_token SET used_count=used_count+1 WHERE id=? AND (max_uses IS NULL OR used_count<max_uses)")
+          .bind(foundToken.id),
+        c.env.DB.prepare(`INSERT INTO membership (id,user_email,user_name,circle_id,event_id,role,is_active)
+          VALUES (?,?,?,?,?,?,1)`).bind(membershipId, userEmail, input.userName, foundToken.circleId,
+            foundToken.eventId, foundToken.role),
+        c.env.DB.prepare("DELETE FROM order_write_guard WHERE id=?").bind(inviteUseGuardId),
+      ]);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message.includes("order_write_guard_valid") || message.includes("membership_user_") || message.includes("UNIQUE constraint failed: membership.user_email")) {
+        apiError("BAD_REQUEST", "招待の使用上限に達したか、既にメンバーとして登録されています");
+      }
+      throw error;
+    }
 
     return c.json({ membershipId, kind: inviteKind(foundToken) }, 201);
   }
@@ -1177,40 +1174,35 @@ membershipRoutes.post(
         apiError("BAD_REQUEST", "既にメンバーとして登録されています");
       }
 
-      // 2026-07-05: トークンの使用回数を条件付きで更新する（TOCTOU対策）。
-      // D1 は対話的トランザクション非対応のため、`used_count < max_uses` を
-      // 満たす場合のみ更新されるようにし、更新0件なら他リクエストと競合して
-      // 上限に達したとみなし中断する。メンバーシップ作成より前に確定させる。
-      const updateResult = await db
-        .update(inviteToken)
-        .set({ usedCount: foundToken.usedCount + 1 })
-        .where(
-          and(
-            eq(inviteToken.id, foundToken.id),
-            foundToken.maxUses !== null
-              ? lt(inviteToken.usedCount, foundToken.maxUses)
-              : undefined
-          )
-        );
-
-      const changes = (updateResult as unknown as { meta?: { changes?: number } })?.meta?.changes ?? 0;
-      if (changes === 0) {
-        apiError("BAD_REQUEST", "招待の上限に達しています");
+      const membershipId = ulid();
+      const inviteUseGuardId = ulid();
+      try {
+        // 2026-10-17: 通知承認でも招待消費・所属作成・通知既読化を一括確定し、
+        // 途中の書き込み失敗で使用数だけが減る状態を防ぐ。
+        await c.env.DB.batch([
+          c.env.DB.prepare(`INSERT INTO order_write_guard (id, valid) SELECT ?, CASE WHEN EXISTS (
+            SELECT 1 FROM invite_token WHERE id=? AND expires_at>? AND (max_uses IS NULL OR used_count<max_uses)
+              AND (target_email IS NULL OR lower(target_email)=?)
+              AND NOT EXISTS (SELECT 1 FROM membership WHERE user_email=?
+                AND ((? IS NOT NULL AND circle_id=?) OR (? IS NOT NULL AND event_id=?)))
+          ) THEN 1 ELSE 0 END`).bind(inviteUseGuardId, foundToken.id, Date.now(), email,
+            email, foundToken.circleId, foundToken.circleId, foundToken.eventId, foundToken.eventId),
+          c.env.DB.prepare("UPDATE invite_token SET used_count=used_count+1 WHERE id=? AND (max_uses IS NULL OR used_count<max_uses)")
+            .bind(foundToken.id),
+          c.env.DB.prepare(`INSERT INTO membership (id,user_email,user_name,circle_id,event_id,role,is_active)
+            VALUES (?,?,?,?,?,?,1)`).bind(membershipId, email, input.userName || session.user.name || "メンバー",
+              foundToken.circleId, foundToken.eventId, foundToken.role),
+          c.env.DB.prepare("UPDATE notification SET status='read' WHERE id=? AND user_email=?").bind(id, email),
+          c.env.DB.prepare("DELETE FROM order_write_guard WHERE id=?").bind(inviteUseGuardId),
+        ]);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (message.includes("order_write_guard_valid") || message.includes("membership_user_") || message.includes("UNIQUE constraint failed: membership.user_email")) {
+          apiError("BAD_REQUEST", "招待の使用上限に達したか、既にメンバーとして登録されています");
+        }
+        throw error;
       }
-
-      // メンバーシップ作成
-      // 2026-07-07 (Phase 3a): 独自 PIN 認証の廃止に伴い pin 保存を撤去。
-      await db.insert(membership).values({
-        id: ulid(),
-        userEmail: email,
-        userName: input.userName || session.user.name || "メンバー",
-        circleId: foundToken.circleId,
-        eventId: foundToken.eventId,
-        role: foundToken.role,
-        isActive: true,
-      });
-
-      // (使用回数は上でメンバーシップ作成前に確定更新済みのため、ここでは何もしない)
+      return c.json({ success: true });
     }
 
     // 通知を既読（回答済）にする

@@ -17,6 +17,7 @@ import { ToggleSwitch } from "@/components/ui/ToggleSwitch";
 import { OptionCard } from "@/components/ui/OptionCard";
 import { undoableDelete } from "@/lib/toast-undo";
 import { toast } from "sonner";
+import { useUnsavedChanges } from "@/components/UnsavedNavigationGuard";
 import { Megaphone, Plus, Trash2, Info, AlertTriangle, OctagonAlert, Save } from "lucide-react";
 
 const LEVELS: { value: AnnouncementLevel; label: string; description: string; icon: any }[] = [
@@ -36,6 +37,22 @@ const EMPTY: AnnouncementInput = { title: "", body: "", level: "info", published
 export function AnnouncementsTab() {
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState<null | { id?: string; data: AnnouncementInput }>(null);
+  const [editingSnapshot, setEditingSnapshot] = useState<AnnouncementInput | null>(null);
+
+  const openCreate = () => {
+    const data = { ...EMPTY };
+    setEditing({ data });
+    setEditingSnapshot(data);
+  };
+  const openEdit = (announcement: AdminAnnouncement) => {
+    const data = { title: announcement.title, body: announcement.body, level: announcement.level, published: announcement.published };
+    setEditing({ id: announcement.id, data });
+    setEditingSnapshot(data);
+  };
+  const closeEditing = () => {
+    setEditing(null);
+    setEditingSnapshot(null);
+  };
 
   const {
     data: list,
@@ -57,7 +74,7 @@ export function AnnouncementsTab() {
     mutationFn: (data: AnnouncementInput) => adminApi.createAnnouncement(data),
     onSuccess: () => {
       invalidate();
-      setEditing(null);
+      closeEditing();
       toast.success("お知らせを作成しました");
     },
     onError: (e: any) => toast.error(e.message || "作成に失敗しました"),
@@ -68,7 +85,7 @@ export function AnnouncementsTab() {
       adminApi.updateAnnouncement(id, data),
     onSuccess: () => {
       invalidate();
-      setEditing(null);
+      closeEditing();
       toast.success("お知らせを更新しました");
     },
     onError: (e: any) => toast.error(e.message || "更新に失敗しました"),
@@ -99,6 +116,18 @@ export function AnnouncementsTab() {
     else createM.mutate(editing.data);
   };
 
+  // 2026-10-16: システムお知らせの作成/編集も、離脱確認内の保存ボタンから同じAPIへ送る。
+  useUnsavedChanges({
+    isDirty: !!editing && !!editingSnapshot && JSON.stringify(editing.data) !== JSON.stringify(editingSnapshot),
+    onSave: async () => {
+      if (!editing) return;
+      if (!editing.data.title.trim()) throw new Error("タイトルは必須です。");
+      if (editing.id) await updateM.mutateAsync({ id: editing.id, data: editing.data });
+      else await createM.mutateAsync(editing.data);
+    },
+    onDiscard: closeEditing,
+  });
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-2 border-b-thick border-border pb-3">
@@ -107,7 +136,7 @@ export function AnnouncementsTab() {
           お知らせ管理 {list ? `(${list.length})` : ""}
         </h2>
         <Button
-          onClick={() => setEditing({ data: { ...EMPTY } })}
+          onClick={openCreate}
           className="rounded-none border-thick border-primary bg-primary text-primary-foreground hover:bg-background hover:text-foreground h-8 text-[11px] uppercase font-bold shadow-none px-3"
         >
           <Plus className="mr-1.5 h-3.5 w-3.5" />
@@ -119,7 +148,7 @@ export function AnnouncementsTab() {
           プロジェクト全体の「入力フォームはモーダルで行う」方針への統一) */}
       <Modal
         isOpen={!!editing}
-        onClose={() => setEditing(null)}
+        onClose={closeEditing}
         title={editing?.id ? "[お知らせを編集]" : "[新しいお知らせ]"}
       >
         {editing && (
@@ -127,7 +156,7 @@ export function AnnouncementsTab() {
             value={editing.data}
             onChange={(data) => setEditing((e) => (e ? { ...e, data } : e))}
             onSave={saveEditing}
-            onCancel={() => setEditing(null)}
+            onCancel={closeEditing}
             isPending={createM.isPending || updateM.isPending}
             isEdit={!!editing.id}
           />
@@ -175,7 +204,7 @@ export function AnnouncementsTab() {
                     </span>
                   </div>
                   <Button
-                    onClick={() => setEditing({ id: a.id, data: { title: a.title, body: a.body, level: a.level, published: a.published } })}
+                    onClick={() => openEdit(a)}
                     className="rounded-none border-thick border-border h-8 text-[10px] uppercase font-bold px-2 bg-background text-foreground hover:bg-primary hover:text-primary-foreground shadow-none"
                   >
                     編集
@@ -196,7 +225,7 @@ export function AnnouncementsTab() {
           icon={Megaphone}
           message="お知らせがありません"
           actionLabel="新規作成"
-          onAction={() => setEditing({ data: { ...EMPTY } })}
+          onAction={openCreate}
         />
       )}
 

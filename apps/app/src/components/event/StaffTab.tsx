@@ -154,7 +154,7 @@ export function StaffTab({
       {/* 2026-09-27: イベント管理ではイベント共同管理者の権限だけを説明し、サークル権限との混同を防ぐ。 */}
       <Card className="rounded-none bg-background shadow-none">
         <CardHeader className="p-4 pb-2 border-b-thick border-border bg-muted/20">
-          <CardTitle className="text-xs uppercase font-bold">[イベント権限]</CardTitle>
+          <CardTitle className="text-xs uppercase font-bold">イベント権限</CardTitle>
           <p className="text-[10px] text-muted-foreground mt-1">このイベントと所属サークルの範囲で適用される権限です。システム全体の権限や、サークル単体のロールは含みません。</p>
         </CardHeader>
         <CardContent className="p-4">
@@ -175,7 +175,7 @@ export function StaffTab({
       {invites && invites.length > 0 && (
         <Card className=" rounded-none bg-background shadow-none">
           <CardHeader className="p-4 pb-2 border-b-thin border-border bg-muted/20">
-            <CardTitle className="text-xs uppercase font-bold">[招待リンク一覧]</CardTitle>
+            <CardTitle className="text-xs uppercase font-bold">招待リンク</CardTitle>
           </CardHeader>
           <CardContent className="p-4 space-y-2">
             {invites.map((inv) => {
@@ -207,7 +207,7 @@ export function StaffTab({
                     </div>
                     <div className="space-y-0.5 min-w-0">
                       <p className="font-bold text-foreground flex items-center gap-1.5">
-                        {purposeLabel}（{inv.usedCount}/{inv.maxUses ?? "∞"} 使用）
+                        {purposeLabel}（{inv.usedCount}/{inv.maxUses == null || inv.maxUses === 0 ? "無制限" : inv.maxUses} 使用）
                         {isExpired && (
                           <Badge variant="default" className="rounded-none text-[8px] font-mono border-thick border-destructive bg-destructive/10 text-destructive uppercase">期限切れ</Badge>
                         )}
@@ -284,7 +284,7 @@ export function StaffTab({
       {/* スタッフ一覧 */}
       <Card className=" rounded-none bg-background shadow-none">
         <CardHeader className="p-4 pb-2 border-b-thick border-border bg-muted/20 flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <CardTitle className="text-xs uppercase font-bold">[登録済みスタッフ一覧]</CardTitle>
+          <CardTitle className="text-xs uppercase font-bold">登録済みスタッフ</CardTitle>
           {staffMembers && staffMembers.length > 0 && (
             <Button variant="outline" onClick={() => setIsStaffTableOpen(true)} className="rounded-none border-thick border-border text-xs">一覧を開く（{staffMembers.length}人）</Button>
           )}
@@ -314,7 +314,7 @@ export function StaffTab({
       </Card>
 
       {/* 2026-09-27: イベント所属者が増えてもタブを縦に伸ばさず、既存操作を表モーダル内に保つ。 */}
-      <Modal isOpen={isStaffTableOpen} onClose={() => setIsStaffTableOpen(false)} title="[登録済みスタッフ一覧]" subtitle={`${staffMembers?.length ?? 0}人`} maxWidth="xl">
+      <Modal isOpen={isStaffTableOpen} onClose={() => setIsStaffTableOpen(false)} title="登録済みスタッフ" subtitle={`${staffMembers?.length ?? 0}人`} maxWidth="xl">
         <div className="relative">
           <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
           <Input aria-label="イベントスタッフを検索" value={staffSearch} onChange={(e) => setStaffSearch(e.target.value)} placeholder="名前・メールアドレスで検索" className="pl-9 rounded-none border-thick border-border" />
@@ -347,7 +347,7 @@ export function StaffTab({
       {/* 招待取消確認ダイアログ (破壊的操作のため ConfirmDialog を使用) */}
       <ConfirmDialog
         isOpen={isDeleteInviteConfirmOpen}
-        title="[確認: スタッフ招待の取消]"
+        title="この招待を取り消しますか？"
         description={`本当にこの招待リンクを取り消しますか？取り消されたリンクは無効になります。`}
         confirmLabel="取り消す"
         onConfirm={() => inviteToDelete && deleteInviteMutation.mutate(inviteToDelete.id)}
@@ -357,7 +357,7 @@ export function StaffTab({
       {/* スタッフ解除確認ダイアログ (破壊的操作のため ConfirmDialog を使用) */}
       <ConfirmDialog
         isOpen={isDeactivateConfirmOpen}
-        title="[確認: スタッフ登録の解除]"
+        title="このスタッフの登録を解除しますか？"
         description={`本当にスタッフ「${memberToDeactivate?.userName}」さんの登録を解除しますか？解除されるとダッシュボードにアクセスできなくなります。`}
         confirmLabel="解除する"
         onConfirm={() => memberToDeactivate && deactivateStaffMutation.mutate(memberToDeactivate.id)}

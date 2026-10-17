@@ -26,6 +26,8 @@ export const menu = sqliteTable(
     imagePath: text("image_path").notNull(),
     description: text("description"),
     additionalInfo: text("additional_info"),
+    // 2026-10-15 (#124): JSON配列。null は未登録、[] は明示的な「なし」。
+    allergens: text("allergens"),
     soldOut: integer("sold_out", { mode: "boolean" }).default(false).notNull(),
     stockQuantity: integer("stock_quantity").default(0).notNull(),
     // 2026-09-27: 在庫は商品単位で明示的に有効化する。数量0を未管理と混同せず、
@@ -69,11 +71,15 @@ export const topping = sqliteTable(
     category: text("category").default("").notNull(),
     price: integer("price").notNull(),
     description: text("description"),
+    // 2026-10-15 (#124): メニューとは別に、選択されたトッピング単位でも警告判定する。
+    allergens: text("allergens"),
     imagePath: text("image_path"),
     soldOut: integer("sold_out", { mode: "boolean" }).default(false).notNull(),
     // 在庫数 (2026-07-15 追加)。メニューと同じ意味論: 0 = 在庫無制限/未管理(チェック・減算しない)、
     // 1 以上 = 在庫管理対象で、注文のたびに減り 0 になると soldOut を自動セットする。
     stockQuantity: integer("stock_quantity").default(0).notNull(),
+    // 2026-10-16: 管理画面で調整したトッピング順を保持し、注文側でも同じ順を使う。
+    sortOrder: integer("sort_order").default(0).notNull(),
     createdAt: integer("created_at", { mode: "timestamp_ms" })
       .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
       .notNull(),

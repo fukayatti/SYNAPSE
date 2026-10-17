@@ -3,12 +3,15 @@ import { zBody } from "../z-validator";
 import { apiError } from "../http-error";
 import { z } from "zod";
 import { topping, menuTopping } from "@fesflow/db";
-import { eq } from "drizzle-orm";
+import { asc, desc, eq } from "drizzle-orm";
 import { ulid } from "ulidx";
 import { hasPermission } from "../utils/auth";
 import type { AppEnv } from "../types";
+import { JAPANESE_ALLERGENS_28 } from "@fesflow/config/allergens";
 
 const toppingRoutes = new Hono<AppEnv>();
+const allergensSchema = z.array(z.enum(JAPANESE_ALLERGENS_28)).max(28)
+  .refine((allergens) => new Set(allergens).size === allergens.length, "アレルゲンの重複を解消してください");
 
 // トッピング一覧取得
 toppingRoutes.get("/", async (c) => {
@@ -27,7 +30,8 @@ toppingRoutes.get("/", async (c) => {
   const toppings = await db
     .select()
     .from(topping)
-    .where(eq(topping.circleId, circleId));
+    .where(eq(topping.circleId, circleId))
+    .orderBy(asc(topping.sortOrder), asc(topping.createdAt));
 
   return c.json(toppings);
 });
@@ -61,9 +65,11 @@ toppingRoutes.post(
       // 価格は負値も許可 (割引トッピング等。2026-07-07 に min(0) を撤廃)。
       price: z.number(),
       description: z.string().optional(),
+      allergens: allergensSchema,
       imagePath: z.string().optional(),
       soldOut: z.boolean().optional(),
       stockQuantity: z.number().min(0).optional(),
+      sortOrder: z.number().int().min(0).optional(),
     })
   ),
   async (c) => {
@@ -76,6 +82,13 @@ toppingRoutes.post(
     }
 
     const id = ulid();
+    // 2026-10-16: 新規トッピングは一覧末尾へ追加し、既存の並びを保つ。
+    const lastTopping = await db
+      .select({ sortOrder: topping.sortOrder })
+      .from(topping)
+      .where(eq(topping.circleId, input.circleId))
+      .orderBy(desc(topping.sortOrder))
+      .limit(1);
 
     await db.insert(topping).values({
       id,
@@ -84,9 +97,11 @@ toppingRoutes.post(
       category: input.category?.trim() ?? "",
       price: input.price,
       description: input.description,
+      allergens: JSON.stringify(input.allergens),
       imagePath: input.imagePath ?? null,
       soldOut: input.soldOut ?? false,
       stockQuantity: input.stockQuantity ?? 0,
+      sortOrder: input.sortOrder ?? (lastTopping[0]?.sortOrder ?? -1) + 1,
     });
 
     return c.json({ id }, 201);
@@ -102,9 +117,11 @@ toppingRoutes.put(
       category: z.string().max(100).optional(),
       price: z.number().optional(), // 負値許可 (割引トッピング)
       description: z.string().optional(),
+      allergens: allergensSchema.optional(),
       imagePath: z.string().optional(),
       soldOut: z.boolean().optional(),
       stockQuantity: z.number().min(0).optional(),
+      sortOrder: z.number().int().min(0).optional(),
     })
   ),
   async (c) => {
@@ -132,11 +149,13 @@ toppingRoutes.put(
     if (input.price !== undefined) updates.price = input.price;
     if (input.description !== undefined)
       updates.description = input.description;
+    if (input.allergens !== undefined) updates.allergens = JSON.stringify(input.allergens);
     if (input.imagePath !== undefined)
       updates.imagePath = input.imagePath ?? null;
     if (input.soldOut !== undefined) updates.soldOut = input.soldOut;
     if (input.stockQuantity !== undefined)
       updates.stockQuantity = input.stockQuantity;
+    if (input.sortOrder !== undefined) updates.sortOrder = input.sortOrder;
 
     await db.update(topping).set(updates).where(eq(topping.id, id));
 

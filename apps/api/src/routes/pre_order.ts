@@ -329,7 +329,9 @@ preOrderRoutes.post(
         }
 
         // 2026-07-05: 売り切れメニューの事前オーダーをハードゲートで拒否する
-        if (m.soldOut) {
+        if (m.soldOut && !isStaleDraftWrite) {
+          // #120: 失われた応答の同一payload再送は後段で保存済みsnapshotと照合する。
+          // 保存済み注文の再送に、後から変わった売切状態を適用しない。
           apiError("BAD_REQUEST", `${m.name}は売り切れです`);
         }
 
@@ -344,7 +346,7 @@ preOrderRoutes.post(
           if (t.circleId !== circleId) {
             apiError("BAD_REQUEST", `トッピング ${t.name} は指定サークルに属していません`);
           }
-          if (t.soldOut) {
+          if (t.soldOut && !isStaleDraftWrite) {
             apiError("BAD_REQUEST", `${t.name}は売り切れです`);
           }
           const isLinked = menuToppingLinks.some(
@@ -384,6 +386,8 @@ preOrderRoutes.post(
       }
 
       // クーポン適用 (2026-09-16, issue #50)。枠の最終判定と消費も注文の保存batch内で行う。
+      // 2026-10-16: cart_percentage は税・送料なしの商品小計全体を基準にサーバーで計算する。
+      // 複数クーポンの割引合計も商品小計以下に抑え、pre_order の total と割引履歴を一致させる。
       // 2026-09-16 フィードバック対応: (1) kind (menu_discount / free_topping) に応じて対象が
       // メニューかトッピングかを切り替え、computeCouponDiscount に計算を委ねる。(2) 複数枚
       // 同時適用に対応。まず全クーポンを検証・計算してから消費するのは、途中の1枚が
@@ -400,17 +404,24 @@ preOrderRoutes.post(
           circleId,
           preOrderId: currentDraft?.id,
         });
-        const targetIds =
-          cp.kind === "free_topping"
-            ? await getCouponToppingIds(db, cp.id)
-            : await getCouponMenuIds(db, cp.id);
-        const computedDiscount = computeCouponDiscount(cp, targetIds, itemList);
+        const targetIds = cp.kind === "free_topping"
+          ? await getCouponToppingIds(db, cp.id)
+          : cp.kind === "menu_discount"
+            ? await getCouponMenuIds(db, cp.id)
+            : [];
+        const remainingSubtotal = Math.max(0, totalPrice - validatedCoupons.reduce((sum, item) => sum + item.discount, 0));
+        const computedDiscount = Math.min(
+          remainingSubtotal,
+          computeCouponDiscount(cp, targetIds, itemList),
+        );
         if (computedDiscount <= 0) {
           apiError(
             "BAD_REQUEST",
-            cp.kind === "free_topping"
-              ? `クーポン「${cp.title}」の対象トッピングがカートに含まれていません`
-              : `クーポン「${cp.title}」の対象メニューがカートに含まれていません`
+            cp.kind === "cart_percentage"
+              ? `クーポン「${cp.title}」を適用できる商品小計がありません`
+              : cp.kind === "free_topping"
+                ? `クーポン「${cp.title}」の対象トッピングがカートに含まれていません`
+                : `クーポン「${cp.title}」の対象メニューがカートに含まれていません`
           );
         }
         validatedCoupons.push({ id: cp.id, title: cp.title, discount: computedDiscount });
@@ -425,6 +436,26 @@ preOrderRoutes.post(
           return c.json({ id: preOrderId, totalPrice: sameDraft.totalPrice, updatedAt: sameDraft.updatedAt }, 200);
         }
         apiError("CONFLICT", "カートが更新または確定されました。画面を再読み込みしてください");
+      }
+
+      // 2026-10-15 Issue #120: 事前注文の保存時にも在庫不足を知らせる。保存済み内容の再送は
+      // 直前の一致確認で完了するため再検証せず、ここでは在庫を予約・減算しない。
+      // 他注文との競合はレジ確定時の原子的な在庫チェックで最終判定する。
+      const requestedMenuQuantities = new Map<string, number>();
+      for (const item of items) {
+        requestedMenuQuantities.set(
+          item.menuId,
+          (requestedMenuQuantities.get(item.menuId) ?? 0) + item.quantity,
+        );
+      }
+      for (const [menuId, requestedQuantity] of requestedMenuQuantities) {
+        const requestedMenu = menus.find((menuItem) => menuItem.id === menuId);
+        if (requestedMenu?.inventoryEnabled && requestedMenu.stockQuantity < requestedQuantity) {
+          apiError(
+            "BAD_REQUEST",
+            `${requestedMenu.name}の在庫が不足しています（残り${requestedMenu.stockQuantity}個 / 必要${requestedQuantity}個）`,
+          );
+        }
       }
 
       const discountAmount = validatedCoupons.reduce((sum, item) => sum + item.discount, 0);

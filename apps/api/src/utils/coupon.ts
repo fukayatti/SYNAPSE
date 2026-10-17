@@ -27,6 +27,10 @@ export async function checkCouponEligibility(
   if (params.circleId && cp.circleId !== params.circleId) {
     apiError("BAD_REQUEST", "このクーポンは指定サークルのものではありません");
   }
+  // レジ専用割引はスタッフのPOS注文でのみ消費できるため、事前注文/visitor verifyを拒否する。
+  if (cp.registerOnly) {
+    apiError("BAD_REQUEST", "このクーポンはサークルのレジでのみ利用できます");
+  }
   if (cp.status !== "active") {
     apiError("BAD_REQUEST", "このクーポンは現在利用できません");
   }
@@ -121,14 +125,20 @@ export interface CouponItemLine {
  *   小さい方を返す (小計を超えて引かない)。
  * - free_topping: targetIds は対象トッピングID。カート内の対象トッピングを「個」単位に展開し
  *   (数量分だけ複製)、単価の高い順に freeUnits 個 (null なら全部) を無料にした合計を返す。
+ * - cart_percentage: 税・送料を含まない商品小計全体の discountPercent% (1円未満切り捨て)。
  * どちらも対象が1件もカートに無ければ 0 を返す。呼び出し側は 0 なら「消費せず拒否」すること。
  */
 export function computeCouponDiscount(
-  cp: Pick<CouponRow, "kind" | "discountAmount" | "freeUnits">,
+  cp: Pick<CouponRow, "kind" | "discountAmount" | "discountPercent" | "freeUnits">,
   targetIds: string[],
   items: CouponItemLine[]
 ): number {
   const targetSet = new Set(targetIds);
+
+  if (cp.kind === "cart_percentage") {
+    const cartSubtotal = items.reduce((sum, item) => sum + item.subtotal, 0);
+    return Math.min(cartSubtotal, Math.floor((cartSubtotal * (cp.discountPercent ?? 0)) / 100));
+  }
 
   if (cp.kind === "free_topping") {
     const unitPrices: number[] = [];

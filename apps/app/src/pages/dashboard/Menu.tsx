@@ -4,24 +4,17 @@ import { toast } from "sonner";
 import { CircleAuthGuard, PermissionGuard, useAuth } from "@/hooks/useCircleAuth";
 import { menuApi, toppingApi, circleApi, parseCircleSettings } from "@/lib/api";
 import DashboardLayout from "@/components/DashboardLayout";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ErrorState } from "@/components/ui/ErrorState";
 import { undoableDelete } from "@/lib/toast-undo";
-import { Plus, Edit, Trash2, Settings, UtensilsCrossed } from "lucide-react";
+import { Plus, Edit, UtensilsCrossed, ArrowUp, ArrowDown } from "lucide-react";
 
 // モーダルインポート
 import { MenuFormModal } from "@/components/menu/MenuFormModal";
 import { ToppingFormModal } from "@/components/menu/ToppingFormModal";
-import { ToppingMappingModal } from "@/components/menu/ToppingMappingModal";
 import { resolveAssetUrl } from "@/lib/asset-url";
 
 function MenuManagementContent() {
@@ -39,8 +32,8 @@ function MenuManagementContent() {
 
   const [isToppingOpen, setIsToppingOpen] = useState(false);
   const [selectedTopping, setSelectedTopping] = useState<any | null>(null);
+  const [isReorderingToppings, setIsReorderingToppings] = useState(false);
 
-  const [isMappingOpen, setIsMappingOpen] = useState(false);
 
   const queryClient = useQueryClient();
 
@@ -141,6 +134,24 @@ function MenuManagementContent() {
     setIsToppingOpen(true);
   };
 
+  // 2026-10-16: 既存データも含めて連番へ正規化し、上下操作後に順番が安定して保存されるようにする。
+  const moveTopping = async (index: number, offset: -1 | 1) => {
+    if (!toppings || isReorderingToppings) return;
+    const target = index + offset;
+    if (target < 0 || target >= toppings.length) return;
+    const reordered = [...toppings];
+    [reordered[index], reordered[target]] = [reordered[target]!, reordered[index]!];
+    setIsReorderingToppings(true);
+    try {
+      await Promise.all(reordered.map((item, sortOrder) => toppingApi.update(item.id, { sortOrder })));
+    } catch (error: any) {
+      toast.error(error?.message || "順番を保存できませんでした");
+    } finally {
+      void queryClient.invalidateQueries({ queryKey: ["toppings", circleId] });
+      setIsReorderingToppings(false);
+    }
+  };
+
   if (menusLoading || toppingsLoading) {
     return (
       <DashboardLayout title={circleName} subtitle="メニュー・トッピング管理" type="circle">
@@ -165,18 +176,10 @@ function MenuManagementContent() {
       <div className="space-y-8 font-mono text-foreground">
         
         {/* メニューセクション */}
-        <div className="space-y-4">
+        <section aria-labelledby="menu-management-heading" className="space-y-4 border-thick border-border p-4">
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b-thick border-border pb-3 gap-2 sm:gap-0">
-            <h2 className="text-sm font-bold uppercase tracking-wider">[メニュー管理]</h2>
+            <h2 id="menu-management-heading" className="text-sm font-bold uppercase tracking-wider">[メニュー管理]</h2>
             <div className="flex gap-2 w-full sm:w-auto">
-              <Button
-                onClick={() => setIsMappingOpen(true)}
-                variant="outline"
-                className="flex-1 sm:flex-none rounded-none border-thick border-border bg-background hover:bg-muted h-8 text-[11px] font-bold uppercase px-3 flex items-center gap-1"
-              >
-                <Settings className="h-3.5 w-3.5" />
-                トッピング対応設定
-              </Button>
               <Button
                 onClick={handleOpenMenuAdd}
                 className="flex-1 sm:flex-none rounded-none border-thick border-primary bg-primary text-primary-foreground hover:bg-background hover:text-foreground h-8 text-[11px] font-bold uppercase px-3 flex items-center gap-1"
@@ -198,112 +201,42 @@ function MenuManagementContent() {
               onAction={handleOpenMenuAdd}
             />
           ) : (
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {menus.map((menu) => (
-                <Card key={menu.id} className="rounded-none bg-background shadow-none p-0 overflow-hidden">
-                  <div className="relative h-40 w-full overflow-hidden border-b-thick border-border">
-                    {menu.imagePath ? (
-                      <img
-                        src={resolveAssetUrl(menu.imagePath)}
-                        alt={menu.name}
-                        className={`object-cover absolute inset-0 h-full w-full ${menu.soldOut ? "opacity-40" : ""}`}
-                      />
-                    ) : (
-                      <div className="flex h-full w-full items-center justify-center bg-muted/40">
-                        <span className="text-[10px] uppercase font-bold tracking-widest text-muted-foreground">No Image</span>
-                      </div>
-                    )}
-                    {/* 売り切れオーバーレイ (管理側でも一目で分かるように) */}
-                    {menu.soldOut && (
-                      <div className="absolute inset-0 flex items-center justify-center bg-black/50">
-                        <span className="text-white text-lg font-headline uppercase tracking-[2px] border-thick border-white px-3 py-1">
-                          売り切れ
-                        </span>
-                      </div>
-                    )}
+            <div className="space-y-6">
+              {/* 2026-10-16: メニューはカテゴリ単位の横幅を使う行表示にし、編集フォームへ設定を集約する。 */}
+              {[...new Set(menus.map((menu) => menu.category?.trim() || "未分類"))].sort((a, b) => a.localeCompare(b, "ja")).map((category) => (
+                <section key={category} className="space-y-2">
+                  <h3 className="border-b-thin border-border pb-2 text-xs font-bold uppercase">{category}</h3>
+                  <div className="w-full divide-y-thin divide-border border-y-thin border-border">
+              {menus.filter((menu) => (menu.category?.trim() || "未分類") === category).map((menu) => (
+                <div key={menu.id} className="flex w-full flex-col gap-3 py-3 sm:flex-row sm:items-center">
+                  {menu.imagePath ? <img src={resolveAssetUrl(menu.imagePath)} alt="" className="h-16 w-20 shrink-0 border-thin border-border object-cover" /> : <div className="flex h-16 w-20 shrink-0 items-center justify-center bg-muted text-[9px] uppercase">No Image</div>}
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-3"><CardTitle className="text-sm font-bold uppercase">{menu.name}</CardTitle><span className="text-base font-black">¥{menu.price.toLocaleString()}</span>
+                      {menu.soldOut && <span className="text-[10px] font-bold text-destructive">売り切れ</span>}
+                      {menu.inventoryEnabled && <span className="text-[10px] text-muted-foreground">在庫 {menu.stockQuantity ?? 0}</span>}
+                    </div>
+                    {menu.description && <p className="mt-1 text-xs text-muted-foreground">{menu.description}</p>}
+                    {menu.toppings?.length ? <p className="mt-1 text-[10px] text-muted-foreground">対応トッピング: {menu.toppings.map((t) => t.name).join("、")}</p> : null}
                   </div>
-                  <CardContent className="p-4 space-y-3">
-                    <div>
-                      <CardTitle className="text-sm font-bold truncate uppercase">{menu.name}</CardTitle>
-                      {menu.inventoryEnabled && (
-                        <p className="text-[10px] text-muted-foreground font-mono mt-0.5">在庫管理中 · 残{menu.stockQuantity ?? 0}</p>
-                      )}
-                    </div>
-
-                    <div className="flex justify-between items-center">
-                      <span className="text-lg font-black text-primary">
-                        ¥{menu.price.toLocaleString()}
-                      </span>
-                      {/* 販売状態: 在庫管理OFFならワンタップ切替、ONなら在庫連動で読み取り専用 (2026-07-14) */}
-                      {menu.inventoryEnabled ? (
-                        <span className={`text-[10px] font-bold font-mono px-2 py-1 border-thick ${menu.soldOut ? "border-destructive text-destructive" : "border-success text-success"}`} title="在庫管理で自動制御">
-                          {menu.soldOut ? "売り切れ" : "販売中"}<span className="text-muted-foreground">(在庫連動)</span>
-                        </span>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => toggleSoldOut.mutate(menu)}
-                          disabled={toggleSoldOut.isPending}
-                          className={`text-[10px] font-bold font-mono uppercase px-2 py-1 border-thick transition-all ${menu.soldOut ? "border-destructive bg-destructive/10 text-destructive hover:bg-destructive hover:text-white" : "border-success bg-success/10 text-success hover:bg-success hover:text-white"}`}
-                        >
-                          {menu.soldOut ? "売り切れ" : "販売中"}
-                        </button>
-                      )}
-                    </div>
-
-                    {menu.description && (
-                      <CardDescription className="text-xs line-clamp-2 min-h-[2.5rem] leading-[1.6]">
-                        {menu.description}
-                      </CardDescription>
-                    )}
-
-                    {menu.toppings && menu.toppings.length > 0 && (
-                      <div className="space-y-1">
-                        <p className="text-[9px] font-bold text-muted-foreground uppercase tracking-wider">紐付けトッピング:</p>
-                        <div className="flex flex-wrap gap-1">
-                          {menu.toppings.map((t) => (
-                            <span key={t.id} className={`inline-flex items-center gap-1 text-[9px] px-1.5 py-0.5 border-thin border-border font-bold ${t.soldOut ? "bg-destructive/10 text-destructive line-through" : "bg-muted"}`}>
-                              {t.imagePath && (
-                                <img src={resolveAssetUrl(t.imagePath)} alt="" className="h-3.5 w-3.5 object-cover border-thin border-current shrink-0" />
-                              )}
-                              {t.name}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    <div className="flex gap-2 pt-2 border-t-thin border-border">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleOpenMenuEdit(menu)}
-                        className="flex-1 rounded-none border-thick border-border h-8 text-[10px] font-bold uppercase"
-                      >
-                        <Edit className="mr-1 h-3 w-3" />
-                        編集
-                      </Button>
-                      <Button
-                        variant="destructive"
-                        size="sm"
-                        onClick={() => handleDeleteMenu(menu)}
-                        className="flex-1 rounded-none border-thick border-destructive h-8 text-[10px] font-bold uppercase"
-                      >
-                        <Trash2 className="mr-1 h-3 w-3" />
-                        削除
-                      </Button>
-                    </div>
-                  </CardContent>
-                </Card>
+                  {/* 2026-10-16: 操作ボタンは狭い画面で折り返し、商品名と重ならないようにする。 */}
+                  <div className="flex shrink-0 flex-wrap gap-2">
+                    {!menu.inventoryEnabled && <Button type="button" variant="outline" size="sm" onClick={() => toggleSoldOut.mutate(menu)} disabled={toggleSoldOut.isPending}>{menu.soldOut ? "販売再開" : "売り切れ"}</Button>}
+                    <Button variant="outline" size="sm" onClick={() => handleOpenMenuEdit(menu)}><Edit className="mr-1 h-3 w-3" />編集</Button>
+                  </div>
+                </div>
+              ))}
+                  </div>
+                </section>
               ))}
             </div>
+
           )}
-        </div>
+        </section>
 
         {/* トッピングセクション */}
-        <div className="space-y-4">
+        <section aria-labelledby="topping-management-heading" className="space-y-4 border-thick border-border p-4">
           <div className="flex justify-between items-center border-b-thick border-border pb-3">
-            <h2 className="text-sm font-bold uppercase tracking-wider">[トッピング管理]</h2>
+            <h2 id="topping-management-heading" className="text-sm font-bold uppercase tracking-wider">[トッピング管理]</h2>
             <Button
               onClick={handleOpenToppingAdd}
               className="rounded-none border-thick border-primary bg-primary text-primary-foreground hover:bg-background hover:text-foreground h-8 text-[11px] font-bold uppercase px-3 flex items-center gap-1"
@@ -324,89 +257,27 @@ function MenuManagementContent() {
               onAction={handleOpenToppingAdd}
             />
           ) : (
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              {toppings.map((topping) => (
-                <Card key={topping.id} className="rounded-none bg-background shadow-none p-0 overflow-hidden">
-                  {/* トッピング画像 (2026-07-15: メニュー管理にも画像を表示)。売切時は減光+オーバーレイ。 */}
-                  <div className="relative h-28 w-full overflow-hidden border-b-thick border-border">
-                    {topping.imagePath ? (
-                      <img
-                        src={resolveAssetUrl(topping.imagePath)}
-                        alt={topping.name}
-                        className={`object-cover absolute inset-0 h-full w-full ${topping.soldOut ? "opacity-40" : ""}`}
-                      />
-                    ) : (
-                      <div className="flex h-full w-full items-center justify-center bg-muted/40">
-                        <span className="text-[9px] uppercase font-bold tracking-widest text-muted-foreground">No Image</span>
-                      </div>
-                    )}
-                    {topping.soldOut && (
-                      <div className="absolute inset-0 flex items-center justify-center bg-black/50">
-                        <span className="text-white text-sm font-headline uppercase tracking-[2px] border-thick border-white px-2 py-0.5">
-                          売り切れ
-                        </span>
-                      </div>
-                    )}
+            <>
+              {/* 2026-10-16: トッピング一覧は全幅の行と並び替え操作で現場の順序調整を可能にする。 */}
+              <div className="w-full divide-y-thin divide-border border-y-thin border-border">
+              {toppings.map((topping, index) => (
+                <div key={topping.id} className="flex w-full flex-col gap-3 py-3 sm:flex-row sm:items-center">
+                  {topping.imagePath ? <img src={resolveAssetUrl(topping.imagePath)} alt="" className="h-14 w-16 shrink-0 border-thin border-border object-cover" /> : <div className="flex h-14 w-16 shrink-0 items-center justify-center bg-muted text-[9px] uppercase">No Image</div>}
+                  <div className="min-w-0 flex-1"><p className="text-sm font-bold uppercase">{topping.name}</p><p className="text-[10px] text-muted-foreground">{topping.category || "未分類"} · +¥{topping.price.toLocaleString()} · {topping.soldOut ? "売り切れ" : "販売中"}</p>{topping.description && <p className="mt-1 text-xs text-muted-foreground">{topping.description}</p>}</div>
+                  {/* 2026-10-16: 順序調整の意味をラベルで示し、販売操作と見分けやすくする。 */}
+                  <div className="flex shrink-0 flex-wrap items-center gap-2">
+                    <span className="w-full text-[9px] font-bold uppercase text-muted-foreground sm:w-auto">順番</span>
+                    <Button type="button" variant="outline" size="icon" title="上へ移動" aria-label={`${topping.name}を上へ`} disabled={isReorderingToppings || index === 0} onClick={() => moveTopping(index, -1)}><ArrowUp className="h-4 w-4" /></Button>
+                    <Button type="button" variant="outline" size="icon" title="下へ移動" aria-label={`${topping.name}を下へ`} disabled={isReorderingToppings || index === toppings.length - 1} onClick={() => moveTopping(index, 1)}><ArrowDown className="h-4 w-4" /></Button>
+                    {!toppingStockManaged && <Button type="button" variant="outline" size="sm" onClick={() => toggleToppingSoldOut.mutate(topping)}>{topping.soldOut ? "販売再開" : "売り切れ"}</Button>}
+                    <Button variant="outline" size="sm" onClick={() => handleOpenToppingEdit(topping)}><Edit className="mr-1 h-3 w-3" />編集</Button>
                   </div>
-                  <CardContent className="p-4 space-y-3">
-                  <div>
-                    <CardTitle className="text-xs font-bold truncate uppercase">{topping.name}</CardTitle>
-                    <p className="text-[9px] text-muted-foreground font-mono mt-0.5">ID: {topping.id}</p>
-                  </div>
-
-                  <div className="flex justify-between items-center gap-2">
-                    <span className="text-base font-black text-primary">
-                      +¥{topping.price.toLocaleString()}
-                    </span>
-                    {/* 販売状態: 在庫管理OFFならワンタップ切替、ONなら在庫連動で読み取り専用 (2026-07-15) */}
-                    {toppingStockManaged ? (
-                      <span className={`text-[9px] font-bold font-mono px-1.5 py-1 border-thick ${topping.soldOut ? "border-destructive text-destructive" : "border-success text-success"}`} title="在庫管理で自動制御">
-                        {topping.soldOut ? "売切" : "販売中"}<span className="text-muted-foreground">(在庫連動)</span>
-                      </span>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => toggleToppingSoldOut.mutate(topping)}
-                        disabled={toggleToppingSoldOut.isPending}
-                        className={`text-[9px] font-bold font-mono uppercase px-1.5 py-1 border-thick transition-all ${topping.soldOut ? "border-destructive bg-destructive/10 text-destructive hover:bg-destructive hover:text-white" : "border-success bg-success/10 text-success hover:bg-success hover:text-white"}`}
-                      >
-                        {topping.soldOut ? "売切" : "販売中"}
-                      </button>
-                    )}
-                  </div>
-
-                  {topping.description && (
-                    <CardDescription className="text-xs line-clamp-2 min-h-[2.5rem] leading-[1.6]">
-                      {topping.description}
-                    </CardDescription>
-                  )}
-
-                  <div className="flex gap-2 pt-2 border-t-thin border-border">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => handleOpenToppingEdit(topping)}
-                      className="flex-1 rounded-none border-thick border-border h-7 text-[10px] font-bold uppercase"
-                    >
-                      <Edit className="mr-1 h-3 w-3" />
-                      編集
-                    </Button>
-                    <Button
-                      variant="destructive"
-                      size="sm"
-                      onClick={() => handleDeleteTopping(topping)}
-                      className="flex-1 rounded-none border-thick border-destructive h-7 text-[10px] font-bold uppercase"
-                    >
-                      <Trash2 className="mr-1 h-3 w-3" />
-                      削除
-                    </Button>
-                  </div>
-                  </CardContent>
-                </Card>
+                </div>
               ))}
-            </div>
+              </div>
+            </>
           )}
-        </div>
+        </section>
 
       </div>
 
@@ -416,6 +287,7 @@ function MenuManagementContent() {
         isOpen={isMenuOpen}
         onClose={() => setIsMenuOpen(false)}
         menu={selectedMenu}
+        onDelete={selectedMenu ? () => { handleDeleteMenu(selectedMenu); setIsMenuOpen(false); } : undefined}
       />
 
       <ToppingFormModal
@@ -423,12 +295,7 @@ function MenuManagementContent() {
         isOpen={isToppingOpen}
         onClose={() => setIsToppingOpen(false)}
         topping={selectedTopping}
-      />
-
-      <ToppingMappingModal
-        circleId={circleId}
-        isOpen={isMappingOpen}
-        onClose={() => setIsMappingOpen(false)}
+        onDelete={selectedTopping ? () => { handleDeleteTopping(selectedTopping); setIsToppingOpen(false); } : undefined}
       />
 
     </DashboardLayout>

@@ -6,6 +6,7 @@ import { membershipApi } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { FormField, FormSubmitButton } from "@/components/ui/FormField";
 import { Modal } from "@/components/ui/Modal";
+import { useUnsavedChanges } from "@/components/UnsavedNavigationGuard";
 
 interface CircleCreateLinkModalProps {
 	eventId: string;
@@ -21,7 +22,13 @@ export function CircleCreateLinkModal({ eventId, isOpen, onClose }: CircleCreate
 	const queryClient = useQueryClient();
 	const [maxUses, setMaxUses] = useState(DEFAULT_MAX_USES);
 	const [expiresInHours, setExpiresInHours] = useState(DEFAULT_EXPIRES_IN_HOURS);
-	const [createdInvite, setCreatedInvite] = useState<{ token: string; code: string; expiresAt: string } | null>(null);
+	const [createdInvite, setCreatedInvite] = useState<{ token: string; code: string; expiresAt: string; maxUses: number } | null>(null);
+	const closeModal = () => {
+		setMaxUses(DEFAULT_MAX_USES);
+		setExpiresInHours(DEFAULT_EXPIRES_IN_HOURS);
+		setCreatedInvite(null);
+		onClose();
+	};
 
 	useEffect(() => {
 		if (!isOpen) return;
@@ -35,15 +42,28 @@ export function CircleCreateLinkModal({ eventId, isOpen, onClose }: CircleCreate
 			membershipApi.createInvite({
 				eventId,
 				role: "circle_manager",
-				maxUses: Math.min(100, Math.max(1, maxUses)),
+				// 2026-10-15 Issue #122: 0回は無制限を表すため、APIへ null を明示して保存する。
+				maxUses: maxUses === 0 ? null : Math.min(100, Math.max(1, maxUses)),
 				expiresInHours: Math.min(168, Math.max(1, expiresInHours)),
 			}),
 		onSuccess: (invite) => {
-			setCreatedInvite({ ...invite, expiresAt: String(invite.expiresAt) });
+			setCreatedInvite({ ...invite, expiresAt: String(invite.expiresAt), maxUses });
 			queryClient.invalidateQueries({ queryKey: ["invites", eventId] });
 			toast.success("サークル作成リンクを発行しました");
 		},
 		onError: (error: Error) => toast.error(error.message || "リンクの発行に失敗しました"),
+	});
+
+	// 2026-10-16: 招待リンクの条件入力も、遷移確認から発行できるよう共通ガードへ登録する。
+	useUnsavedChanges({
+		isDirty: isOpen && !createdInvite && (maxUses !== DEFAULT_MAX_USES || expiresInHours !== DEFAULT_EXPIRES_IN_HOURS),
+		onSave: async () => {
+			if (maxUses < 0 || maxUses > 100 || expiresInHours < 1 || expiresInHours > 168) {
+				throw new Error("使用回数は0〜100回、有効期限は1〜168時間で入力してください。");
+			}
+			await createInviteMutation.mutateAsync();
+		},
+		onDiscard: closeModal,
 	});
 
 	const inviteUrl = createdInvite
@@ -62,22 +82,22 @@ export function CircleCreateLinkModal({ eventId, isOpen, onClose }: CircleCreate
 	return (
 		<Modal
 			isOpen={isOpen}
-			onClose={onClose}
-			title={createdInvite ? "[サークル作成リンクを発行しました]" : "[サークル作成リンクを作成]"}
+			onClose={closeModal}
+			title={createdInvite ? "サークル作成リンクを発行しました" : "サークル作成リンクを発行"}
 			subtitle="リンクを開いた人はログイン後、このイベントのサークル作成へ進みます。"
 			maxWidth="md"
 		>
 			{createdInvite ? (
 				<div className="space-y-4">
 					<div className="border-thick border-border bg-muted/30 p-3 space-y-2">
-						<p className="text-[10px] font-bold uppercase">[共有リンク]</p>
+						<p className="text-[10px] font-bold uppercase">共有リンク</p>
 						<p className="break-all select-all text-xs">{inviteUrl}</p>
 						<Button type="button" variant="outline" className="w-full rounded-none" onClick={() => copy(inviteUrl, "リンク")}>
 							<Copy className="h-4 w-4" /> リンクをコピー
 						</Button>
 					</div>
 					<div className="border-thick border-border p-3 space-y-2">
-						<p className="text-[10px] font-bold uppercase">[招待コード]</p>
+						<p className="text-[10px] font-bold uppercase">招待コード</p>
 						<p className="flex items-center justify-between gap-2">
 							<span className="select-all font-bold tracking-[3px]">{createdInvite.code}</span>
 							<Button type="button" variant="outline" size="sm" className="rounded-none" onClick={() => copy(createdInvite.code, "招待コード")}>
@@ -86,10 +106,10 @@ export function CircleCreateLinkModal({ eventId, isOpen, onClose }: CircleCreate
 						</p>
 					</div>
 					<p className="text-[10px] text-muted-foreground">
-						使用可能回数: {maxUses}回 / 有効期限: {new Date(createdInvite.expiresAt).toLocaleString("ja-JP")}
+						使用可能回数: {createdInvite.maxUses === 0 ? "無制限" : `${createdInvite.maxUses}回`} / 有効期限: {new Date(createdInvite.expiresAt).toLocaleString("ja-JP")}
 					</p>
 					<div className="flex justify-end border-t-thick border-border pt-3">
-						<Button type="button" variant="outline" className="rounded-none" onClick={onClose}>閉じる</Button>
+						<Button type="button" variant="outline" className="rounded-none" onClick={closeModal}>閉じる</Button>
 					</div>
 				</div>
 			) : (
@@ -99,14 +119,17 @@ export function CircleCreateLinkModal({ eventId, isOpen, onClose }: CircleCreate
 					</p>
 					<FormField
 						id="circleInviteMaxUses"
-						label="使用可能回数（作成できるサークル数）"
+						label={`使用可能回数（作成できるサークル数${maxUses === 0 ? "・無制限" : ""}）`}
 						type="number"
-						min={1}
+						min={0}
 						max={100}
 						value={maxUses}
 						onChange={(event) => setMaxUses(Number(event.target.value))}
-						placeholder="1"
+						placeholder={maxUses === 0 ? "無制限" : "1"}
 					/>
+					<p className="-mt-3 text-[10px] text-muted-foreground" aria-live="polite">
+						0を入力すると無制限です（現在: {maxUses === 0 ? "無制限" : `${maxUses}回`}）。
+					</p>
 					<FormField
 						id="circleInviteExpiry"
 						label="有効期限（時間）"
@@ -119,7 +142,7 @@ export function CircleCreateLinkModal({ eventId, isOpen, onClose }: CircleCreate
 					/>
 					<FormSubmitButton
 						onClick={() => createInviteMutation.mutate()}
-						disabled={maxUses < 1 || maxUses > 100 || expiresInHours < 1 || expiresInHours > 168}
+						disabled={maxUses < 0 || maxUses > 100 || expiresInHours < 1 || expiresInHours > 168}
 						isPending={createInviteMutation.isPending}
 						icon={Link2}
 					>

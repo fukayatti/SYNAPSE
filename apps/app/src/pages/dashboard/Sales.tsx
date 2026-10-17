@@ -57,9 +57,14 @@ function SalesManagementContent() {
     new Set((orders ?? []).filter((o) => o.createdAt).map((o) => dayKey(new Date(o.createdAt!))))
   ).sort((a, b) => (a < b ? 1 : -1));
 
-  // orders 取得後、まだ日付未選択なら最新の営業日を既定にする。
+  // 2026-10-16: スペース切り替え後に前サークルの選択日が残ると、新しい注文があるのに空表示になる。
+  // 選択日が現在の注文日一覧に含まれない場合は最新の営業日に戻す。
   useEffect(() => {
-    if (!selectedDate && availableDates.length > 0) {
+    if (availableDates.length === 0) {
+      if (selectedDate) setSelectedDate("");
+      return;
+    }
+    if (!availableDates.includes(selectedDate)) {
       setSelectedDate(availableDates[0]);
     }
   }, [availableDates, selectedDate]);
@@ -168,10 +173,10 @@ function SalesManagementContent() {
 
   return (
     <DashboardLayout title={circleName} subtitle="売上管理" type="circle">
-      <div className="space-y-6">
+      <div className="space-y-8">
         {/* 日付切り替えバー (日にちごとに売上を表示) */}
         <Card className="rounded-none shadow-none">
-          <CardContent className="p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 font-mono">
+          <CardContent className="flex flex-col justify-between gap-4 p-5 font-mono sm:flex-row sm:items-center">
             <span className="text-sm font-bold uppercase tracking-wider text-muted-foreground">[表示する営業日]</span>
             {availableDates.length === 0 ? (
               <span className="text-sm text-muted-foreground">注文データがありません</span>
@@ -212,31 +217,31 @@ function SalesManagementContent() {
         </Card>
 
         {/* サマリーカード */}
-        <div className="grid gap-4 md:grid-cols-3">
+        <div className="grid gap-5 md:grid-cols-3">
           <Card className="rounded-none shadow-none">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm uppercase font-bold text-muted-foreground">総注文数</CardTitle>
+            <CardHeader className="pb-1">
+              <CardTitle className="font-mono text-xs uppercase tracking-widest text-muted-foreground">総注文数</CardTitle>
             </CardHeader>
             <CardContent>
-              <p className="text-2xl font-black">{ordersForDay.length}件</p>
+              <p className="font-headline text-3xl tabular-nums">{ordersForDay.length}<span className="ml-2 text-base">件</span></p>
             </CardContent>
           </Card>
 
           <Card className="rounded-none shadow-none">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm uppercase font-bold text-muted-foreground">完了注文数</CardTitle>
+            <CardHeader className="pb-1">
+              <CardTitle className="font-mono text-xs uppercase tracking-widest text-muted-foreground">完了注文数</CardTitle>
             </CardHeader>
             <CardContent>
-              <p className="text-2xl font-black">{completedOrders.length}件</p>
+              <p className="font-headline text-3xl tabular-nums">{completedOrders.length}<span className="ml-2 text-base">件</span></p>
             </CardContent>
           </Card>
 
           <Card className="rounded-none shadow-none bg-primary text-primary-foreground">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm uppercase font-bold text-primary-foreground/75">完了売上</CardTitle>
+            <CardHeader className="pb-1">
+              <CardTitle className="font-mono text-xs uppercase tracking-widest text-primary-foreground/75">完了売上</CardTitle>
             </CardHeader>
             <CardContent>
-              <p className="text-2xl font-black">
+              <p className="font-headline text-3xl tabular-nums">
                 ¥{completedSales.toLocaleString()}
               </p>
             </CardContent>
@@ -244,16 +249,20 @@ function SalesManagementContent() {
         </div>
 
         {/* グラフエリア */}
-        <div className="grid gap-6 md:grid-cols-2">
+        <div className="grid items-start gap-6 xl:grid-cols-2">
           {/* 時間帯別売上グラフ (SVG) */}
           <Card className="rounded-none shadow-none">
             <CardHeader>
-              <CardTitle className="text-base font-bold uppercase">[時間帯別売上推移]</CardTitle>
+              <CardTitle className="text-base font-bold uppercase tracking-wide">時間帯別売上推移</CardTitle>
               <CardDescription className="text-xs">9:00 - 18:00 の時間帯別売上 (円)</CardDescription>
             </CardHeader>
             <CardContent className="flex justify-center">
-              <div 
-                className="w-full max-w-[500px] cursor-pointer hover:opacity-80 transition-opacity" 
+              {/* 2026-10-16: グラフ拡大をマウスだけでなくキーボードからも開けるよう共通Buttonにする。 */}
+              <Button
+                type="button"
+                variant="ghost"
+                aria-label="時間帯別売上グラフを拡大"
+                className="h-auto w-full max-w-[500px] cursor-pointer justify-start p-0 text-foreground no-underline hover:bg-transparent hover:text-foreground active:bg-transparent active:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
                 onClick={() => setIsChartExpanded(true)}
                 title="クリックして拡大"
               >
@@ -322,14 +331,14 @@ function SalesManagementContent() {
                     </g>
                   ))}
                 </svg>
-              </div>
+              </Button>
             </CardContent>
           </Card>
 
           {/* メニュー別売上グラフ (HTML棒) */}
           <Card className="rounded-none shadow-none">
             <CardHeader>
-              <CardTitle className="text-base font-bold uppercase">[メニュー別売上構成]</CardTitle>
+              <CardTitle className="text-base font-bold uppercase tracking-wide">メニュー別売上構成</CardTitle>
               <CardDescription className="text-xs">完了したメニューごとの合計売上</CardDescription>
             </CardHeader>
             <CardContent>
@@ -339,9 +348,9 @@ function SalesManagementContent() {
                     const pct = (item.sales / maxMenuSales) * 100;
                     return (
                       <div key={idx} className="space-y-1">
-                        <div className="flex justify-between text-xs font-bold uppercase font-mono">
-                          <span>{item.name} ({item.count}点)</span>
-                          <span>¥{item.sales.toLocaleString()}</span>
+                        <div className="flex min-w-0 flex-wrap items-start justify-between gap-x-4 gap-y-1 text-xs font-bold uppercase font-mono">
+                          <span className="min-w-0 break-words">{item.name} ({item.count}点)</span>
+                          <span className="shrink-0 tabular-nums">¥{item.sales.toLocaleString()}</span>
                         </div>
                         <div className="w-full h-4 border-thick border-border bg-muted rounded-none relative">
                           <div
@@ -363,7 +372,7 @@ function SalesManagementContent() {
         {/* 注文履歴カード */}
         <Card className="rounded-none shadow-none">
           <CardHeader>
-            <CardTitle className="text-base font-bold uppercase">注文履歴</CardTitle>
+            <CardTitle className="text-base font-bold uppercase tracking-wide">注文履歴</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="space-y-2 max-h-[300px] overflow-y-auto pr-2">

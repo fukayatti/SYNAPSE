@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { circleApi, type CircleAnalytics } from "@/lib/api";
 import { CircleAuthGuard, PermissionGuard, useAuth } from "@/hooks/useCircleAuth";
 import DashboardLayout from "@/components/DashboardLayout";
+import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState } from "@/components/ui/ErrorState";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -67,14 +68,14 @@ function StatCard({
   icon?: React.ComponentType<{ className?: string }>;
 }) {
   return (
-    <div className="border-thick border-border bg-background p-3 flex flex-col gap-1">
+    <Card className="min-w-0 gap-4 p-5">
       <div className="flex items-center gap-1.5 text-muted-foreground">
         {Icon && <Icon className="h-3.5 w-3.5" />}
         <span className="font-mono text-[10px] uppercase tracking-widest">{label}</span>
       </div>
-      <div className="font-headline text-[24px] leading-none tabular-nums">{value}</div>
+      <div className="break-words font-headline text-2xl leading-tight tabular-nums">{value}</div>
       {sub && <div className="font-mono text-[10px] text-muted-foreground">{sub}</div>}
-    </div>
+    </Card>
   );
 }
 
@@ -157,16 +158,20 @@ function CircleAnalyticsContent() {
 
   return (
     <DashboardLayout title={circleName || "サークルダッシュボード"} subtitle="統計・分析" type="circle">
-      <div className="space-y-6">
-        <div className="flex items-center justify-between border-b-thick border-border pb-3">
-          <h2 className="text-sm font-bold flex items-center gap-2 uppercase tracking-wider">
-            <BarChart3 className="h-4 w-4" /> サークル統計・分析
-          </h2>
-          <div className="flex items-center gap-2">
+      <div className="space-y-8">
+        <div className="flex flex-col gap-5 border-b-thick border-border pb-6 lg:flex-row lg:items-end lg:justify-between">
+          <div className="space-y-2">
+            <p className="font-mono text-xs uppercase tracking-widest text-muted-foreground">パフォーマンス概要</p>
+            <h2 className="text-xl font-headline flex items-center gap-3 uppercase tracking-wider">
+              <BarChart3 className="h-5 w-5" /> サークル統計・分析
+            </h2>
+            <p className="max-w-2xl text-sm text-muted-foreground">売上、注文、来場者の動きをまとめて確認できます。</p>
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
             <button
               type="button"
               onClick={() => downloadCsv(circleName || "circle", data)}
-              className="flex items-center gap-1 font-mono text-[11px] uppercase border-thick border-border px-2 py-1 hover:bg-muted"
+              className="flex items-center gap-2 whitespace-nowrap font-mono text-xs uppercase border-thick border-border px-3 py-2 hover:bg-muted"
               title="統計・精算データをCSVで書き出す"
             >
               <Download className="h-3.5 w-3.5" /> CSV
@@ -174,7 +179,7 @@ function CircleAnalyticsContent() {
             <button
               type="button"
               onClick={() => setLive((v) => !v)}
-              className={`flex items-center gap-1 font-mono text-[11px] uppercase border-thick px-2 py-1 transition-colors ${
+              className={`flex items-center gap-2 whitespace-nowrap font-mono text-xs uppercase border-thick px-3 py-2 transition-colors ${
                 live ? "border-accent bg-accent text-accent-foreground" : "border-border hover:bg-muted"
               }`}
               title="ONで15秒ごとに自動更新 (リアルタイムライブ表示)"
@@ -185,7 +190,7 @@ function CircleAnalyticsContent() {
               type="button"
               onClick={() => refetch()}
               disabled={isFetching}
-              className="flex items-center gap-1 font-mono text-[11px] uppercase border-thick border-border px-2 py-1 hover:bg-muted"
+              className="flex items-center gap-2 whitespace-nowrap font-mono text-xs uppercase border-thick border-border px-3 py-2 hover:bg-muted"
             >
               <RefreshCw className={`h-3.5 w-3.5 ${isFetching ? "animate-spin" : ""}`} /> 更新
             </button>
@@ -193,10 +198,11 @@ function CircleAnalyticsContent() {
         </div>
 
         {/* KPI カード */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4">
           <StatCard label="総売上" value={yen(t.revenue)} icon={Coins} />
           <StatCard label="総注文数" value={t.orders.toLocaleString()} sub={`完了率 ${t.completedRate}%`} icon={Receipt} />
-          <StatCard label="総客数" value={t.customers.toLocaleString()} sub={`平均客単価 ${yen(t.avgSpend)}`} icon={Users} />
+          {/* 2026-10-16: 平均客単価は専用KPIで見せ、総客数カードとの重複を避ける。 */}
+          <StatCard label="総客数" value={t.customers.toLocaleString()} icon={Users} />
           <StatCard label="平均調理時間" value={t.avgPrepMin != null ? `${t.avgPrepMin}分` : "—"} icon={Clock} />
           <StatCard label="平均評価" value={t.avgRating != null ? `★${t.avgRating}` : "—"} sub={`${t.reviews}件のレビュー`} icon={Star} />
           <StatCard label="スキャン来場者" value={t.visitors.toLocaleString()} icon={Users} />
@@ -205,10 +211,13 @@ function CircleAnalyticsContent() {
         </div>
 
         {/* 時間帯別売上 */}
-        <section className="space-y-2">
-          <h3 className="font-mono text-[11px] uppercase tracking-widest text-muted-foreground">時間帯別 売上推移</h3>
+        <section className="space-y-5">
+          <div className="space-y-2 border-b-thin border-border pb-3">
+            <h3 className="font-headline text-base uppercase tracking-wide">時間帯別 売上推移</h3>
+            <p className="font-mono text-xs text-muted-foreground">時間ごとの売上と注文数</p>
+          </div>
           {activeHours.length === 0 ? (
-            <p className="font-mono text-[11px] text-muted-foreground">まだ本日の売上データがありません。</p>
+            <p className="font-mono text-sm text-muted-foreground">まだ売上データがありません。</p>
           ) : (
             <Bars
               rows={activeHours.map((h) => ({ label: `${h.hour}時`, value: h.revenue }))}
@@ -219,34 +228,40 @@ function CircleAnalyticsContent() {
         </section>
 
         {/* 人気メニュー + 支払い方法 */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <section className="space-y-2">
-            <h3 className="font-mono text-[11px] uppercase tracking-widest text-muted-foreground">人気メニュー (販売個数 Top)</h3>
+        <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+          <section className="space-y-5">
+            <div className="space-y-2 border-b-thin border-border pb-3">
+              <h3 className="font-headline text-base uppercase tracking-wide">人気メニュー</h3>
+              <p className="font-mono text-xs text-muted-foreground">販売個数の上位メニュー</p>
+            </div>
             {a.menuRanking.length === 0 ? (
               <p className="font-mono text-[11px] text-muted-foreground">販売実績がありません。</p>
             ) : (
-              <div className="space-y-1">
+              <div className="space-y-2">
                 {a.menuRanking.slice(0, 10).map((m, i) => (
-                  <div key={m.menuName} className="flex items-center justify-between font-mono text-[11px] border-b border-border py-1">
-                    <span className="truncate">
+                  <div key={m.menuName} className="flex items-start justify-between gap-4 font-mono text-xs border-b border-border py-2">
+                    <span className="min-w-0 break-words">
                       <span className="text-muted-foreground mr-2">{i + 1}.</span>
                       {m.menuName}
                     </span>
-                    <span className="tabular-nums shrink-0">{m.quantity}個 / {yen(m.revenue)}</span>
+                    <span className="shrink-0 text-right tabular-nums">{m.quantity}個<br />{yen(m.revenue)}</span>
                   </div>
                 ))}
               </div>
             )}
           </section>
 
-          <section className="space-y-2">
-            <h3 className="font-mono text-[11px] uppercase tracking-widest text-muted-foreground">支払い方法別 売上</h3>
+          <section className="space-y-5">
+            <div className="space-y-2 border-b-thin border-border pb-3">
+              <h3 className="font-headline text-base uppercase tracking-wide">支払い方法別 売上</h3>
+              <p className="font-mono text-xs text-muted-foreground">支払い手段ごとの利用状況</p>
+            </div>
             {a.paymentBreakdown.length === 0 ? (
               <p className="font-mono text-[11px] text-muted-foreground">売上がありません。</p>
             ) : (
-              <div className="space-y-1">
+              <div className="space-y-2">
                 {a.paymentBreakdown.map((p) => (
-                  <div key={p.method} className="flex items-center justify-between font-mono text-[11px] border-b border-border py-1">
+                  <div key={p.method} className="flex items-center justify-between gap-4 font-mono text-xs border-b border-border py-2">
                     <span>{p.method}</span>
                     <span className="tabular-nums shrink-0">{p.orders}件 / {yen(p.revenue)}</span>
                   </div>

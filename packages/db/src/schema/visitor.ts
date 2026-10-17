@@ -13,6 +13,14 @@ import {
 import { event, circle } from "./core";
 import { ulid } from "ulidx";
 
+// 2026-10-17: イベント内の表示番号を同時発行でも重複させないため、最後に確保した番号を保存する。
+export const eventUserSequence = sqliteTable("event_user_sequence", {
+  eventId: text("event_id")
+    .primaryKey()
+    .references(() => event.id, { onDelete: "cascade" }),
+  value: integer("value").notNull(),
+});
+
 // イベント来場ユーザーテーブル
 export const eventUser = sqliteTable(
   "event_user",
@@ -30,6 +38,8 @@ export const eventUser = sqliteTable(
     // 2026-10-08: 入場時点の年齢と、年を含めない誕生日（月日）を別々に保持する。
     birthdayMonthDay: text("birthday_month_day"), // MM-DD
     age: integer("age"),
+    // 2026-10-15 (#124): 家族全員の申告をまとめたJSON配列。null=未登録、[]=該当なし。
+    allergies: text("allergies"),
     onboardedAt: integer("onboarded_at", { mode: "timestamp_ms" }), // 初回入力完了時刻
     createdAt: integer("created_at", { mode: "timestamp_ms" })
       .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
@@ -57,6 +67,12 @@ export const wristband = sqliteTable(
       .notNull()
       .references(() => eventUser.id, { onDelete: "cascade" }),
     status: text("status").notNull().default("active"), // active / lost / replaced / revoked
+    // 2026-10-15 (#125): 家族の来場記録は eventUser を共有しつつ、受付表示に必要な
+    // ニックネーム・誕生日・年齢は物理/デジタルバンド単位で保持する。
+    nickname: text("nickname"),
+    birthdayMonthDay: text("birthday_month_day"), // MM-DD
+    age: integer("age"),
+    onboardedAt: integer("onboarded_at", { mode: "timestamp_ms" }),
     assignedAt: integer("assigned_at", { mode: "timestamp_ms" })
       .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
       .notNull(),
@@ -230,5 +246,32 @@ export const rewardRedemption = sqliteTable(
   },
   (table) => [
     index("reward_redemption_userId_idx").on(table.userId),
+  ]
+);
+
+// 2026-10-16: 1アカウントが家族人数分の景品を受け取れるよう、交換ごとの数量と
+// 景品名スナップショットを記録する。重複制約を外し、来場者・景品単位で複数回記録できる。
+export const stampRallyRedemption = sqliteTable(
+  "stamp_rally_redemption",
+  {
+    id: text("id").primaryKey().$defaultFn(() => ulid()),
+    eventId: text("event_id")
+      .notNull()
+      .references(() => event.id, { onDelete: "cascade" }),
+    eventUserId: text("event_user_id")
+      .notNull()
+      .references(() => eventUser.id, { onDelete: "cascade" }),
+    staffId: text("staff_id").notNull(),
+    rewardId: text("reward_id").notNull().default("default"),
+    rewardName: text("reward_name").notNull().default(""),
+    quantity: integer("quantity").notNull().default(1),
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+      .notNull(),
+  },
+  (table) => [
+    index("stamp_rally_redemption_event_created_idx").on(table.eventId, table.createdAt),
+    index("stamp_rally_redemption_event_user_idx").on(table.eventId, table.eventUserId),
+    index("stamp_rally_redemption_event_reward_idx").on(table.eventId, table.rewardId),
   ]
 );

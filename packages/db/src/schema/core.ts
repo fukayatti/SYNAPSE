@@ -20,6 +20,8 @@ export const event = sqliteTable("event", {
   id: text("id").primaryKey().$defaultFn(() => ulid()),
   eventName: text("event_name").notNull(),
   description: text("description"),
+  // 2026-10-16 (#126): 告知用の公式サイトURLをイベント情報として保持する。
+  officialWebsiteUrl: text("official_website_url"),
   startDate: integer("start_date", { mode: "timestamp_ms" }),
   endDate: integer("end_date", { mode: "timestamp_ms" }),
 
@@ -45,6 +47,9 @@ export const event = sqliteTable("event", {
   // 例: '["現金","PayPay","金券"]'。各サークルはこの中から対応する方法を選ぶ。
   // 2026-07-12: レジで支払い方法を選択して注文するフローの基盤。
   paymentMethods: text("payment_methods").default('["現金"]').notNull(),
+  // 2026-10-16 (#126): 店舗の位置カテゴリをイベント単位のID付き一覧として共有する。
+  // circle.settings.storeAreaId がこの一覧のIDを参照し、来場者画面でも同じ名称を表示する。
+  storeAreas: text("store_areas").default("[]").notNull(),
   // 文化祭エリアを横断するスタンプラリー設定をイベント単位で持つ。
   // 設定は低頻度で更新される小さなJSONなので、circle.mods/settings と同じく
   // 拡張しやすい形で保存し、読み込み時はアプリ側で既定値へ補完する (2026-10-07)。
@@ -83,6 +88,8 @@ export const event = sqliteTable("event", {
 
   // 物理リストバンドの有無フラグ (2026-07-12)
   hasPhysicalWristband: integer("has_physical_wristband", { mode: "boolean" }).default(true).notNull(),
+  // 2026-10-17: 既存のセルフ発行を維持して既定ONとし、イベント主催者が必要に応じて停止できる。
+  allowSelfIssue: integer("allow_self_issue", { mode: "boolean" }).default(true).notNull(),
 
   // 論理削除 (2026-07-04): 物理削除せず deletedAt に時刻を入れて非表示化する
   deletedAt: integer("deleted_at", { mode: "timestamp_ms" }),
@@ -152,6 +159,8 @@ export const circle = sqliteTable(
     createdFromInviteId: text("created_from_invite_id"),
     // 論理削除 (2026-07-04): 物理削除せず deletedAt に時刻を入れて非表示化する
     deletedAt: integer("deleted_at", { mode: "timestamp_ms" }),
+    // 2026-10-15 (#128): イベント削除で隠したサークルだけを安全に復元するための親ID。
+    deletedWithEventId: text("deleted_with_event_id"),
     createdAt: integer("created_at", { mode: "timestamp_ms" })
       .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
       .notNull(),

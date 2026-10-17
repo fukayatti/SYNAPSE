@@ -23,6 +23,7 @@ import { ErrorState } from "@/components/ui/ErrorState";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { toast } from "sonner";
 import { EventTheme } from "@/components/EventTheme";
+import { ApiError } from "@/lib/api-error";
 import { ShoppingCart, Plus, Minus, CheckCircle, UtensilsCrossed, Ticket, X, QrCode } from "lucide-react";
 import { resolveAssetUrl } from "@/lib/asset-url";
 import { QRCodeSVG } from "qrcode.react";
@@ -34,6 +35,8 @@ import type { CreateOrderInput } from "@fesflow/config/order-contract";
 import { ToppingSelection, parseToppingCategoryMaximums, parseToppingCategoryMinimums } from "@/components/menu/ToppingSelection";
 import { MenuCategoryFilter, menuCategoryKey } from "@/components/menu/MenuCategoryFilter";
 import { findVisitorRouteItem } from "@/lib/visitor-route";
+import { parseJapaneseAllergens } from "@fesflow/config/allergens";
+import { getCartAllergyWarnings, OrderAllergyWarning } from "@/features/orders/allergy-check";
 
 // 2026-07-13: 来場者モバイルオーダーもトッピング対応にするため、レジ (Register.tsx) と同じく
 // カートを「行 (line)」単位で持つ。同じメニューでもトッピング構成が違えば別行になる。
@@ -196,7 +199,9 @@ function VisitorMenuCard({
                         ? toppingMatches
                           ? "選択中のトッピングが無料になります"
                           : "対象トッピングを選ぶと無料になります"
-                        : `¥${c.discountAmount?.toLocaleString()}引き`}
+                        : c.kind === "cart_percentage"
+                          ? `カート全体から${c.discountPercent}%引き`
+                          : `¥${c.discountAmount?.toLocaleString()}引き`}
                     </p>
                   </div>
                   <button
@@ -247,6 +252,7 @@ function MenuPageContent() {
     enabled: visitorLoaded && !!userId,
   });
   const activeWristband = wristbandStatus?.wristband;
+  const familyAllergies = parseJapaneseAllergens(wristbandStatus?.user.allergies);
   const canDisplayMyQr = !!activeWristband && ["active", "smartphone"].includes(activeWristband.status);
   const myQrButtonLabel = isWristbandStatusLoading
     ? "入場情報を確認中…"
@@ -451,6 +457,12 @@ function MenuPageContent() {
     },
   });
   const { mutate: saveDraft } = preOrderMutation;
+  const preOrderStockError =
+    preOrderMutation.error instanceof ApiError &&
+    preOrderMutation.error.code === "BAD_REQUEST" &&
+    /在庫が不足|売り切れ/.test(preOrderMutation.error.message)
+      ? `${preOrderMutation.error.message}。数量を調整してから再度お試しください。`
+      : null;
 
   useEffect(() => {
     const waitMs = preOrderMutation.isError
@@ -471,7 +483,7 @@ function MenuPageContent() {
     circleId: selectedCircleId, userId, peopleCount: 1,
     items: cart.map((line) => ({ menuId: line.menuId, quantity: line.quantity, toppingIds: line.toppings.map((t) => t.toppingId) })),
   } : null;
-  const submitOrder = useOrderSubmission(orderInput);
+  const submitOrder = useOrderSubmission(orderInput, orderApi.createMobile);
   // 代引オーダー（本注文）も同じカートの再送では Idempotency-Key を維持する (2026-10-03)。
   const codOrderMutation = useMutation({
     mutationFn: async () => {
@@ -513,13 +525,15 @@ function MenuPageContent() {
     setCart((prev) => addCartLine(prev, menu, chosen));
   };
 
-  // このメニューに関係するクーポン (2026-09-16)。menu_discount はこのメニューが対象のもの、
-  // free_topping はこのメニューに紐づくトッピングのどれかが対象のもの。
+  // このメニューに関係するクーポン (2026-10-16)。cart_percentage は商品小計全体が対象。
+  // menu_discount はこのメニューが対象、free_topping は紐づくトッピングが対象。
   const relevantCouponsForMenu = (menu: MenuWithToppings) =>
     appliedCoupons.filter((c) =>
-      c.kind === "menu_discount"
-        ? c.menuIds.includes(menu.id)
-        : (menu.toppings ?? []).some((t) => c.toppingIds.includes(t.id))
+      c.kind === "cart_percentage"
+        ? true
+        : c.kind === "menu_discount"
+          ? c.menuIds.includes(menu.id)
+          : (menu.toppings ?? []).some((t) => c.toppingIds.includes(t.id))
     );
 
   const updateLineQuantity = (lineId: string, delta: number) => {
@@ -564,6 +578,7 @@ function MenuPageContent() {
 
   // カート内トッピング編集用に menuId → メニュー(許可トッピング付き)を引けるようにする
   const menuMap = new Map((menus ?? []).map((m) => [m.id, m]));
+  const cartAllergyWarnings = getCartAllergyWarnings(cart, menuMap, familyAllergies);
 
   // 有効な外部モッドの一覧取得
   const getActiveMods = () => {
@@ -587,16 +602,29 @@ function MenuPageContent() {
     }
   };
 
+  // 2026-10-17: 来場者側にも受付可否を伝え、設定OFFでは送信ボタンを出さない。
+  const isMobileOrderEnabled = () => {
+    try {
+      return JSON.parse(circleData?.settings || "{}").mobileOrderEnabled === true;
+    } catch {
+      return false;
+    }
+  };
+
   // クーポン適用は事前オーダー(preOrderApi)経由のみ対応 (issue #50 スコープ外: COD直販/レジ)。
   // COD (代引き) モッドが有効なサークルでは orderApi.create に割引を渡す経路が無いため、
   // 誤って「割引されると見せて実際は反映されない」ことがないよう表示自体を出さない。
-  // 2026-09-16 フィードバック対応: (1) kind に応じて menu_discount (対象メニューの小計から
-  // 定額引き) / free_topping (対象トッピングを freeUnits 個まで無料) を計算する。
+  // 2026-10-16: cart_percentage は商品小計全体 (税・送料なし) から割引し、サーバと同じく円未満切り捨て。
+  // 2026-09-16 フィードバック対応: menu_discount / free_topping も既存どおり計算する。
   // サーバ側 (utils/coupon.ts computeCouponDiscount) と同じロジック。(2) 検証済みでも
   // 自動では適用せず、enabledCouponSlugs (「クーポン」欄でのユーザーの明示選択) に
   // 含まれるものだけ有効にする。(3) 複数枚を検証済みの場合は全部リストに出し、
   // 選んだ分だけ同時に適用できる (以前は1枚しか保存/表示できなかった不具合の修正)。
   const potentialDiscountFor = (c: StoredCoupon): number => {
+    if (c.kind === "cart_percentage") {
+      const subtotal = getTotalPrice();
+      return Math.min(subtotal, Math.floor((subtotal * (c.discountPercent ?? 0)) / 100));
+    }
     if (c.kind === "free_topping") {
       const unitPrices: number[] = [];
       for (const line of cart) {
@@ -616,10 +644,17 @@ function MenuPageContent() {
     return Math.min(c.discountAmount ?? 0, eligibleSubtotal);
   };
   // 実際に効くクーポン = 明示的にONにしていて、かつ対象商品がカートにある (割引>0) もの。
-  const applicableCoupons = isPreOrderEnabled()
-    ? []
-    : appliedCoupons.filter((c) => enabledCouponSlugs.has(c.slug) && potentialDiscountFor(c) > 0);
-  const couponDiscount = applicableCoupons.reduce((sum, c) => sum + potentialDiscountFor(c), 0);
+  const couponApplications: { coupon: StoredCoupon; discount: number }[] = [];
+  if (!isPreOrderEnabled()) {
+    for (const c of appliedCoupons) {
+      if (!enabledCouponSlugs.has(c.slug)) continue;
+      const remaining = Math.max(0, getTotalPrice() - couponApplications.reduce((sum, item) => sum + item.discount, 0));
+      const discount = Math.min(remaining, potentialDiscountFor(c));
+      if (discount > 0) couponApplications.push({ coupon: c, discount });
+    }
+  }
+  const applicableCoupons = couponApplications.map((item) => item.coupon);
+  const couponDiscount = couponApplications.reduce((sum, item) => sum + item.discount, 0);
   const getDiscountedTotal = () => Math.max(0, getTotalPrice() - couponDiscount);
 
   const draftPayload = JSON.stringify({
@@ -909,11 +944,17 @@ function MenuPageContent() {
               <div className="flex flex-wrap items-center gap-2 text-[10px] font-mono text-primary-foreground/80" role="status">
                 {preOrderMutation.isError ? (
                   <>
-                    <span>
-                      {isRetryablePreOrderSaveError(preOrderMutation.error)
-                        ? "カートを保存できませんでした。通信を確認して再試行してください。"
-                        : "カートの保存状態を確認できません。画面を再読み込みしてください。"}
-                    </span>
+                    {preOrderStockError ? (
+                      <span className="w-full font-bold text-destructive" role="alert">
+                        {preOrderStockError}
+                      </span>
+                    ) : (
+                      <span>
+                        {isRetryablePreOrderSaveError(preOrderMutation.error)
+                          ? "カートを保存できませんでした。通信を確認して再試行してください。"
+                          : "カートの保存状態を確認できません。画面を再読み込みしてください。"}
+                      </span>
+                    )}
                     {isRetryablePreOrderSaveError(preOrderMutation.error) && (
                       <Button
                         type="button"
@@ -1040,15 +1081,22 @@ function MenuPageContent() {
           })}
         </div>
 
+        <OrderAllergyWarning
+          warnings={cartAllergyWarnings}
+          familyAllergies={familyAllergies}
+          enabled={!!userId && cart.length > 0}
+        />
+
         <div className="border-t-thick border-border pt-3 space-y-2">
-          {applicableCoupons.map((c) => (
+          {/* 2026-10-16: 小計上限で調整した後の実適用額を内訳にも表示する。 */}
+          {couponApplications.map(({ coupon: c, discount }) => (
             <div key={c.slug} className="flex items-center justify-between text-xs">
               <span className="flex items-center gap-1.5 font-bold">
                 <Ticket className="h-3.5 w-3.5 shrink-0" />
                 「{c.title}」
               </span>
               <span className="flex items-center gap-2">
-                <span className="font-bold text-success">-¥{potentialDiscountFor(c).toLocaleString()}</span>
+                <span className="font-bold text-success">-¥{discount.toLocaleString()}</span>
                 <button
                   type="button"
                   onClick={() => toggleCoupon(c.slug)}
@@ -1065,7 +1113,9 @@ function MenuPageContent() {
             <span>¥{getDiscountedTotal().toLocaleString()}</span>
           </div>
           <p className="text-[11px] text-muted-foreground leading-normal">
-            {isPreOrderEnabled()
+            {!isMobileOrderEnabled()
+              ? "このサークルはモバイルオーダーを受け付けていません。カートを保存し、レジでお支払いください。"
+              : isPreOrderEnabled()
               ? "※「注文を送信する」を押すと注文が送信されます。番号が呼ばれたら受取口にてお支払いください。"
               : "カートの内容は自動保存されています。レジでマイQRコード、または連携したリストバンドを提示してお支払いください。"}
           </p>
@@ -1084,7 +1134,7 @@ function MenuPageContent() {
         )}
 
         <div className="flex flex-col gap-2 pt-2">
-          {isPreOrderEnabled() ? <Button
+          {isPreOrderEnabled() && isMobileOrderEnabled() ? <Button
             onClick={() => {
               if (!userId) {
                 toast.error("注文にはリストバンドが必要です。QR を読み取って入場してください。");
@@ -1119,7 +1169,6 @@ function MenuPageContent() {
       <Modal isOpen={isQrOpen} onClose={() => setIsQrOpen(false)} title="[マイQR]" maxWidth="md">
         {canDisplayMyQr && activeWristband ? (
           <div className="space-y-3 text-center">
-            <p className="text-xs text-muted-foreground">このQRは、入場登録したあなたを注文の受取や店頭会計で確認するためのものです。</p>
             <div className="inline-block border-thick border-border bg-background p-3">
               <QRCodeSVG
                 value={`${appOrigin}/w/${activeWristband.id}`}

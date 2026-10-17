@@ -1,4 +1,4 @@
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { zBody } from "../z-validator";
 import { AppError, apiError } from "../http-error";
 import { z } from "zod";
@@ -15,6 +15,7 @@ import {
   eventUser,
   wristband,
   orderCommit,
+  coupon,
 } from "@fesflow/db";
 import { eq, and, or, desc, inArray, sql } from "drizzle-orm";
 import { ulid } from "ulidx";
@@ -307,16 +308,16 @@ orderRoutes.get("/by-number/:orderNumber", async (c) => {
 });
 
 // 注文作成
-orderRoutes.post(
-  "/",
-  zBody(createOrderSchema),
-  async (c) => {
+const handleCreateOrder = async (
+  c: Context<AppEnv>,
+  source: "pos" | "mobile",
+  input: z.infer<typeof createOrderSchema>,
+) => {
     const db = c.get("db");
     try {
-      const input = c.req.valid("json");
       const orderId = ulid();
       // 2026-10-03: 再送結果は在庫/価格の再検証前に返し、成功後のレスポンス紛失にも対応する。
-      const command = await orderCommand(`pos:${input.circleId}:${input.userId}`, c.req.header("Idempotency-Key"), input);
+      const command = await orderCommand(`${source}:${input.circleId}:${input.userId}`, c.req.header("Idempotency-Key"), input);
 
       // 2026-10-03: 再送照会と注文コンテキストを1つのJOINにまとめ、D1の直列readを1回減らす。
       // 保存済み注文は再検証より先に返す。サークル削除後の再送だけは下のfallback照会で維持する。
@@ -354,6 +355,44 @@ orderRoutes.post(
       }
       const eventId = context.circle.eventId;
 
+      // 2026-10-17: API経路で注文元を固定し、モバイル注文はレジ担当者情報を引き継がない。
+      const cashierId = source === "pos" ? input.cashierId ?? null : null;
+      if (source === "mobile") {
+        let settings: { mobileOrderEnabled?: boolean } = {};
+        try {
+          settings = JSON.parse(context.circle.settings || "{}") as typeof settings;
+        } catch {
+          settings = {};
+        }
+        if (settings.mobileOrderEnabled !== true) {
+          apiError("FORBIDDEN", "このサークルはモバイルオーダーを受け付けていません");
+        }
+      }
+
+      let appliedRegisterCoupon: { id: string; discountApplied: number } | undefined;
+      let registerDiscountPercent: number | undefined;
+      if (input.registerCouponId) {
+        if (!(await hasPermission(c, input.circleId, "order:write"))) {
+          apiError("FORBIDDEN", "レジ割引を適用する権限がありません");
+        }
+        const rows = await db.select().from(coupon).where(eq(coupon.id, input.registerCouponId)).limit(1);
+        const registerCoupon = rows[0];
+        if (!registerCoupon || registerCoupon.circleId !== input.circleId || !registerCoupon.registerOnly) {
+          apiError("BAD_REQUEST", "このレジで利用できるクーポンではありません");
+        }
+        if (registerCoupon.status !== "active" ||
+          (registerCoupon.expiresAt && registerCoupon.expiresAt.getTime() < Date.now()) ||
+          (registerCoupon.maxRedemptions !== null && registerCoupon.redeemedCount >= registerCoupon.maxRedemptions)) {
+          apiError("BAD_REQUEST", "クーポンは無効か、使用上限に達しています");
+        }
+        if (registerCoupon.kind !== "cart_percentage" || !registerCoupon.discountPercent ||
+          registerCoupon.discountPercent < 1 || registerCoupon.discountPercent > 100) {
+          apiError("BAD_REQUEST", "レジ専用クーポンの割引設定が不正です");
+        }
+        appliedRegisterCoupon = { id: registerCoupon.id, discountApplied: 0 };
+        registerDiscountPercent = registerCoupon.discountPercent;
+      }
+
       // 開催状態・利用停止・来場者BANは同じJOIN結果で確認し、いずれも注文確定時にも再検証する。
       const eventRow = context.event;
       if (!eventRow?.id || eventRow.deletedAt) {
@@ -383,10 +422,10 @@ orderRoutes.post(
       let orderFlowMode: "pending" | "preparing" | "completed" = "pending";
       try {
         const parsed = JSON.parse(context.circle.settings || "{}");
-        if (
+        if (source === "pos" && (
           parsed?.orderFlowMode === "preparing" ||
           parsed?.orderFlowMode === "completed"
-        ) {
+        )) {
           orderFlowMode = parsed.orderFlowMode;
         }
       } catch (_) {
@@ -546,6 +585,15 @@ orderRoutes.post(
         totalPrice += subtotal;
       }
 
+      if (appliedRegisterCoupon) {
+        const discountApplied = Math.min(totalPrice, Math.floor((totalPrice * registerDiscountPercent!) / 100));
+        if (discountApplied <= 0) {
+          apiError("BAD_REQUEST", "割引を適用できる商品小計がありません");
+        }
+        totalPrice = Math.max(0, totalPrice - discountApplied);
+        appliedRegisterCoupon = { ...appliedRegisterCoupon, discountApplied };
+      }
+
       // 2026-10-03: 在庫減算は注文/明細と同じD1 batchで実施する。逐次補償は不要。
       // 支払い方法の解決 (2026-07-12): 明示指定を優先し、無ければサークルの対応方法が
       // ちょうど1つのときだけそれを補完する (単一方法はレジで選択させないため)。
@@ -564,8 +612,9 @@ orderRoutes.post(
 
       const committed = await commitOrder(c.env.DB, command, {
         id: orderId, circleId: input.circleId, userId: input.userId,
-        cashierId: input.cashierId, peopleCount: input.peopleCount,
+        cashierId, source, peopleCount: input.peopleCount,
         totalPrice, paymentMethod: resolvedPayment, status: orderFlowMode,
+        registerCoupon: appliedRegisterCoupon,
         items: orderItems.map((item) => ({ ...item,
           toppings: (item.toppingIds ?? []).map((id) => {
             const t = toppings.find((row) => row.id === id)!;
@@ -581,8 +630,10 @@ orderRoutes.post(
       // 2026-10-03: SQLやbind値をレスポンス/ログへ流さず、共通ハンドラのrequestIdで追跡する。
       throw error;
     }
-  }
-);
+};
+
+orderRoutes.post("/", zBody(createOrderSchema), async (c) => handleCreateOrder(c, "pos", c.req.valid("json")));
+orderRoutes.post("/mobile", zBody(createOrderSchema), async (c) => handleCreateOrder(c, "mobile", c.req.valid("json")));
 
 // 注文ステータス更新
 orderRoutes.patch(

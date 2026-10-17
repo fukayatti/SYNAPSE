@@ -19,6 +19,7 @@ import {
   couponMenu,
   couponTopping,
   couponRedemption,
+  orderCoupon,
 } from "./order";
 import {
   eventUser,
@@ -27,6 +28,7 @@ import {
   numberedTicket,
   review,
   userStamp,
+  stampRallyRedemption,
 } from "./visitor";
 import { lottery, lotteryPrize, lotteryEntry, lotteryWinner } from "./lottery";
 
@@ -199,6 +201,7 @@ export const couponRelations = relations(coupon, ({ one, many }) => ({
     references: [circle.id],
   }),
   redemptions: many(couponRedemption),
+  orderCoupons: many(orderCoupon),
   preOrders: many(preOrder),
   couponMenus: many(couponMenu),
   couponToppings: many(couponTopping),
@@ -241,6 +244,11 @@ export const couponRedemptionRelations = relations(couponRedemption, ({ one }) =
   }),
 }));
 
+export const orderCouponRelations = relations(orderCoupon, ({ one }) => ({
+  coupon: one(coupon, { fields: [orderCoupon.couponId], references: [coupon.id] }),
+  order: one(order, { fields: [orderCoupon.orderId], references: [order.id] }),
+}));
+
 // --- visitor ---
 export const eventUserRelations = relations(eventUser, ({ one, many }) => ({
   event: one(event, {
@@ -262,6 +270,17 @@ export const userStampRelations = relations(userStamp, ({ one }) => ({
   circle: one(circle, {
     fields: [userStamp.circleId],
     references: [circle.id],
+  }),
+}));
+
+export const stampRallyRedemptionRelations = relations(stampRallyRedemption, ({ one }) => ({
+  event: one(event, {
+    fields: [stampRallyRedemption.eventId],
+    references: [event.id],
+  }),
+  eventUser: one(eventUser, {
+    fields: [stampRallyRedemption.eventUserId],
+    references: [eventUser.id],
   }),
 }));
 
