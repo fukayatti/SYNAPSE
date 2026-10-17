@@ -38,6 +38,7 @@ export type KitchenOrderView = "horizontal" | "list";
 interface SwipeableOrderStackProps {
   orders: SwipeableOrder[];
   view: KitchenOrderView;
+  openAtLatest?: boolean;
   onViewChange: (view: KitchenOrderView) => void;
   onStart: (id: string) => Promise<unknown>;
   onComplete: (id: string) => Promise<unknown>;
@@ -291,6 +292,7 @@ function KitchenOrderCard({
 export function SwipeableOrderStack({
   orders,
   view,
+  openAtLatest = false,
   onViewChange,
   onStart,
   onComplete,
@@ -301,28 +303,38 @@ export function SwipeableOrderStack({
   const scrollRef = useRef<HTMLDivElement>(null);
   const previousOrderIds = useRef("");
   const previousView = useRef<KitchenOrderView>("list");
+  const previousOpenAtLatest = useRef(false);
   const ordered = useMemo(() => [...orders].sort((a, b) => {
     const at = a.createdAt ? new Date(a.createdAt).getTime() : 0;
     const bt = b.createdAt ? new Date(b.createdAt).getTime() : 0;
     return at - bt || a.orderNumber.localeCompare(b.orderNumber, "ja", { numeric: true });
   }), [orders]);
-  const orderSnapshot = ordered.map((order) => `${order.id}:${order.status}`).join(",");
-  const currentOrder = ordered.find((order) => order.status === "pending")
-    ?? ordered.find((order) => order.status === "preparing");
-  const currentOrderIndex = currentOrder ? ordered.indexOf(currentOrder) : -1;
+  const orderIds = ordered.map((order) => order.id).join(",");
+  const currentOrder = openAtLatest
+    ? undefined
+    : ordered.find((order) => order.status === "pending" || order.status === "preparing");
 
-  // 2026-10-17: 古い注文を左に残し、最初に着手すべき注文を中央へ置いて履歴と作業対象を同時に見せる。
+  // 2026-10-17: 作業キューでは最古の対応中注文を中央に置き、全件表示では最新注文から履歴を確認する。
   useEffect(() => {
-    if (previousOrderIds.current === orderSnapshot && previousView.current === view) return;
-    previousOrderIds.current = orderSnapshot;
+    if (
+      previousOrderIds.current === orderIds &&
+      previousView.current === view &&
+      previousOpenAtLatest.current === openAtLatest
+    ) return;
+    previousOrderIds.current = orderIds;
     previousView.current = view;
+    previousOpenAtLatest.current = openAtLatest;
     if (view !== "horizontal") return;
     const frame = window.requestAnimationFrame(() => {
       const element = scrollRef.current;
       if (!element) return;
+      if (openAtLatest || !currentOrder) {
+        element.scrollLeft = element.scrollWidth;
+        return;
+      }
       const focusedOrder = currentOrder && element.querySelector<HTMLElement>(`[data-order-id="${CSS.escape(currentOrder.id)}"]`);
       if (!focusedOrder) {
-        element.scrollLeft = 0;
+        element.scrollLeft = element.scrollWidth;
         return;
       }
       const orderRect = focusedOrder.getBoundingClientRect();
@@ -332,7 +344,7 @@ export function SwipeableOrderStack({
       });
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [currentOrder?.id, orderSnapshot, view]);
+  }, [currentOrder?.id, openAtLatest, orderIds, view]);
 
   return (
     <section className="space-y-3" aria-label="厨房の注文一覧">
@@ -376,8 +388,12 @@ export function SwipeableOrderStack({
               <p className="mt-2 text-center font-mono text-xs text-muted-foreground">この状態の注文が入るとここに表示されます。</p>
             </CardContent>
           </Card>
-        ) : ordered.map((order, index) => (
-          <div key={order.id} className={`${view === "horizontal" ? "w-[min(88vw,26rem)] shrink-0" : "min-w-0"} ${currentOrderIndex >= 0 && index < currentOrderIndex ? "grayscale opacity-55" : ""}`}>
+        ) : ordered.map((order) => (
+          <div
+            key={order.id}
+            data-order-id={order.id}
+            className={view === "horizontal" ? "w-[min(88vw,26rem)] shrink-0" : "min-w-0"}
+          >
             <KitchenOrderCard
               order={order}
               view={view}

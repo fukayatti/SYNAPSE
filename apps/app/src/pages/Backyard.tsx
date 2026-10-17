@@ -16,8 +16,8 @@ function BackyardPageContent() {
   // useAuth() (authChange 購読で常に最新値) に統一する。
   const { circleId: authCircleId } = useAuth();
   const circleId = authCircleId ?? "";
-  // 2026-10-17: 着手対象と直前の完了注文を同じ一覧に置き、厨房から過去注文をすぐ参照できるよう全件表示にする。
-  const [selectedStatus, setSelectedStatus] = useState<string | undefined>();
+  // 2026-10-17: 起動時は未着手と調理中を一続きの作業キューにし、最初に対応すべき注文へ案内する。
+  const [selectedStatus, setSelectedStatus] = useState<string | undefined>("actionable");
   const [view, setView] = useState<KitchenOrderView>("horizontal");
   // 注文キャンセルの確認ダイアログ用
   const [pendingCancel, setPendingCancel] = useState<{ id: string; orderNumber: string } | null>(
@@ -25,6 +25,8 @@ function BackyardPageContent() {
   );
   const [cancelAnimationOrderId, setCancelAnimationOrderId] = useState<string | null>(null);
   const queryClient = useQueryClient();
+  // 2026-10-17: 「対応中」は未着手・調理中を合わせた表示なので、全件取得後に画面側で絞る。
+  const apiStatus = selectedStatus === "actionable" ? undefined : selectedStatus;
 
   const {
     data: orders,
@@ -33,8 +35,8 @@ function BackyardPageContent() {
     error,
     refetch,
   } = useQuery({
-    queryKey: ["orders", circleId, selectedStatus],
-    queryFn: () => orderApi.list(circleId, selectedStatus),
+    queryKey: ["orders", circleId, apiStatus],
+    queryFn: () => orderApi.list(circleId, apiStatus),
     enabled: !!circleId,
     refetchInterval: 5000, // 5秒ごとに自動更新
   });
@@ -106,6 +108,9 @@ function BackyardPageContent() {
       })),
     })),
   }));
+  const visibleOrders = selectedStatus === "actionable"
+    ? kitchenOrders.filter((order) => order.status === "pending" || order.status === "preparing")
+    : kitchenOrders;
 
   if (isLoading) {
     return (
@@ -139,6 +144,13 @@ function BackyardPageContent() {
 
       {/* ステータスフィルター */}
       <div className="flex gap-2 flex-wrap">
+        <Button
+          variant={selectedStatus === "actionable" ? "default" : "outline"}
+          onClick={() => setSelectedStatus("actionable")}
+          className="border-thick border-border rounded-none font-mono uppercase text-xs sm:text-sm"
+        >
+          対応中
+        </Button>
         <Button
           variant={selectedStatus === "pending" ? "default" : "outline"}
           onClick={() => setSelectedStatus("pending")}
@@ -178,8 +190,9 @@ function BackyardPageContent() {
 
       {/* 注文一覧 */}
       <SwipeableOrderStack
-        orders={kitchenOrders}
+        orders={visibleOrders}
         view={view}
+        openAtLatest={selectedStatus === undefined}
         onViewChange={setView}
         onStart={handleStartPreparing}
         onComplete={handleComplete}
