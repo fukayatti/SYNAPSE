@@ -29,7 +29,6 @@ const initialForm = {
   passphrase: "",
   discountAmount: 100,
   discountPercent: 10,
-  registerOnly: false,
   // 空欄 = 使用回数無制限 (2026-09-16 フィードバック対応)。
   maxRedemptions: 5 as number | "",
   menuIds: [] as string[],
@@ -113,8 +112,9 @@ function CouponsContent() {
             : {
               kind: "cart_percentage",
               ...base,
-              ...(form.registerOnly ? {} : { passphrase: form.passphrase.trim() }),
-              registerOnly: form.registerOnly,
+              // 2026-10-17: レジ値引きは割引管理へ分け、カート全体引きクーポンは来場者向けに固定する。
+              passphrase: form.passphrase.trim(),
+              registerOnly: false,
               discountPercent: Math.min(100, Math.max(1, form.discountPercent)),
             };
       return couponApi.create(circleId, input);
@@ -159,7 +159,7 @@ function CouponsContent() {
       ? !!form.passphrase.trim() && form.discountAmount >= 1 && form.menuIds.length > 0
       : form.kind === "free_topping"
         ? !!form.passphrase.trim() && form.toppingIds.length > 0
-        : (form.registerOnly || !!form.passphrase.trim()) && form.discountPercent >= 1 && form.discountPercent <= 100);
+        : !!form.passphrase.trim() && form.discountPercent >= 1 && form.discountPercent <= 100);
 
   // 2026-10-16: 作成モーダルの入力も共通遷移ガードに登録し、離脱時に同じ作成処理を使う。
   useUnsavedChanges({
@@ -354,38 +354,14 @@ function CouponsContent() {
             value={form.title}
             onChange={(e) => setForm({ ...form, title: e.target.value })}
           />
-          {form.kind === "cart_percentage" && (
-            <div className="space-y-1.5">
-              <p className="text-xs font-bold">利用先</p>
-              <div className="flex flex-wrap gap-2">
-                {([[false, "来場者の事前注文"], [true, "サークル側レジのみ"]] as const).map(([registerOnly, label]) => (
-                  <button
-                    key={label}
-                    type="button"
-                    aria-pressed={form.registerOnly === registerOnly}
-                    onClick={() => setForm({ ...form, registerOnly })}
-                    className={cn(
-                      "border-thin px-3 py-2 text-xs font-bold",
-                      form.registerOnly === registerOnly ? "border-primary bg-primary text-primary-foreground" : "border-border bg-background hover:bg-muted",
-                    )}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-              <p className="text-[11px] text-muted-foreground">レジ専用クーポンは来場者ページ・事前注文では使用できません。</p>
-            </div>
-          )}
-          {!(form.kind === "cart_percentage" && form.registerOnly) && (
-            <FormField
-              id="coupon-passphrase"
-              label="合言葉"
-              required
-              placeholder="fes2026"
-              value={form.passphrase}
-              onChange={(e) => setForm({ ...form, passphrase: e.target.value })}
-            />
-          )}
+          <FormField
+            id="coupon-passphrase"
+            label="合言葉"
+            required
+            placeholder="fes2026"
+            value={form.passphrase}
+            onChange={(e) => setForm({ ...form, passphrase: e.target.value })}
+          />
           {form.kind === "menu_discount" ? (
             <FormField
               id="coupon-discount"

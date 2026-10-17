@@ -17,25 +17,25 @@ describe("shared authorization domains", () => {
         "circle:read", "circle:write", "circle:delete", "menu:read", "menu:write", "menu:delete",
         "order:read", "order:write", "order:delete", "staff:read", "staff:write", "staff:delete",
         "stock:read", "stock:write", "sales:read", "member:read", "member:write", "member:delete",
-        "coupon:read", "coupon:write",
+        "coupon:read", "coupon:write", "discount:read", "discount:write",
       ],
       event_manager: [
         "event:read", "event:write", "circle:read", "circle:write", "circle:delete",
         "menu:read", "menu:write", "menu:delete", "order:read", "order:write", "order:delete",
         "staff:read", "staff:write", "staff:delete", "stock:read", "stock:write", "sales:read",
-        "member:read", "member:write", "member:delete", "coupon:read", "coupon:write",
+        "member:read", "member:write", "member:delete", "coupon:read", "coupon:write", "discount:read", "discount:write",
       ],
       circle_manager: [
         "circle:read", "circle:write", "menu:read", "menu:write", "menu:delete",
         "order:read", "order:write", "staff:read", "staff:write", "staff:delete",
         "stock:read", "stock:write", "sales:read", "member:read", "member:write",
-        "coupon:read", "coupon:write",
+        "coupon:read", "coupon:write", "discount:read", "discount:write",
       ],
       circle_admin: [
         "circle:read", "circle:write", "menu:read", "menu:write", "menu:delete",
         "order:read", "order:write", "staff:read", "staff:write", "staff:delete",
         "stock:read", "stock:write", "sales:read", "member:read", "member:write",
-        "coupon:read", "coupon:write",
+        "coupon:read", "coupon:write", "discount:read", "discount:write",
       ],
       circle_staff: [
         "circle:read", "menu:read", "order:read", "order:write", "stock:read", "stock:write", "staff:read",
@@ -49,6 +49,8 @@ describe("shared authorization domains", () => {
     expect(hasRolePermission(ROLES.CIRCLE_STAFF, "menu:write")).toBe(false);
     expect(hasRolePermission(ROLES.CIRCLE_STAFF, "member:write")).toBe(false);
     expect(hasRolePermission(ROLES.CIRCLE_STAFF, "member:delete")).toBe(false);
+    expect(hasRolePermission(ROLES.CIRCLE_STAFF, "discount:write")).toBe(false);
+    expect(hasRolePermission(ROLES.CIRCLE_MANAGER, "discount:write")).toBe(true);
   });
 
   test("keeps event and system boundaries while preserving backend super-admin permissions", () => {

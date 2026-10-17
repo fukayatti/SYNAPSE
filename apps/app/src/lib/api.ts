@@ -1715,6 +1715,35 @@ export const couponApi = {
     }),
 };
 
+// レジで値引きする設定は配布・合言葉のあるクーポンと分離して扱う。
+export type DiscountKind = "percentage" | "amount";
+export interface Discount {
+  id: string;
+  circleId: string;
+  title: string;
+  kind: DiscountKind;
+  value: number;
+  status: "active" | "disabled";
+  createdAt: string;
+  updatedAt: string;
+}
+export interface RegisterDiscountOption {
+  id: string;
+  title: string;
+  kind: DiscountKind;
+  value: number;
+}
+export const discountApi = {
+  listByCircle: (circleId: string) =>
+    fetchApi<Discount[]>(`/api/discounts/circle/${encodeURIComponent(circleId)}`),
+  registerOptions: (circleId: string) =>
+    fetchApi<RegisterDiscountOption[]>(`/api/discounts/circle/${encodeURIComponent(circleId)}/register-options`),
+  create: (circleId: string, data: { title: string; kind: DiscountKind; value: number }) =>
+    fetchApi<Discount>(`/api/discounts/circle/${encodeURIComponent(circleId)}`, { method: "POST", body: data }),
+  disable: (id: string) =>
+    fetchApi<{ success: boolean }>(`/api/discounts/${encodeURIComponent(id)}/disable`, { method: "POST" }),
+};
+
 export const preOrderApi = {
   create: (data: CreatePreOrderInput) =>
     fetchApi<{ success?: boolean; id: string; totalPrice: number; updatedAt: number; deleted?: boolean }>("/api/pre-orders", {

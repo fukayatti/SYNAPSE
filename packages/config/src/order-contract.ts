@@ -12,8 +12,10 @@ export const createOrderSchema = z.object({
   cashierId: z.string().optional(),
   peopleCount: z.number().int().positive().default(1),
   paymentMethod: z.string().max(30).optional(),
-  // サークルレジ限定クーポン。割引率・適用可否はサーバー側で再検証する。
+  // サークルレジ限定クーポン (旧機能)。割引率・適用可否はサーバー側で再検証する。
   registerCouponId: z.string().min(1).optional(),
+  // 店頭割引は注文時にサーバーが種別・設定値・注文小計から割引額を再計算する。
+  discountId: z.string().min(1).optional(),
   notes: z.string().optional(),
   items: z.array(z.object({
     menuId: z.string().min(1),

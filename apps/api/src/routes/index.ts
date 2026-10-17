@@ -11,6 +11,7 @@ import preOrderRoutes from "./pre_order";
 import accountRoutes from "./account";
 import lotteryRoutes from "./lottery";
 import couponRoutes from "./coupon";
+import discountRoutes from "./discount";
 import reviewRoutes from "./review";
 import { systemRoutes, adminRoutes } from "./system";
 
@@ -28,6 +29,7 @@ export {
   accountRoutes,
   lotteryRoutes,
   couponRoutes,
+  discountRoutes,
   reviewRoutes,
   systemRoutes,
   adminRoutes,
