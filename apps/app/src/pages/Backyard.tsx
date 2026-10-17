@@ -16,14 +16,14 @@ function BackyardPageContent() {
   // useAuth() (authChange 購読で常に最新値) に統一する。
   const { circleId: authCircleId } = useAuth();
   const circleId = authCircleId ?? "";
-  const [selectedStatus, setSelectedStatus] = useState<string | undefined>(
-    "pending"
-  );
+  // 2026-10-17: 着手対象と直前の完了注文を同じ一覧に置き、厨房から過去注文をすぐ参照できるよう全件表示にする。
+  const [selectedStatus, setSelectedStatus] = useState<string | undefined>();
   const [view, setView] = useState<KitchenOrderView>("horizontal");
   // 注文キャンセルの確認ダイアログ用
   const [pendingCancel, setPendingCancel] = useState<{ id: string; orderNumber: string } | null>(
     null
   );
+  const [cancelAnimationOrderId, setCancelAnimationOrderId] = useState<string | null>(null);
   const queryClient = useQueryClient();
 
   const {
@@ -76,19 +76,22 @@ function BackyardPageContent() {
   });
 
   const handleStartPreparing = (orderId: string) => {
-    updateStatus.mutate({ id: orderId, status: "preparing" });
+    return updateStatus.mutateAsync({ id: orderId, status: "preparing" });
   };
 
   const handleComplete = (orderId: string) => {
-    completeOrder.mutate({ id: orderId });
+    return completeOrder.mutateAsync({ id: orderId });
   };
 
   const handleCancel = () => {
     if (!pendingCancel) return;
-    updateStatus.mutate(
-      { id: pendingCancel.id, status: "cancelled" },
-      { onSettled: () => setPendingCancel(null) }
-    );
+    const orderId = pendingCancel.id;
+    setCancelAnimationOrderId(orderId);
+    setPendingCancel(null);
+    window.setTimeout(() => updateStatus.mutate(
+      { id: orderId, status: "cancelled" },
+      { onSettled: () => setCancelAnimationOrderId(null) }
+    ), 300);
   };
 
   const toppingDetails = new Map((toppings ?? []).map((topping) => [topping.id, topping]));
@@ -181,6 +184,7 @@ function BackyardPageContent() {
         onStart={handleStartPreparing}
         onComplete={handleComplete}
         onCancelRequest={(id, orderNumber) => setPendingCancel({ id, orderNumber })}
+        cancelAnimationOrderId={cancelAnimationOrderId}
         isUpdating={updateStatus.isPending || completeOrder.isPending}
       />
 
