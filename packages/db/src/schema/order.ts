@@ -40,6 +40,8 @@ export const order = sqliteTable(
     peopleCount: integer("people_count").notNull(),
     totalPrice: integer("total_price").notNull(),
     status: text("status").notNull().default("pending"), // pending, preparing, completed, cancelled
+    // 2026-10-17: 厨房で受注元を確実に識別する。既存注文はレジ由来として移行する。
+    source: text("source").notNull().default("pos"), // pos / mobile
     completed: integer("completed", { mode: "boolean" })
       .default(false)
       .notNull(),

@@ -13,7 +13,7 @@ import {
   circleVisit,
   menu,
 } from "@fesflow/db";
-import { eq, and, isNull, lt, inArray } from "drizzle-orm";
+import { eq, and, isNull, inArray } from "drizzle-orm";
 import { ulid } from "ulidx";
 import { hasPermission, isCircleOwner } from "../utils/auth";
 import { requireAuth } from "../middleware/auth";
@@ -227,6 +227,7 @@ circleRoutes.post(
       // 2026-10-16 (#127): 作成時の運用設定も同時保存し、店舗エリアはイベント共有IDで参照する。
       settings: z.object({
         orderFlowMode: z.enum(["pending", "preparing", "completed"]).optional(),
+        mobileOrderEnabled: z.boolean().optional(),
         extensions: z.object({ stock: z.boolean().optional(), staff: z.boolean().optional() }).optional(),
         acceptedPayments: z.array(z.string().trim().min(1).max(30)).max(20).optional(),
         storeAreaId: z.string().nullable().optional(),
@@ -567,6 +568,13 @@ circleRoutes.patch(
       settings.orderFlowMode !== "completed"
     ) {
       apiError("BAD_REQUEST", "注文モードの指定が正しくありません");
+    }
+
+    if (
+      Object.prototype.hasOwnProperty.call(settings, "mobileOrderEnabled") &&
+      typeof settings.mobileOrderEnabled !== "boolean"
+    ) {
+      apiError("BAD_REQUEST", "モバイルオーダーの設定が正しくありません");
     }
 
     let oldSettings: Record<string, unknown> = {};

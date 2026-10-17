@@ -11,7 +11,8 @@ type Line = {
   toppings: { toppingId: string; toppingName: string; toppingPrice: number }[];
 };
 type CommitOrderInputBase = {
-  id: string; circleId: string; userId: string; cashierId?: string;
+  id: string; circleId: string; userId: string; cashierId?: string | null;
+  source?: "pos" | "mobile";
   peopleCount: number; totalPrice: number; paymentMethod?: string;
   status: "pending" | "preparing" | "completed";
   registerCoupon?: { id: string; discountApplied: number };
@@ -88,7 +89,8 @@ export async function commitOrder(db: D1, command: OrderCommand, input: CommitOr
       EXISTS (SELECT 1 FROM circle c JOIN event e ON e.id=c.event_id JOIN event_user u ON u.event_id=e.id
         WHERE c.id=? AND c.deleted_at IS NULL AND u.id=? AND u.status!='banned'
         AND e.deleted_at IS NULL AND e.lifecycle_status='live' AND e.billing_status!='suspended'
-        AND (e.end_date IS NULL OR e.end_date>=?))
+        AND (e.end_date IS NULL OR e.end_date>=?)
+        AND (?!='mobile' OR json_extract(c.settings,'$.mobileOrderEnabled')=1))
       AND NOT EXISTS (SELECT 1 FROM json_each(?) j LEFT JOIN menu m ON m.id=json_extract(j.value,'$.id')
         WHERE m.id IS NULL OR m.circle_id!=? OR m.sold_out=1
         OR (m.inventory_enabled=1 AND m.stock_quantity<json_extract(j.value,'$.quantity')))
@@ -100,7 +102,7 @@ export async function commitOrder(db: D1, command: OrderCommand, input: CommitOr
       AND (? IS NULL OR EXISTS (SELECT 1 FROM coupon cp WHERE cp.id=? AND cp.circle_id=? AND cp.register_only=1
         AND cp.status='active' AND (cp.expires_at IS NULL OR cp.expires_at>=?)
         AND (cp.max_redemptions IS NULL OR cp.redeemed_count<cp.max_redemptions)))
-      THEN 1 ELSE 0 END`).bind(input.id, input.circleId, input.userId, now, menus, input.circleId,
+      THEN 1 ELSE 0 END`).bind(input.id, input.circleId, input.userId, now, input.source ?? "pos", menus, input.circleId,
         toppings, input.circleId, input.preOrderId ?? null, input.preOrderId ?? null, input.circleId, input.userId,
         input.expectedPreOrderUpdatedAt ?? null, registerCoupon?.id ?? null, registerCoupon?.id ?? null,
         input.circleId, now),
@@ -116,11 +118,11 @@ export async function commitOrder(db: D1, command: OrderCommand, input: CommitOr
       .bind(scope, orderNumberPrefix, `${orderNumberPrefix}:`, orderNumberPrefix, legacyOrderNumberPrefix,
         input.circleId, orderNumberPrefix, `${orderNumberPrefix}:`, legacyOrderNumberPrefix, `${legacyOrderNumberPrefix}:`,
         dayStart, dayStart + 24 * 60 * 60 * 1000),
-    db.prepare(`INSERT INTO orders (id,circle_id,user_id,cashier_id,order_number,people_count,total_price,status,payment_method,completed,completed_at)
-      SELECT ?,?,?,?,? || printf('%03d',daily.value),?,?,?,?,?,?
+    db.prepare(`INSERT INTO orders (id,circle_id,user_id,cashier_id,source,order_number,people_count,total_price,status,payment_method,completed,completed_at)
+      SELECT ?,?,?,?,?,? || printf('%03d',daily.value),?,?,?,?,?,?
       FROM order_sequence daily WHERE daily.scope=?
       RETURNING id,order_number AS orderNumber`)
-      .bind(input.id, input.circleId, input.userId, input.cashierId ?? null, orderNumberPrefix,
+      .bind(input.id, input.circleId, input.userId, input.cashierId ?? null, input.source ?? "pos", orderNumberPrefix,
         input.peopleCount, input.totalPrice, input.status, input.paymentMethod ?? null,
         input.status === "completed" ? 1 : 0, input.status === "completed" ? now : null, scope),
     db.prepare(`INSERT INTO order_item (id,order_id,menu_id,menu_name,menu_price,quantity)

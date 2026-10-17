@@ -300,6 +300,13 @@ export const orderApi = {
       body: data,
       headers: { "Idempotency-Key": idempotencyKey },
     })),
+  // 2026-10-17: 来場者注文をレジ注文とAPI経路から分け、サークル設定をサーバー側で強制する。
+  createMobile: async (data: CreateOrderInput, idempotencyKey: string): Promise<CreateOrderResult> =>
+    createOrderResultSchema.parse(await fetchApi<unknown>("/api/orders/mobile", {
+      method: "POST",
+      body: data,
+      headers: { "Idempotency-Key": idempotencyKey },
+    })),
   updateStatus: (id: string, status: OrderStatus) =>
     fetchApi<{ success: boolean }>(`/api/orders/${id}/status`, {
       method: "PATCH",
@@ -526,6 +533,7 @@ export interface EventTheme {
   startDate?: string | Date | null;
   endDate?: string | Date | null;
   hasPhysicalWristband?: boolean;
+  allowSelfIssue?: boolean;
 }
 
 
@@ -535,6 +543,7 @@ export interface Event extends EventTheme {
   eventName: string;
   description: string | null;
   hasPhysicalWristband: boolean;
+  allowSelfIssue: boolean;
   // 利用可能な支払い方法 (JSON 文字列配列)。parseEventPaymentMethods でパースする。
   paymentMethods?: string;
   // 店舗の位置カテゴリはイベント共通のID付きJSON一覧。
@@ -962,6 +971,8 @@ export type OrderFlowMode = "pending" | "preparing" | "completed";
 export interface CircleSettings {
   // 新規注文の初期状態: pending=未着手 / preparing=調理中 / completed=即完成
   orderFlowMode: OrderFlowMode;
+  // 2026-10-17: 来場者の確定注文は店舗が許可した場合だけ受け付ける (初期値は停止)。
+  mobileOrderEnabled: boolean;
   // 組み込み拡張機能のON/OFF (既定はすべてOFF=オプトイン)
   extensions: {
     stock: boolean;
@@ -978,6 +989,7 @@ export interface CircleSettings {
 export function parseCircleSettings(raw?: string | null): CircleSettings {
   const defaults: CircleSettings = {
     orderFlowMode: "pending",
+    mobileOrderEnabled: false,
     extensions: { stock: false, staff: false },
     acceptedPayments: [],
     storeAreaId: null,
@@ -991,6 +1003,7 @@ export function parseCircleSettings(raw?: string | null): CircleSettings {
         parsed?.orderFlowMode === "completed"
           ? parsed.orderFlowMode
           : "pending",
+      mobileOrderEnabled: parsed?.mobileOrderEnabled === true,
       extensions: {
         stock: parsed?.extensions?.stock === true,
         staff: parsed?.extensions?.staff === true,
@@ -1056,6 +1069,7 @@ export interface Order {
   circleId: string;
   orderNumber: string;
   status: OrderStatus;
+  source: "pos" | "mobile";
   totalPrice: number;
   notes: string | null;
   estimatedMinutes: number | null;
@@ -1184,6 +1198,7 @@ export interface CreateEventInput {
   startDate?: string;
   endDate?: string;
   hasPhysicalWristband?: boolean;
+  allowSelfIssue?: boolean;
   fontFamily?: "mono" | "sans" | "serif";
   primaryColor?: string;
   primaryTextColor?: string;
