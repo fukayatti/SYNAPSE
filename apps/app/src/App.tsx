@@ -38,6 +38,7 @@ const pageImports = {
 	DashboardAnalytics: () => import("@/pages/dashboard/Analytics"),
 	DashboardExport: () => import("@/pages/dashboard/Export"),
 	DashboardCoupons: () => import("@/pages/dashboard/Coupons"),
+	DashboardDiscounts: () => import("@/pages/dashboard/Discounts"),
 	DashboardReviews: () => import("@/pages/dashboard/Reviews"),
 	StaffOnboarding: () => import("@/pages/StaffOnboarding"),
 	NotFound: () => import("@/pages/NotFound"),
@@ -77,6 +78,7 @@ const DashboardStock = lazy(pageImports.DashboardStock);
 const DashboardAnalytics = lazy(pageImports.DashboardAnalytics);
 const DashboardExport = lazy(pageImports.DashboardExport);
 const DashboardCoupons = lazy(pageImports.DashboardCoupons);
+const DashboardDiscounts = lazy(pageImports.DashboardDiscounts);
 const DashboardReviews = lazy(pageImports.DashboardReviews);
 const NotFound = lazy(pageImports.NotFound);
 
@@ -102,7 +104,7 @@ export function preloadStaffPages() {
 		"Home", "Login", "Register", "Backyard", "Checkin", "Invite", "Admin", 
 		"EventDashboard", "DashboardIndex", "DashboardCircle", "DashboardMembers", 
 		"DashboardMenu", "DashboardQr", "DashboardSales", "DashboardStaff",
-		"DashboardStock", "DashboardAnalytics", "DashboardExport", "DashboardCoupons", "StaffOnboarding"
+		"DashboardStock", "DashboardAnalytics", "DashboardExport", "DashboardCoupons", "DashboardDiscounts", "StaffOnboarding"
 	];
 	
 	staffKeys.forEach((key) => {
@@ -371,6 +373,7 @@ export default function App() {
 							</CircleAuthGuard>
 						}
 					/>
+					<Route path="/circle/dashboard/discounts" element={<CircleAuthGuard><DashboardDiscounts /></CircleAuthGuard>} />
 
 				</Route>
 

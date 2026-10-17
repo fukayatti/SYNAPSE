@@ -29,6 +29,7 @@ import {
   Calculator,
   CalendarCheck,
   Ticket,
+  Tag,
   ChevronDown,
   Download,
   IdCard,
@@ -165,6 +166,7 @@ export default function DashboardLayout({
         { title: "レビュー", href: "/circle/dashboard/reviews", icon: Star, permission: "sales:read" },
         { title: "データエクスポート", href: "/circle/dashboard/export", icon: Download, permission: "sales:read" },
         { title: "クーポン管理", href: "/circle/dashboard/coupons", icon: Ticket, permission: "coupon:read" },
+        { title: "割引管理", href: "/circle/dashboard/discounts", icon: Tag, permission: "discount:read" },
       ],
     },
     {

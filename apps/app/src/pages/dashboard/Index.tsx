@@ -52,6 +52,13 @@ function DashboardContent() {
       href: "/circle/dashboard/sales",
       permission: "sales:read" as const,
     },
+    // 2026-10-17: レジ専用の価格調整をクーポン管理と分けて案内する。
+    {
+      title: "割引管理",
+      description: "レジで使う割合引き・金額引きを作成・停止",
+      href: "/circle/dashboard/discounts",
+      permission: "discount:read" as const,
+    },
     // 2026-09-27: 管理メニューからもレビュー一覧へ直接移動できるようにする。
     {
       title: "レビュー",

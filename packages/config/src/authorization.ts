@@ -19,25 +19,25 @@ export const ROLE_PERMISSIONS = {
     "circle:read", "circle:write", "circle:delete", "menu:read", "menu:write", "menu:delete",
     "order:read", "order:write", "order:delete", "staff:read", "staff:write", "staff:delete",
     "stock:read", "stock:write", "sales:read", "member:read", "member:write", "member:delete",
-    "coupon:read", "coupon:write",
+    "coupon:read", "coupon:write", "discount:read", "discount:write",
   ],
   [ROLES.EVENT_MANAGER]: [
     "event:read", "event:write", "circle:read", "circle:write", "circle:delete",
     "menu:read", "menu:write", "menu:delete", "order:read", "order:write", "order:delete",
     "staff:read", "staff:write", "staff:delete", "stock:read", "stock:write", "sales:read",
-    "member:read", "member:write", "member:delete", "coupon:read", "coupon:write",
+    "member:read", "member:write", "member:delete", "coupon:read", "coupon:write", "discount:read", "discount:write",
   ],
   [ROLES.CIRCLE_MANAGER]: [
     "circle:read", "circle:write", "menu:read", "menu:write", "menu:delete",
     "order:read", "order:write", "staff:read", "staff:write", "staff:delete",
     "stock:read", "stock:write", "sales:read", "member:read", "member:write",
-    "coupon:read", "coupon:write",
+    "coupon:read", "coupon:write", "discount:read", "discount:write",
   ],
   [ROLES.CIRCLE_ADMIN]: [
     "circle:read", "circle:write", "menu:read", "menu:write", "menu:delete",
     "order:read", "order:write", "staff:read", "staff:write", "staff:delete",
     "stock:read", "stock:write", "sales:read", "member:read", "member:write",
-    "coupon:read", "coupon:write",
+    "coupon:read", "coupon:write", "discount:read", "discount:write",
   ],
   [ROLES.CIRCLE_STAFF]: [
     "circle:read", "menu:read", "order:read", "order:write", "stock:read", "stock:write", "staff:read",
@@ -72,6 +72,8 @@ export const PERMISSION_NAMES: Record<string, string> = {
   "member:delete": "メンバー削除",
   "coupon:read": "クーポン閲覧",
   "coupon:write": "クーポン編集",
+  "discount:read": "割引閲覧",
+  "discount:write": "割引編集",
 };
 
 // super_admin のテナント操作は実ロール/なりすましがサーバーで別途評価する。

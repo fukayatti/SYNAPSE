@@ -16,6 +16,7 @@ type CommitOrderInputBase = {
   peopleCount: number; totalPrice: number; paymentMethod?: string;
   status: "pending" | "preparing" | "completed";
   registerCoupon?: { id: string; discountApplied: number };
+  discount?: { id: string; discountApplied: number };
   items: Line[];
 };
 // 2026-10-08 (#49): claimのCAS tokenをpreOrderIdと必ず対にし、D1へundefinedをbindできないよう型で制約する。
@@ -102,10 +103,11 @@ export async function commitOrder(db: D1, command: OrderCommand, input: CommitOr
       AND (? IS NULL OR EXISTS (SELECT 1 FROM coupon cp WHERE cp.id=? AND cp.circle_id=? AND cp.register_only=1
         AND cp.status='active' AND (cp.expires_at IS NULL OR cp.expires_at>=?)
         AND (cp.max_redemptions IS NULL OR cp.redeemed_count<cp.max_redemptions)))
+      AND (? IS NULL OR EXISTS (SELECT 1 FROM discount d WHERE d.id=? AND d.circle_id=? AND d.status='active'))
       THEN 1 ELSE 0 END`).bind(input.id, input.circleId, input.userId, now, input.source ?? "pos", menus, input.circleId,
         toppings, input.circleId, input.preOrderId ?? null, input.preOrderId ?? null, input.circleId, input.userId,
         input.expectedPreOrderUpdatedAt ?? null, registerCoupon?.id ?? null, registerCoupon?.id ?? null,
-        input.circleId, now),
+        input.circleId, now, input.discount?.id ?? null, input.discount?.id ?? null, input.circleId),
     // 2026-10-03 (#81): 表示番号は店舗内の連番で十分なため、共有グローバル連番の競合書込みをなくす。
     // 年を表示に含めて店舗内の番号検索を一意に保ち、初回実行時は同じJST営業日の旧形式番号から続ける。
     db.prepare(`INSERT INTO order_sequence (scope,value)
@@ -159,6 +161,11 @@ export async function commitOrder(db: D1, command: OrderCommand, input: CommitOr
       .bind(registerCoupon.id, input.circleId, now));
     statements.push(db.prepare(`INSERT INTO order_coupon (id,order_id,coupon_id,discount_applied)
       VALUES (?,?,?,?)`).bind(ulid(), input.id, registerCoupon.id, registerCoupon.discountApplied));
+  }
+  if (input.discount) {
+    // 割引の使用記録は会計と同じbatchに含め、注文失敗時に割引記録だけ残さない。
+    statements.push(db.prepare(`INSERT INTO order_discount (id,order_id,discount_id,discount_applied)
+      VALUES (?,?,?,?)`).bind(ulid(), input.id, input.discount.id, input.discount.discountApplied));
   }
   if (input.status !== "pending") statements.push(db.prepare(`INSERT INTO user_stamp (id,user_id,circle_id)
     SELECT ?,?,? WHERE NOT EXISTS (SELECT 1 FROM user_stamp WHERE user_id=? AND circle_id=?)`)

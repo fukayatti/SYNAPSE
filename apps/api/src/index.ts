@@ -60,6 +60,7 @@ import {
   accountRoutes,
   lotteryRoutes,
   couponRoutes,
+  discountRoutes,
   reviewRoutes,
   systemRoutes,
   adminRoutes,
@@ -248,6 +249,7 @@ app.route("/api/pre-orders", preOrderRoutes);
 app.route("/api/account", accountRoutes);
 app.route("/api/lottery", lotteryRoutes);
 app.route("/api/coupons", couponRoutes);
+app.route("/api/discounts", discountRoutes);
 app.route("/api/reviews", reviewRoutes);
 app.route("/api/system", systemRoutes);
 app.route("/api/admin", adminRoutes);
