@@ -178,6 +178,7 @@ function KitchenOrderCard({
     }
   };
 
+  // 2026-10-17: スワイプの方向説明は表示・読み上げとも省き、状態名だけを伝える。
   return (
     <Card
       className={`relative flex h-full flex-col border-thick border-border bg-background transition-[transform,opacity,background-color] duration-300 ease-in-out motion-reduce:transition-none ${view === "horizontal" ? "snap-start" : ""} ${exitDirection === "up" ? "-translate-y-8 bg-success/30 opacity-0" : exitDirection === "down" ? "translate-y-8 bg-destructive/30 opacity-0" : ""} ${action || canCancel ? "touch-pan-x cursor-grab select-none active:cursor-grabbing" : ""}`}
@@ -192,7 +193,7 @@ function KitchenOrderCard({
       onKeyDown={onGestureKeyDown}
       tabIndex={action || canCancel ? 0 : undefined}
       role="group"
-      aria-label={`注文 ${order.orderNumber}、${badge.label}${action ? `、上矢印で${action.label}` : ""}${canCancel ? "、下矢印でキャンセル確認" : ""}`}
+      aria-label={`注文 ${order.orderNumber}、${badge.label}`}
     >
       {gestureHint && (
         <div className={`pointer-events-none absolute inset-0 z-10 flex items-center justify-center ${gestureHint === "cancel" ? "bg-destructive/15 text-destructive" : "bg-success/15 text-success"}`}>
