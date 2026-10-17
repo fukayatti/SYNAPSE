@@ -192,7 +192,10 @@ wristbandRoutes.get("/lookup/:code{.+}", async (c) => {
   const wristbands = await db
     .select()
     .from(wristband)
-    .where(eq(wristband.id, code));
+    .where(and(
+      eq(wristband.id, code),
+      or(eq(wristband.status, "active"), eq(wristband.status, "smartphone")),
+    ));
 
 
   if (wristbands.length > 0) {
