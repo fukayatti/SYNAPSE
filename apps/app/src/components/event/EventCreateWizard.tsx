@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { toast } from "sonner";
+import { useGuardedNavigation, useUnsavedChanges } from "@/components/UnsavedNavigationGuard";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -31,6 +32,8 @@ export function EventCreateWizard({ onBack, onComplete }: { onBack: () => void; 
   const [createdEvent, setCreatedEvent] = useState<{ id: string; hasPhysicalWristband: boolean } | null>(null);
   const [invite, setInvite] = useState<{ token: string; code: string } | null>(null);
   const [creatingInvite, setCreatingInvite] = useState(false);
+  const createdEventRef = useRef(false);
+  const requestNavigation = useGuardedNavigation();
 
   const handleLogo = async (file?: File) => {
     if (!file) return;
@@ -61,16 +64,28 @@ export function EventCreateWizard({ onBack, onComplete }: { onBack: () => void; 
   };
 
   const createEvent = async () => {
-    if (!eventName.trim()) return;
-    if (officialWebsiteUrl && !/^https?:\/\//i.test(officialWebsiteUrl)) {
-      toast.error("イベントURLは http:// または https:// から入力してください");
+    if (uploadingLogo) {
+      const message = "ロゴのアップロードが完了してから保存してください";
+      toast.error(message);
+      throw new Error(message);
+    }
+    if (!eventName.trim()) {
+      const message = "イベント名を入力してください";
+      toast.error(message);
       setStep(0);
-      return;
+      throw new Error(message);
+    }
+    if (officialWebsiteUrl && !/^https?:\/\//i.test(officialWebsiteUrl)) {
+      const message = "イベントURLは http:// または https:// から入力してください";
+      toast.error(message);
+      setStep(0);
+      throw new Error(message);
     }
     if (startDate && endDate && startDate > endDate) {
-      toast.error("終了日は開始日以降にしてください");
+      const message = "終了日は開始日以降にしてください";
+      toast.error(message);
       setStep(1);
-      return;
+      throw new Error(message);
     }
     setCreating(true);
     try {
@@ -90,10 +105,12 @@ export function EventCreateWizard({ onBack, onComplete }: { onBack: () => void; 
         storeAreas,
       });
       setCreatedEvent({ id: result.id, hasPhysicalWristband });
+      createdEventRef.current = true;
       toast.success("イベントを作成しました");
       await createStaffInvite(result.id);
     } catch (error: any) {
       toast.error(error?.message || "イベントの作成に失敗しました");
+      throw error instanceof Error ? error : new Error("イベントの作成に失敗しました。");
     } finally {
       setCreating(false);
     }
@@ -112,6 +129,19 @@ export function EventCreateWizard({ onBack, onComplete }: { onBack: () => void; 
   };
 
   const invitationUrl = invite ? `${window.location.origin}/join?inviteToken=${encodeURIComponent(invite.token)}` : "";
+  // 2026-10-17: イベント作成前の入力を未保存変更として扱い、作成成功後は遷移確認の対象から外す。
+  useUnsavedChanges({
+    isDirty: () => !createdEventRef.current && (
+      !!eventName.trim() || !!description.trim() || !!officialWebsiteUrl.trim() || !!logoUrl || uploadingLogo ||
+      !!startDate || !!endDate || !hasPhysicalWristband || fontFamily !== "mono" ||
+      primaryColor !== "#000000" || accentColor !== "#0000FF" || backgroundColor !== "#FFFFFF" ||
+      JSON.stringify(paymentMethods) !== JSON.stringify(["現金"]) || !!newPayment.trim() ||
+      storeAreas.length > 0 || !!newArea.trim()
+    ),
+    onSave: createEvent,
+    onDiscard: onBack,
+  });
+
   const copyInvite = async () => {
     try {
       await navigator.clipboard.writeText(invitationUrl);
@@ -211,8 +241,8 @@ export function EventCreateWizard({ onBack, onComplete }: { onBack: () => void; 
       </div>}
 
       <div className="flex gap-2">
-        {step === 0 ? <Button type="button" variant="outline" onClick={onBack}>戻る</Button> : <Button type="button" variant="outline" onClick={() => setStep((current) => current - 1)}>前へ</Button>}
-        {step < STEP_TITLES.length - 1 ? <Button type="button" className="flex-1" disabled={!canAdvance || uploadingLogo} onClick={() => setStep((current) => current + 1)}>次へ</Button> : <Button type="button" className="flex-1" disabled={creating || !paymentMethods.length} onClick={() => void createEvent()}>{creating ? "作成中…" : "イベントを作成"}</Button>}
+        {step === 0 ? <Button type="button" variant="outline" onClick={() => requestNavigation(onBack)}>戻る</Button> : <Button type="button" variant="outline" onClick={() => setStep((current) => current - 1)}>前へ</Button>}
+        {step < STEP_TITLES.length - 1 ? <Button type="button" className="flex-1" disabled={!canAdvance || uploadingLogo} onClick={() => setStep((current) => current + 1)}>次へ</Button> : <Button type="button" className="flex-1" disabled={creating || !paymentMethods.length} onClick={() => void createEvent().catch(() => undefined)}>{creating ? "作成中…" : "イベントを作成"}</Button>}
       </div>
     </div>
   );
