@@ -373,7 +373,7 @@ function CartBody({
             onBlur={() => { if (peopleCount < 1) onSetPeople(1); }}
           />
         </div>
-        <p className="-mt-2 text-[10px] text-muted-foreground">家族の登録人数とは別項目です。注文の来店人数は必要に応じて入力してください。</p>
+        {/* 2026-10-17: 来店人数はラベルで区別し、家族バンド数との関係を説明文で繰り返さない。 */}
         {registerCoupons.length > 0 && (
           <div className="space-y-1.5">
             <Label htmlFor={`${idPrefix}-register-coupon`} className="font-mono text-xs uppercase tracking-wider">レジ専用割引券</Label>
@@ -389,7 +389,7 @@ function CartBody({
                 <option key={coupon.id} value={coupon.id}>{coupon.title} ({coupon.discountPercent}％引き)</option>
               ))}
             </select>
-            {isPreOrder && <p className="text-[10px] text-muted-foreground">事前注文にはレジ専用割引券を適用できません。</p>}
+            {isPreOrder && <p className="text-[10px] text-muted-foreground">事前注文には適用できません。</p>}
             {!isPreOrder && registerCouponId && (() => {
               const selected = registerCoupons.find((coupon) => coupon.id === registerCouponId);
               const discount = selected?.discountPercent
@@ -431,9 +431,8 @@ function CartBody({
         )}
         {activeCustomer && (
           <div className="border-thick border-border bg-muted/20 p-2 text-xs font-mono">
-            選択中の顧客: [{activeCustomer.userId}]
-            {activeCustomer.wristbandId && ` (リストバンド: ${activeCustomer.wristbandId})`}
-            <div className="mt-1 font-bold">登録バンド数: {activeCustomer.familyBandCount}本（会計人数とは別）</div>
+            <div>来場者: {activeCustomer.wristbandId ?? activeCustomer.userId}</div>
+            <div className="mt-1 font-bold">登録バンド {activeCustomer.familyBandCount}本</div>
           </div>
         )}
         <OrderAllergyWarning
@@ -441,18 +440,23 @@ function CartBody({
           familyAllergies={activeCustomer?.allergies ?? null}
           enabled={!!activeCustomer && cart.length > 0}
         />
-        {(!activeCustomer || cart.length === 0) && (
-          <div className="border-thick border-destructive bg-destructive/10 p-2 space-y-1 font-mono text-[10px] uppercase tracking-wider text-destructive">
-            {!activeCustomer && <p>[顧客未スキャン — リストバンド/QRをスキャンしてください]</p>}
-            {cart.length === 0 && <p>[カートが空です — 商品を選択してください]</p>}
-          </div>
-        )}
+        {/* 2026-10-17: 不足状態は確定ボタンの文言に集約し、画面上部の案内と重ねない。 */}
         <Button
           className="w-full h-14 border-thick border-border bg-primary text-primary-foreground font-mono text-base font-black uppercase rounded-none hover:bg-background hover:text-foreground transition-all"
           onClick={onSubmit}
           disabled={cart.length === 0 || submitting || !activeCustomer || needsPayment}
         >
-          {submitting ? "注文中..." : needsPayment ? "支払い方法を選択" : "注文を確定する"}
+          {submitting
+            ? "確定中…"
+            : needsPayment
+              ? "支払い方法を選択"
+              : !activeCustomer
+                ? "来場者を確認"
+                : cart.length === 0
+                  ? "商品を選択"
+                  : isPreOrder
+                    ? "受取を確定"
+                    : "注文を確定する"}
         </Button>
         {cart.length > 0 && (
           <Button
@@ -509,7 +513,7 @@ function RegisterPageContent() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["circle", circleId] });
       queryClient.invalidateQueries({ queryKey: ["circles", circle?.eventId] });
-      toast.success("待ち時間を本部・来場者へ報告しました（30分間有効）");
+      toast.success("待ち時間を報告しました");
     },
     onError: (error: any) => toast.error(error.message || "待ち時間を報告できませんでした"),
   });
@@ -571,7 +575,7 @@ function RegisterPageContent() {
           familyBandCount: data.familyBandCount ?? 0,
           allergies: parseJapaneseAllergens(data.user.allergies),
         });
-        toast.success(`顧客を特定しました: ${data.wristband?.id || data.user.id}`);
+        toast.success("来場者を確認しました");
         setScannedCode("");
       } else {
         toast.error("ユーザーが見つかりませんでした");
@@ -839,18 +843,8 @@ function RegisterPageContent() {
         <div className="flex-1 min-w-0 p-3 pb-[calc(10rem+env(safe-area-inset-bottom))] sm:p-4 sm:pb-[calc(11rem+env(safe-area-inset-bottom))] xl:pb-4">
           {/* ヘッダーバー */}
           <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 bg-primary p-3 sm:p-4 text-primary-foreground border-thick border-border mb-4">
-            <h1 className="font-mono text-lg sm:text-2xl font-black uppercase tracking-wider">
-              [レジ - 注文入力]
-            </h1>
+            <h1 className="font-mono text-lg sm:text-2xl font-black uppercase tracking-wider">[レジ]</h1>
             <div className="flex gap-2 flex-wrap">
-              <Button
-                variant="accent"
-                onClick={() => setIsCustomerQrModalOpen(true)}
-                className="h-10 sm:h-12 text-xs sm:text-sm uppercase tracking-wider"
-              >
-                <QrCode className="mr-1 sm:mr-2 h-4 w-4 sm:h-5 sm:w-5" />
-                [顧客スキャン(カメラ)]
-              </Button>
               {preOrderActive && (
                 <Button
                   variant="outline"
@@ -886,23 +880,23 @@ function RegisterPageContent() {
             </div>
           </div>
 
-          {/* 2026-10-07 (#9): 現場スタッフが10分刻みで待ち時間を報告し、30分後は自動的に未報告扱いにする。 */}
-          <section className="mb-4 border-thick border-border bg-muted/40 p-3 font-mono">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <h2 className="text-xs font-black uppercase tracking-wider">[待ち時間を本部・来場者へ報告]</h2>
+          {/* 2026-10-17: レジでは現在値と更新操作だけを短く示し、有効期限の説明を重ねない。 */}
+          <section className="mb-4 border-b-thin border-border pb-3 font-mono">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                <h2 className="text-xs font-black uppercase tracking-wider">待ち時間</h2>
                 {waitTimeReport ? (
-                  <p className="mt-1 text-[10px]">現在の報告: 約{waitTimeReport.minutes}分待ち（{waitTimeReport.minutesAgo}分前）</p>
+                  <p role="status" className="text-xs text-success">約{waitTimeReport.minutes}分待ち · {waitTimeReport.minutesAgo}分前</p>
                 ) : (
-                  <p className="mt-1 text-[10px] text-muted-foreground">現在の報告: 未報告（報告は30分間有効）</p>
+                  <p role="status" className="text-xs text-muted-foreground">未報告</p>
                 )}
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex w-full items-center gap-2 sm:w-auto">
                 <select
-                  aria-label="報告する待ち時間"
+                  aria-label="待ち時間"
                   value={waitMinutes}
                   onChange={(event) => setWaitMinutes(event.target.value)}
-                  className="h-10 border-thick border-border bg-background px-3 text-xs"
+                  className="h-10 min-w-0 flex-1 border-thick border-border bg-background px-3 text-xs sm:flex-initial"
                 >
                   {Array.from({ length: 25 }, (_, index) => index * 10).map((minutes) => (
                     <option key={minutes} value={minutes}>{minutes === 0 ? "待ち時間なし" : `${minutes}分待ち`}</option>
@@ -911,33 +905,31 @@ function RegisterPageContent() {
                 <Button
                   onClick={() => reportWaitTime.mutate()}
                   disabled={reportWaitTime.isPending}
-                  className="h-10 whitespace-nowrap text-xs"
+                  className="h-10 shrink-0 whitespace-nowrap text-xs"
                 >
-                  {reportWaitTime.isPending ? "報告中…" : "本部へ報告"}
+                  {reportWaitTime.isPending ? "報告中…" : "報告"}
                 </Button>
               </div>
             </div>
           </section>
 
-          {/* ===== 顧客未スキャン時: 画面中央に大きなカメラQRボタン ===== */}
+          {/* 2026-10-17: 来場者の確認操作を一か所に集約し、状態説明は主ボタンへ置き換える。 */}
           {!activeCustomer ? (
-            <div className="mb-4 border-thick border-border bg-muted/40 p-6 sm:p-10 flex flex-col items-center justify-center gap-4 text-center font-mono">
-              <p className="text-destructive font-black text-xs sm:text-sm uppercase tracking-wider animate-pulse">
-                【顧客未スキャン】注文の確定にはリストバンド / スマホQRのスキャンが必要です
-              </p>
-              <button
+            <div className="mb-4 flex flex-col items-center justify-center gap-4 border-thick border-border bg-muted/40 p-4 text-center font-mono sm:p-6">
+              <h2 className="text-sm font-black uppercase tracking-wider">来場者を確認</h2>
+              <Button
                 onClick={() => setIsCustomerQrModalOpen(true)}
-                className="flex flex-col items-center gap-3 border-heavy border-border bg-primary text-primary-foreground px-8 py-6 sm:px-12 sm:py-8 hover:bg-background hover:text-foreground transition-all"
+                className="flex h-auto min-h-20 w-full max-w-md flex-col gap-2 border-heavy px-8 py-5 text-base sm:w-auto"
               >
                 <ScanLine className="h-12 w-12 sm:h-16 sm:w-16" />
-                <span className="font-black uppercase tracking-widest text-base sm:text-xl">QRをスキャン</span>
-              </button>
-              {/* 手入力フォールバック */}
+                <span>QRを読み取る</span>
+              </Button>
               <div className="flex items-center gap-2 w-full max-w-md">
                 <Input
                   type="text"
-                  placeholder="または QR / リストバンドIDを入力..."
-                  className="h-10 border-thick border-border font-mono text-xs rounded-none bg-background focus-visible:ring-0 flex-1"
+                  aria-label="QRコードまたはリストバンドID"
+                  placeholder="QR / リストバンドID"
+                  className="h-11 min-w-0 flex-1 border-thick border-border bg-background font-mono text-xs focus-visible:ring-0"
                   value={scannedCode}
                   onChange={(e) => setScannedCode(e.target.value)}
                   onKeyDown={(e) => {
@@ -951,32 +943,40 @@ function RegisterPageContent() {
                   variant="outline"
                   disabled={lookupCustomer.isPending || !scannedCode.trim()}
                   onClick={() => lookupCustomer.mutate(scannedCode.trim())}
-                  className="h-10 border-thick border-border font-mono text-xs rounded-none bg-background hover:bg-primary hover:text-primary-foreground shrink-0"
+                  className="h-11 shrink-0 border-thick border-border font-mono text-xs"
                 >
-                  特定
+                  {lookupCustomer.isPending ? "確認中…" : "検索"}
                 </Button>
               </div>
             </div>
           ) : (
-            // スキャン済みは小さなステータスバーに畳む
-            <Card className="mb-4 bg-muted/40 rounded-none">
-              <CardContent className="p-3 flex items-center justify-between gap-4 font-mono">
-                <div className="flex items-center gap-2 text-success font-black text-xs sm:text-sm">
-                  <span className="w-2.5 h-2.5 bg-success rounded-full animate-pulse" />
-                  スキャン完了: ゲストID [{activeCustomer.userId}]
-                  {activeCustomer.wristbandId && ` (リストバンド: ${activeCustomer.wristbandId})`}
-                  <span className="ml-2 font-bold">登録バンド {activeCustomer.familyBandCount}本（会計人数とは別）</span>
+            <Card className="mb-4 bg-muted/40">
+              <CardContent className="flex flex-col gap-3 p-3 font-mono sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex items-center gap-2 text-xs font-black text-success sm:text-sm">
+                  <span className="h-2.5 w-2.5 shrink-0 bg-success" />
+                  来場者確認済み
                 </div>
-                <Button
-                  variant="destructive"
-                  onClick={() => {
-                    setActiveCustomer(null);
-                    setActivePreOrderId(null);
-                  }}
-                  className="h-9 border-thick border-border font-mono text-xs rounded-none shrink-0"
-                >
-                  クリア
-                </Button>
+                <div className="flex shrink-0 items-center gap-2 self-end sm:self-auto">
+                  <Button
+                    variant="outline"
+                    onClick={() => setIsCustomerQrModalOpen(true)}
+                    className="h-9 border-thick border-border font-mono text-xs"
+                  >
+                    来場者を変更
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    aria-label="来場者を解除"
+                    onClick={() => {
+                      setActiveCustomer(null);
+                      setActivePreOrderId(null);
+                    }}
+                    className="h-9 w-9 shrink-0 border-thick border-border"
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
               </CardContent>
             </Card>
           )}

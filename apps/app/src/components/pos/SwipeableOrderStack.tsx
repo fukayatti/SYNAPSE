@@ -38,14 +38,17 @@ export type KitchenOrderView = "horizontal" | "list";
 interface SwipeableOrderStackProps {
   orders: SwipeableOrder[];
   view: KitchenOrderView;
+  openAtLatest?: boolean;
   onViewChange: (view: KitchenOrderView) => void;
-  onStart: (id: string) => void;
-  onComplete: (id: string) => void;
+  onStart: (id: string) => Promise<unknown>;
+  onComplete: (id: string) => Promise<unknown>;
   onCancelRequest: (id: string, orderNumber: string) => void;
+  cancelAnimationOrderId?: string | null;
   isUpdating?: boolean;
 }
 
 const VERTICAL_SWIPE_THRESHOLD = 72;
+const EXIT_ANIMATION_MS = 300;
 
 function orderTime(date: string | Date | null) {
   if (!date) return "—";
@@ -93,29 +96,48 @@ function KitchenOrderCard({
   onStart,
   onComplete,
   onCancelRequest,
+  cancelAnimationOrderId,
 }: {
   order: SwipeableOrder;
   view: KitchenOrderView;
   isUpdating: boolean;
-  onStart: () => void;
-  onComplete: () => void;
+  onStart: () => Promise<unknown>;
+  onComplete: () => Promise<unknown>;
   onCancelRequest: () => void;
+  cancelAnimationOrderId?: string | null;
 }) {
   const gestureStart = useRef<{ x: number; y: number } | null>(null);
+  const actionTimer = useRef<number | null>(null);
   const [gestureHint, setGestureHint] = useState<"start" | "complete" | "cancel" | null>(null);
+  const [exitDirection, setExitDirection] = useState<"up" | "down" | null>(null);
   const action = orderAction(order.status);
   const badge = statusBadge(order.status);
   const canCancel = order.status === "pending" || order.status === "preparing";
-  const gestureInstructions = [
-    action ? `上へスワイプで${action.label}` : null,
-    canCancel ? "下へスワイプで確認後キャンセル" : null,
-  ].filter((instruction): instruction is string => instruction !== null);
 
-  // 2026-10-16: 横移動は一覧のスクロールに任せ、カード上端だけ縦スワイプ操作に使う。
-  // 内容を読むための縦スクロールと注文状態の誤変更を分け、操作には画面上のボタンも残す。
+  const performAction = async () => {
+    try {
+      if (action?.kind === "start") await onStart();
+      else if (action?.kind === "complete") await onComplete();
+    } catch {
+      // 2026-10-17: 失敗通知は親のMutationが表示し、カードは操作可能な状態へ戻す。
+    } finally {
+      setExitDirection(null);
+    }
+  };
+
+  useEffect(() => {
+    if (cancelAnimationOrderId === order.id) setExitDirection("down");
+    else setExitDirection((direction) => direction === "down" ? null : direction);
+  }, [cancelAnimationOrderId, order.id]);
+
+  useEffect(() => () => {
+    if (actionTimer.current !== null) window.clearTimeout(actionTimer.current);
+  }, []);
+
+  // 2026-10-17: 明示ボタンを残したままカード全体で上下操作を受け、カード内に操作案内を重ねない。
   const onGestureDown = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (isUpdating || (!action && !canCancel) || !event.isPrimary || event.button !== 0) return;
-    // 2026-10-16: 指やマウスがヘッダーから外れても、ジェスチャーの終了を同じカードで受け取る。
+    if (isUpdating || exitDirection || (!action && !canCancel) || !event.isPrimary || event.button !== 0) return;
+    if ((event.target as HTMLElement).closest("button, a, input, select, textarea")) return;
     event.currentTarget.setPointerCapture(event.pointerId);
     gestureStart.current = { x: event.clientX, y: event.clientY };
     setGestureHint(null);
@@ -126,48 +148,59 @@ function KitchenOrderCard({
     const dx = event.clientX - start.x;
     const dy = event.clientY - start.y;
     if (Math.abs(dy) <= Math.abs(dx)) return;
+    event.preventDefault();
     setGestureHint(dy < -16 ? (action?.kind ?? null) : dy > 16 && canCancel ? "cancel" : null);
   };
   const onGestureEnd = (event: React.PointerEvent<HTMLDivElement>) => {
     const start = gestureStart.current;
     gestureStart.current = null;
     setGestureHint(null);
-    if (!start || isUpdating) return;
+    if (!start || isUpdating || exitDirection) return;
     const dx = event.clientX - start.x;
     const dy = event.clientY - start.y;
     if (Math.abs(dy) <= Math.abs(dx)) return;
-    if (dy <= -VERTICAL_SWIPE_THRESHOLD && action?.kind === "start") onStart();
-    else if (dy <= -VERTICAL_SWIPE_THRESHOLD && action?.kind === "complete") onComplete();
+    if (dy <= -VERTICAL_SWIPE_THRESHOLD && action) {
+      setExitDirection("up");
+      actionTimer.current = window.setTimeout(() => void performAction(), EXIT_ANIMATION_MS);
+    }
     else if (dy >= VERTICAL_SWIPE_THRESHOLD && canCancel) onCancelRequest();
   };
 
+  const onGestureKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.target !== event.currentTarget || isUpdating || exitDirection) return;
+    if (event.key === "ArrowUp" && action) {
+      event.preventDefault();
+      setExitDirection("up");
+      actionTimer.current = window.setTimeout(() => void performAction(), EXIT_ANIMATION_MS);
+    } else if (event.key === "ArrowDown" && canCancel) {
+      event.preventDefault();
+      onCancelRequest();
+    }
+  };
+
+  // 2026-10-17: スワイプの方向説明は表示・読み上げとも省き、状態名だけを伝える。
   return (
     <Card
-      className={`flex h-full flex-col border-thick border-border bg-background ${view === "horizontal" ? "snap-start" : ""}`}
+      className={`relative flex h-full flex-col border-thick border-border bg-background transition-[transform,opacity,background-color] duration-300 ease-in-out motion-reduce:transition-none ${view === "horizontal" ? "snap-start" : ""} ${exitDirection === "up" ? "-translate-y-8 bg-success/30 opacity-0" : exitDirection === "down" ? "translate-y-8 bg-destructive/30 opacity-0" : ""} ${action || canCancel ? "touch-pan-x cursor-grab select-none active:cursor-grabbing" : ""}`}
       data-order-id={order.id}
+      onPointerDown={onGestureDown}
+      onPointerMove={onGestureMove}
+      onPointerUp={onGestureEnd}
+      onPointerCancel={() => {
+        gestureStart.current = null;
+        setGestureHint(null);
+      }}
+      onKeyDown={onGestureKeyDown}
+      tabIndex={action || canCancel ? 0 : undefined}
+      role="group"
+      aria-label={`注文 ${order.orderNumber}、${badge.label}`}
     >
-      {/* 2026-10-16: 読み上げでも、その状態で実際に使えるスワイプだけ案内する。 */}
-      <div
-        className="relative touch-pan-x cursor-grab select-none border-b-thin border-border active:cursor-grabbing"
-        onPointerDown={onGestureDown}
-        onPointerMove={onGestureMove}
-        onPointerUp={onGestureEnd}
-        onPointerCancel={() => {
-          gestureStart.current = null;
-          setGestureHint(null);
-        }}
-        role="group"
-        aria-label={`注文 ${order.orderNumber}。${gestureInstructions.length > 0 ? gestureInstructions.join("、") : `状態: ${badge.label}。変更できません`}`}
-      >
-        {gestureHint && (
-          <div className={`pointer-events-none absolute inset-0 z-10 flex items-center justify-center ${gestureHint === "cancel" ? "bg-destructive/15 text-destructive" : "bg-success/15 text-success"}`}>
-            <span className="flex items-center gap-2 bg-background px-3 py-2 font-mono text-xs font-black uppercase">
-              {gestureHint === "cancel" ? <ArrowDown className="h-5 w-5" /> : <ArrowUp className="h-5 w-5" />}
-              {gestureHint === "cancel" ? "確認後キャンセル" : action?.label}
-            </span>
-          </div>
-        )}
-        <CardHeader className="p-3 sm:p-4">
+      {gestureHint && (
+        <div className={`pointer-events-none absolute inset-0 z-10 flex items-center justify-center ${gestureHint === "cancel" ? "bg-destructive/15 text-destructive" : "bg-success/15 text-success"}`}>
+          {gestureHint === "cancel" ? <ArrowDown className="h-8 w-8" /> : <ArrowUp className="h-8 w-8" />}
+        </div>
+      )}
+      <CardHeader className="border-b-thin border-border p-3 sm:p-4">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <CardTitle className="font-headline text-2xl uppercase leading-none sm:text-3xl">#{order.orderNumber}</CardTitle>
@@ -179,12 +212,7 @@ function KitchenOrderCard({
             </div>
             <Badge variant={badge.variant} className="shrink-0">{badge.label}</Badge>
           </div>
-          <p className="mt-2 flex items-center gap-2 font-mono text-xs text-muted-foreground">
-            {action ? <><ArrowUp className="h-3.5 w-3.5" />上へ: {action.label}</> : <span>状態の変更なし</span>}
-            {canCancel && <><span aria-hidden="true">·</span><ArrowDown className="h-3.5 w-3.5" />下へ: 確認してキャンセル</>}
-          </p>
-        </CardHeader>
-      </div>
+      </CardHeader>
 
       <CardContent className="flex-1 space-y-3 p-3 sm:p-4">
         {order.items.map((item) => (
@@ -230,8 +258,11 @@ function KitchenOrderCard({
       <CardFooter className="grid grid-cols-1 gap-2 border-t-thin border-border p-3 sm:grid-cols-2 sm:p-4">
         {action ? (
           <Button
-            onClick={action.kind === "start" ? onStart : onComplete}
-            disabled={isUpdating}
+            onClick={() => {
+              setExitDirection("up");
+              actionTimer.current = window.setTimeout(() => void performAction(), EXIT_ANIMATION_MS);
+            }}
+            disabled={isUpdating || exitDirection !== null}
             aria-label={`注文${order.orderNumber}を${action.label}`}
             className="h-12 w-full border-thick border-border font-mono font-black uppercase"
           >
@@ -246,7 +277,7 @@ function KitchenOrderCard({
           <Button
             variant="outline"
             onClick={onCancelRequest}
-            disabled={isUpdating}
+            disabled={isUpdating || exitDirection !== null}
             aria-label={`注文${order.orderNumber}をキャンセル`}
             className="h-12 w-full border-thick border-destructive font-mono font-bold text-destructive hover:bg-destructive hover:text-primary-foreground"
           >
@@ -254,6 +285,7 @@ function KitchenOrderCard({
           </Button>
         )}
       </CardFooter>
+
     </Card>
   );
 }
@@ -261,44 +293,65 @@ function KitchenOrderCard({
 export function SwipeableOrderStack({
   orders,
   view,
+  openAtLatest = false,
   onViewChange,
   onStart,
   onComplete,
   onCancelRequest,
+  cancelAnimationOrderId,
   isUpdating = false,
 }: SwipeableOrderStackProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const previousOrderIds = useRef("");
   const previousView = useRef<KitchenOrderView>("list");
+  const previousOpenAtLatest = useRef(false);
   const ordered = useMemo(() => [...orders].sort((a, b) => {
     const at = a.createdAt ? new Date(a.createdAt).getTime() : 0;
     const bt = b.createdAt ? new Date(b.createdAt).getTime() : 0;
     return at - bt || a.orderNumber.localeCompare(b.orderNumber, "ja", { numeric: true });
   }), [orders]);
   const orderIds = ordered.map((order) => order.id).join(",");
+  const currentOrder = openAtLatest
+    ? undefined
+    : ordered.find((order) => order.status === "pending" || order.status === "preparing");
 
-  // 2026-10-16: 時系列を左から右へ古→新に固定し、新着注文は横並びの右端に現れる。
-  // 同一IDの定期更新ではスクロール位置を保ち、注文が増減した時だけ最新位置へ案内する。
+  // 2026-10-17: 作業キューでは最古の対応中注文を中央に置き、全件表示では最新注文から履歴を確認する。
   useEffect(() => {
-    if (previousOrderIds.current === orderIds && previousView.current === view) return;
+    if (
+      previousOrderIds.current === orderIds &&
+      previousView.current === view &&
+      previousOpenAtLatest.current === openAtLatest
+    ) return;
     previousOrderIds.current = orderIds;
     previousView.current = view;
+    previousOpenAtLatest.current = openAtLatest;
     if (view !== "horizontal") return;
     const frame = window.requestAnimationFrame(() => {
       const element = scrollRef.current;
-      if (element) element.scrollLeft = element.scrollWidth;
+      if (!element) return;
+      if (openAtLatest || !currentOrder) {
+        element.scrollLeft = element.scrollWidth;
+        return;
+      }
+      const focusedOrder = currentOrder && element.querySelector<HTMLElement>(`[data-order-id="${CSS.escape(currentOrder.id)}"]`);
+      if (!focusedOrder) {
+        element.scrollLeft = element.scrollWidth;
+        return;
+      }
+      const orderRect = focusedOrder.getBoundingClientRect();
+      const listRect = element.getBoundingClientRect();
+      element.scrollTo({
+        left: element.scrollLeft + orderRect.left - listRect.left - (element.clientWidth - orderRect.width) / 2,
+      });
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [orderIds, view]);
+  }, [currentOrder?.id, openAtLatest, orderIds, view]);
 
   return (
     <section className="space-y-3" aria-label="厨房の注文一覧">
       <div className="flex flex-col gap-3 border-b-thick border-border pb-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <p className="font-mono text-xs font-black uppercase tracking-wider">{ordered.length}件の注文</p>
-          <p className="mt-1 font-mono text-xs text-muted-foreground">
-            {view === "horizontal" ? "左から古い順 · 新しい注文は右端" : "古い順 · 下に行くほど新しい"}
-          </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {view === "horizontal" && ordered.length > 0 && (
@@ -337,7 +390,11 @@ export function SwipeableOrderStack({
             </CardContent>
           </Card>
         ) : ordered.map((order) => (
-          <div key={order.id} className={view === "horizontal" ? "w-[min(88vw,26rem)] shrink-0" : "min-w-0"}>
+          <div
+            key={order.id}
+            data-order-id={order.id}
+            className={view === "horizontal" ? "w-[min(88vw,26rem)] shrink-0" : "min-w-0"}
+          >
             <KitchenOrderCard
               order={order}
               view={view}
@@ -345,6 +402,7 @@ export function SwipeableOrderStack({
               onStart={() => onStart(order.id)}
               onComplete={() => onComplete(order.id)}
               onCancelRequest={() => onCancelRequest(order.id, order.orderNumber)}
+              cancelAnimationOrderId={cancelAnimationOrderId}
             />
           </div>
         ))}

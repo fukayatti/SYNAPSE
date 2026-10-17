@@ -16,15 +16,17 @@ function BackyardPageContent() {
   // useAuth() (authChange 購読で常に最新値) に統一する。
   const { circleId: authCircleId } = useAuth();
   const circleId = authCircleId ?? "";
-  const [selectedStatus, setSelectedStatus] = useState<string | undefined>(
-    "pending"
-  );
+  // 2026-10-17: 起動時は未着手と調理中を一続きの作業キューにし、最初に対応すべき注文へ案内する。
+  const [selectedStatus, setSelectedStatus] = useState<string | undefined>("actionable");
   const [view, setView] = useState<KitchenOrderView>("horizontal");
   // 注文キャンセルの確認ダイアログ用
   const [pendingCancel, setPendingCancel] = useState<{ id: string; orderNumber: string } | null>(
     null
   );
+  const [cancelAnimationOrderId, setCancelAnimationOrderId] = useState<string | null>(null);
   const queryClient = useQueryClient();
+  // 2026-10-17: 「対応中」は未着手・調理中を合わせた表示なので、全件取得後に画面側で絞る。
+  const apiStatus = selectedStatus === "actionable" ? undefined : selectedStatus;
 
   const {
     data: orders,
@@ -33,8 +35,8 @@ function BackyardPageContent() {
     error,
     refetch,
   } = useQuery({
-    queryKey: ["orders", circleId, selectedStatus],
-    queryFn: () => orderApi.list(circleId, selectedStatus),
+    queryKey: ["orders", circleId, apiStatus],
+    queryFn: () => orderApi.list(circleId, apiStatus),
     enabled: !!circleId,
     refetchInterval: 5000, // 5秒ごとに自動更新
   });
@@ -76,19 +78,22 @@ function BackyardPageContent() {
   });
 
   const handleStartPreparing = (orderId: string) => {
-    updateStatus.mutate({ id: orderId, status: "preparing" });
+    return updateStatus.mutateAsync({ id: orderId, status: "preparing" });
   };
 
   const handleComplete = (orderId: string) => {
-    completeOrder.mutate({ id: orderId });
+    return completeOrder.mutateAsync({ id: orderId });
   };
 
   const handleCancel = () => {
     if (!pendingCancel) return;
-    updateStatus.mutate(
-      { id: pendingCancel.id, status: "cancelled" },
-      { onSettled: () => setPendingCancel(null) }
-    );
+    const orderId = pendingCancel.id;
+    setCancelAnimationOrderId(orderId);
+    setPendingCancel(null);
+    window.setTimeout(() => updateStatus.mutate(
+      { id: orderId, status: "cancelled" },
+      { onSettled: () => setCancelAnimationOrderId(null) }
+    ), 300);
   };
 
   const toppingDetails = new Map((toppings ?? []).map((topping) => [topping.id, topping]));
@@ -103,6 +108,9 @@ function BackyardPageContent() {
       })),
     })),
   }));
+  const visibleOrders = selectedStatus === "actionable"
+    ? kitchenOrders.filter((order) => order.status === "pending" || order.status === "preparing")
+    : kitchenOrders;
 
   if (isLoading) {
     return (
@@ -136,6 +144,13 @@ function BackyardPageContent() {
 
       {/* ステータスフィルター */}
       <div className="flex gap-2 flex-wrap">
+        <Button
+          variant={selectedStatus === "actionable" ? "default" : "outline"}
+          onClick={() => setSelectedStatus("actionable")}
+          className="border-thick border-border rounded-none font-mono uppercase text-xs sm:text-sm"
+        >
+          対応中
+        </Button>
         <Button
           variant={selectedStatus === "pending" ? "default" : "outline"}
           onClick={() => setSelectedStatus("pending")}
@@ -175,12 +190,14 @@ function BackyardPageContent() {
 
       {/* 注文一覧 */}
       <SwipeableOrderStack
-        orders={kitchenOrders}
+        orders={visibleOrders}
         view={view}
+        openAtLatest={selectedStatus === undefined}
         onViewChange={setView}
         onStart={handleStartPreparing}
         onComplete={handleComplete}
         onCancelRequest={(id, orderNumber) => setPendingCancel({ id, orderNumber })}
+        cancelAnimationOrderId={cancelAnimationOrderId}
         isUpdating={updateStatus.isPending || completeOrder.isPending}
       />
 
