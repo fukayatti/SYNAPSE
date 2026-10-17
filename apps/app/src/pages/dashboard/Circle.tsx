@@ -29,7 +29,7 @@ import { OptionCard } from "@/components/ui/OptionCard";
 import { ToggleSwitch } from "@/components/ui/ToggleSwitch";
 import { ExtensionsManager } from "@/components/circle/ExtensionsManager";
 import { toast } from "sonner";
-import { Save, UserCheck, CreditCard, Crown, Clock, ChefHat, CheckCircle2 } from "lucide-react";
+import { Save, UserCheck, CreditCard, Crown, Clock, ChefHat, CheckCircle2, ShoppingCart } from "lucide-react";
 import { useUnsavedChanges } from "@/components/UnsavedNavigationGuard";
 
 // 注文モードの選択肢
@@ -83,6 +83,7 @@ function CircleSettingsContent() {
 
   // 2026-09-27: stockEnabledは旧設定値の保存互換用で、UIでは切り替えない。
   const [orderFlowMode, setOrderFlowMode] = useState<OrderFlowMode>("pending");
+  const [mobileOrderEnabled, setMobileOrderEnabled] = useState(false);
   const [stockEnabled, setStockEnabled] = useState(false);
   const [staffEnabled, setStaffEnabled] = useState(false);
   // 対応する支払い方法 (2026-07-12)。イベントの paymentMethods の部分集合。
@@ -93,6 +94,7 @@ function CircleSettingsContent() {
   // そのため見た目も1つのセクションにまとめ、この3項目分の未保存判定を1つのスナップショットで行う。
   const [settingsSnapshot, setSettingsSnapshot] = useState({
     orderFlowMode: "pending" as OrderFlowMode,
+    mobileOrderEnabled: false,
     stockEnabled: false,
     staffEnabled: false,
     acceptedPayments: [] as string[],
@@ -137,12 +139,14 @@ function CircleSettingsContent() {
 
       const s = parseCircleSettings(circle.settings);
       setOrderFlowMode(s.orderFlowMode);
+      setMobileOrderEnabled(s.mobileOrderEnabled);
       setStockEnabled(s.extensions.stock);
       setStaffEnabled(s.extensions.staff);
       setAcceptedPayments(s.acceptedPayments);
       setStoreAreaId(s.storeAreaId);
       setSettingsSnapshot({
         orderFlowMode: s.orderFlowMode,
+        mobileOrderEnabled: s.mobileOrderEnabled,
         stockEnabled: s.extensions.stock,
         staffEnabled: s.extensions.staff,
         acceptedPayments: s.acceptedPayments,
@@ -190,11 +194,12 @@ function CircleSettingsContent() {
 
   // 「運用設定」の保存。circleApi.updateSettings は settings カラムを丸ごと上書きするため、
   // 注文モード・拡張機能・支払い方法を常にまとめて送る。旧stock値も後方互換用に保持する。
-  const settingsDraft = { orderFlowMode, stockEnabled, staffEnabled, acceptedPayments, storeAreaId };
+  const settingsDraft = { orderFlowMode, mobileOrderEnabled, stockEnabled, staffEnabled, acceptedPayments, storeAreaId };
   const updateSettings = useMutation({
     mutationFn: async (draft: typeof settingsDraft) =>
       circleApi.updateSettings(circleId, {
         orderFlowMode: draft.orderFlowMode,
+        mobileOrderEnabled: draft.mobileOrderEnabled,
         extensions: { stock: draft.stockEnabled, staff: draft.staffEnabled },
         // イベントに存在する方法だけ残す (イベント側で削除された方法を掃除)
         acceptedPayments: draft.acceptedPayments.filter((p) => eventPayments.includes(p)),
@@ -274,6 +279,7 @@ function CircleSettingsContent() {
     onDiscard: () => {
       setForm(formSnapshot);
       setOrderFlowMode(settingsSnapshot.orderFlowMode);
+      setMobileOrderEnabled(settingsSnapshot.mobileOrderEnabled);
       setStockEnabled(settingsSnapshot.stockEnabled);
       setStaffEnabled(settingsSnapshot.staffEnabled);
       setAcceptedPayments(settingsSnapshot.acceptedPayments);
@@ -422,6 +428,20 @@ function CircleSettingsContent() {
                     onSelect={() => setOrderFlowMode(opt.value)}
                   />
                 ))}
+              </div>
+            </div>
+
+            {/* 2026-10-17: モバイル注文は厨房へ本注文を送る運用のため、サークルごとに明示許可を求める。 */}
+            <div className="space-y-2 border-t-thin border-border pt-4">
+              <h3 className="text-xs font-bold uppercase tracking-wider">注文受付</h3>
+              <div className="space-y-3 pt-1">
+                <ExtensionToggle
+                  icon={ShoppingCart}
+                  label="モバイルオーダーを受け付ける"
+                  description="有効にすると、来場者の注文が厨房の未着手一覧へ届きます。レジ注文とは表示で区別されます。"
+                  enabled={mobileOrderEnabled}
+                  onToggle={() => setMobileOrderEnabled((value) => !value)}
+                />
               </div>
             </div>
 

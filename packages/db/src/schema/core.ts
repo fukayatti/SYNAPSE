@@ -88,6 +88,8 @@ export const event = sqliteTable("event", {
 
   // 物理リストバンドの有無フラグ (2026-07-12)
   hasPhysicalWristband: integer("has_physical_wristband", { mode: "boolean" }).default(true).notNull(),
+  // 2026-10-17: 既存のセルフ発行を維持して既定ONとし、イベント主催者が必要に応じて停止できる。
+  allowSelfIssue: integer("allow_self_issue", { mode: "boolean" }).default(true).notNull(),
 
   // 論理削除 (2026-07-04): 物理削除せず deletedAt に時刻を入れて非表示化する
   deletedAt: integer("deleted_at", { mode: "timestamp_ms" }),

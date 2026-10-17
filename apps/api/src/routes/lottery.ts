@@ -204,10 +204,33 @@ lotteryRoutes.post("/:id/draw", async (c) => {
     }
   }
 
-  for (const w of winners) {
-    await db.insert(lotteryWinner).values({ id: ulid(), lotteryId: id, prizeId: w.prizeId, eventUserId: w.eventUserId });
+  const drawGuardId = ulid();
+  const winnerRows = JSON.stringify(winners.map((winner) => ({
+    id: ulid(),
+    prizeId: winner.prizeId,
+    eventUserId: winner.eventUserId,
+  })));
+  const statements = [
+    // 2026-10-17: 抽選状態の再確認・全当選者・drawn 状態を同じ D1 batch に入れる。
+    // 並行確定や途中エラーで当選者だけ残る状態を避ける。
+    c.env.DB.prepare(`INSERT INTO order_write_guard (id, valid) SELECT ?, CASE WHEN EXISTS (
+      SELECT 1 FROM lottery WHERE id=? AND status!='drawn'
+    ) THEN 1 ELSE 0 END`).bind(drawGuardId, id),
+    c.env.DB.prepare(`INSERT INTO lottery_winner (id,lottery_id,prize_id,event_user_id)
+      SELECT json_extract(value,'$.id'), ?, json_extract(value,'$.prizeId'), json_extract(value,'$.eventUserId')
+      FROM json_each(?)`).bind(id, winnerRows),
+    c.env.DB.prepare("UPDATE lottery SET status='drawn' WHERE id=? AND status!='drawn'").bind(id),
+    c.env.DB.prepare("DELETE FROM order_write_guard WHERE id=?").bind(drawGuardId),
+  ];
+  try {
+    await c.env.DB.batch(statements);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.includes("order_write_guard_valid")) {
+      apiError("BAD_REQUEST", "この抽選は既に実行済みです");
+    }
+    throw error;
   }
-  await db.update(lottery).set({ status: "drawn" }).where(eq(lottery.id, id));
   return c.json({ drawn: winners.length });
 });
 

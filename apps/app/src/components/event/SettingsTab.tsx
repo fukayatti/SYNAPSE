@@ -132,6 +132,7 @@ export function SettingsTab({ eventId, event }: SettingsTabProps) {
     endDate: "",
     logoUrl: "",
     hasPhysicalWristband: true,
+    allowSelfIssue: true,
   });
   // 直近保存済みの値のスナップショット。現在値と比較して「未保存の変更」があるかを判定する。
   const [basicSnapshot, setBasicSnapshot] = useState(basicForm);
@@ -150,6 +151,7 @@ export function SettingsTab({ eventId, event }: SettingsTabProps) {
         endDate: event.endDate ? String(event.endDate).slice(0, 10) : "",
         logoUrl: event.logoUrl || "",
         hasPhysicalWristband: event.hasPhysicalWristband !== undefined ? event.hasPhysicalWristband : true,
+        allowSelfIssue: event.allowSelfIssue !== false,
       };
       setBasicForm(nextBasic);
       setBasicSnapshot(nextBasic);
@@ -184,6 +186,7 @@ export function SettingsTab({ eventId, event }: SettingsTabProps) {
         endDate: data.endDate || null,
         logoUrl: data.logoUrl || null,
         hasPhysicalWristband: data.hasPhysicalWristband,
+        allowSelfIssue: data.allowSelfIssue,
       }),
     onSuccess: (_res, variables) => {
       queryClient.invalidateQueries({ queryKey: ["event", eventId] });
@@ -502,6 +505,22 @@ export function SettingsTab({ eventId, event }: SettingsTabProps) {
                   <Label htmlFor="hasPhysicalWristband" className="text-xs font-bold uppercase cursor-pointer">物理リストバンドを使用する</Label>
                   <p className="text-[9px] text-muted-foreground leading-normal">
                     OFFにすると、物理バンドの発行手順がスキップされ、来場者はスマホのデジタルQRのみで入場・注文ができます。
+                  </p>
+                </div>
+              </div>
+              {/* 2026-10-17: セルフ発行はイベント側の明示設定を正本にし、APIでも同じ値を強制する。 */}
+              <div className="flex items-center gap-3 border-thick border-border p-3 bg-muted/10">
+                <input
+                  id="allowSelfIssue"
+                  type="checkbox"
+                  checked={basicForm.allowSelfIssue}
+                  onChange={(e) => setBasicForm({ ...basicForm, allowSelfIssue: e.target.checked })}
+                  className="h-4 w-4 border-thick border-border bg-background cursor-pointer focus:ring-0"
+                />
+                <div className="space-y-0.5">
+                  <Label htmlFor="allowSelfIssue" className="text-xs font-bold uppercase cursor-pointer">来場者のQRセルフ発行を許可する</Label>
+                  <p className="text-[9px] text-muted-foreground leading-normal">
+                    ONにすると来場者が受付前にスマートフォン用QRを発行できます。OFFではイベントスタッフが発行します。
                   </p>
                 </div>
               </div>

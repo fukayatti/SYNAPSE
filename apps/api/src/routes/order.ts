@@ -1,4 +1,4 @@
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { zBody } from "../z-validator";
 import { AppError, apiError } from "../http-error";
 import { z } from "zod";
@@ -308,16 +308,16 @@ orderRoutes.get("/by-number/:orderNumber", async (c) => {
 });
 
 // 注文作成
-orderRoutes.post(
-  "/",
-  zBody(createOrderSchema),
-  async (c) => {
+const handleCreateOrder = async (
+  c: Context<AppEnv>,
+  source: "pos" | "mobile",
+  input: z.infer<typeof createOrderSchema>,
+) => {
     const db = c.get("db");
     try {
-      const input = c.req.valid("json");
       const orderId = ulid();
       // 2026-10-03: 再送結果は在庫/価格の再検証前に返し、成功後のレスポンス紛失にも対応する。
-      const command = await orderCommand(`pos:${input.circleId}:${input.userId}`, c.req.header("Idempotency-Key"), input);
+      const command = await orderCommand(`${source}:${input.circleId}:${input.userId}`, c.req.header("Idempotency-Key"), input);
 
       // 2026-10-03: 再送照会と注文コンテキストを1つのJOINにまとめ、D1の直列readを1回減らす。
       // 保存済み注文は再検証より先に返す。サークル削除後の再送だけは下のfallback照会で維持する。
@@ -354,6 +354,20 @@ orderRoutes.post(
         return c.json({ id: context.committed.id, orderNumber: context.committed.orderNumber }, 201);
       }
       const eventId = context.circle.eventId;
+
+      // 2026-10-17: API経路で注文元を固定し、モバイル注文はレジ担当者情報を引き継がない。
+      const cashierId = source === "pos" ? input.cashierId ?? null : null;
+      if (source === "mobile") {
+        let settings: { mobileOrderEnabled?: boolean } = {};
+        try {
+          settings = JSON.parse(context.circle.settings || "{}") as typeof settings;
+        } catch {
+          settings = {};
+        }
+        if (settings.mobileOrderEnabled !== true) {
+          apiError("FORBIDDEN", "このサークルはモバイルオーダーを受け付けていません");
+        }
+      }
 
       let appliedRegisterCoupon: { id: string; discountApplied: number } | undefined;
       let registerDiscountPercent: number | undefined;
@@ -408,10 +422,10 @@ orderRoutes.post(
       let orderFlowMode: "pending" | "preparing" | "completed" = "pending";
       try {
         const parsed = JSON.parse(context.circle.settings || "{}");
-        if (
+        if (source === "pos" && (
           parsed?.orderFlowMode === "preparing" ||
           parsed?.orderFlowMode === "completed"
-        ) {
+        )) {
           orderFlowMode = parsed.orderFlowMode;
         }
       } catch (_) {
@@ -598,7 +612,7 @@ orderRoutes.post(
 
       const committed = await commitOrder(c.env.DB, command, {
         id: orderId, circleId: input.circleId, userId: input.userId,
-        cashierId: input.cashierId, peopleCount: input.peopleCount,
+        cashierId, source, peopleCount: input.peopleCount,
         totalPrice, paymentMethod: resolvedPayment, status: orderFlowMode,
         registerCoupon: appliedRegisterCoupon,
         items: orderItems.map((item) => ({ ...item,
@@ -616,8 +630,10 @@ orderRoutes.post(
       // 2026-10-03: SQLやbind値をレスポンス/ログへ流さず、共通ハンドラのrequestIdで追跡する。
       throw error;
     }
-  }
-);
+};
+
+orderRoutes.post("/", zBody(createOrderSchema), async (c) => handleCreateOrder(c, "pos", c.req.valid("json")));
+orderRoutes.post("/mobile", zBody(createOrderSchema), async (c) => handleCreateOrder(c, "mobile", c.req.valid("json")));
 
 // 注文ステータス更新
 orderRoutes.patch(

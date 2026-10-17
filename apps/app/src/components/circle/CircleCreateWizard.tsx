@@ -11,6 +11,7 @@ const STEPS = ["基本情報", "画像", "運用設定", "確認"];
 
 type CreatedCircleSettings = {
   orderFlowMode: OrderFlowMode;
+  mobileOrderEnabled: boolean;
   extensions: { stock: boolean; staff: boolean };
   acceptedPayments: string[];
   storeAreaId: string | null;
@@ -70,6 +71,8 @@ export function CircleCreateWizard({
     setCreating(true);
     const settings: CreatedCircleSettings = {
       orderFlowMode,
+      // 2026-10-17: 新規サークルは来場者注文を明示的に有効化するまで受け付けない。
+      mobileOrderEnabled: false,
       extensions: { stock: stockEnabled, staff: staffEnabled },
       acceptedPayments,
       storeAreaId: storeAreaId || null,

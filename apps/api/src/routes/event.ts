@@ -140,6 +140,7 @@ eventRoutes.get("/:id", async (c) => {
       backgroundColor: event.backgroundColor,
       textColor: event.textColor,
       hasPhysicalWristband: event.hasPhysicalWristband,
+      allowSelfIssue: event.allowSelfIssue,
     })
     .from(event)
     .where(and(eq(event.id, id), isNull(event.deletedAt)));
@@ -1304,6 +1305,7 @@ eventRoutes.post(
       startDate: z.string().optional(),
       endDate: z.string().optional(),
       hasPhysicalWristband: z.boolean().optional(),
+      allowSelfIssue: z.boolean().optional(),
       fontFamily: z.enum(["mono", "sans", "serif"]).optional(),
       primaryColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
       primaryTextColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
@@ -1335,6 +1337,7 @@ eventRoutes.post(
       startDate: input.startDate ? new Date(input.startDate) : undefined,
       endDate: input.endDate ? new Date(input.endDate) : undefined,
       hasPhysicalWristband: input.hasPhysicalWristband ?? true,
+      allowSelfIssue: input.allowSelfIssue ?? true,
       fontFamily: input.fontFamily ?? "mono",
       primaryColor: input.primaryColor ?? "#000000",
       primaryTextColor: input.primaryTextColor ?? "#FFFFFF",
@@ -1412,6 +1415,7 @@ eventRoutes.put(
       startDate: z.string().nullable().optional(),
       endDate: z.string().nullable().optional(),
       hasPhysicalWristband: z.boolean().optional(),
+      allowSelfIssue: z.boolean().optional(),
     })
   ),
   async (c) => {

@@ -483,7 +483,7 @@ function MenuPageContent() {
     circleId: selectedCircleId, userId, peopleCount: 1,
     items: cart.map((line) => ({ menuId: line.menuId, quantity: line.quantity, toppingIds: line.toppings.map((t) => t.toppingId) })),
   } : null;
-  const submitOrder = useOrderSubmission(orderInput);
+  const submitOrder = useOrderSubmission(orderInput, orderApi.createMobile);
   // 代引オーダー（本注文）も同じカートの再送では Idempotency-Key を維持する (2026-10-03)。
   const codOrderMutation = useMutation({
     mutationFn: async () => {
@@ -598,6 +598,15 @@ function MenuPageContent() {
       const preOrderMod = parsed.installed?.["circle-pre-order-cod"];
       return preOrderMod?.enabled ?? false;
     } catch (e) {
+      return false;
+    }
+  };
+
+  // 2026-10-17: 来場者側にも受付可否を伝え、設定OFFでは送信ボタンを出さない。
+  const isMobileOrderEnabled = () => {
+    try {
+      return JSON.parse(circleData?.settings || "{}").mobileOrderEnabled === true;
+    } catch {
       return false;
     }
   };
@@ -1104,7 +1113,9 @@ function MenuPageContent() {
             <span>¥{getDiscountedTotal().toLocaleString()}</span>
           </div>
           <p className="text-[11px] text-muted-foreground leading-normal">
-            {isPreOrderEnabled()
+            {!isMobileOrderEnabled()
+              ? "このサークルはモバイルオーダーを受け付けていません。カートを保存し、レジでお支払いください。"
+              : isPreOrderEnabled()
               ? "※「注文を送信する」を押すと注文が送信されます。番号が呼ばれたら受取口にてお支払いください。"
               : "カートの内容は自動保存されています。レジでマイQRコード、または連携したリストバンドを提示してお支払いください。"}
           </p>
@@ -1123,7 +1134,7 @@ function MenuPageContent() {
         )}
 
         <div className="flex flex-col gap-2 pt-2">
-          {isPreOrderEnabled() ? <Button
+          {isPreOrderEnabled() && isMobileOrderEnabled() ? <Button
             onClick={() => {
               if (!userId) {
                 toast.error("注文にはリストバンドが必要です。QR を読み取って入場してください。");

@@ -16,6 +16,7 @@ export interface SwipeableOrder {
   orderNumber: string;
   createdAt: string | Date | null;
   status: string;
+  source?: "pos" | "mobile";
   totalPrice?: number;
   peopleCount?: number;
   items: Array<{
@@ -207,6 +208,10 @@ function KitchenOrderCard({
               <CardDescription className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-xs">
                 <span className="inline-flex items-center gap-1"><Clock className="h-3.5 w-3.5" />{orderTime(order.createdAt)}</span>
                 {order.peopleCount != null && <span className="inline-flex items-center gap-1"><Users className="h-3.5 w-3.5" />{order.peopleCount}名</span>}
+                {/* 2026-10-17: 厨房では注文受付元をカード上で即時判別できるようにする。 */}
+                <span className="inline-flex rounded-none border-thin border-border bg-background px-1.5 py-0 text-[10px] font-semibold uppercase tracking-[1px]">
+                  {order.source === "mobile" ? "モバイル注文" : "レジ注文"}
+                </span>
                 <span>{order.items.length}品目</span>
               </CardDescription>
             </div>
