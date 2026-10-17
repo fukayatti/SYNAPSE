@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import { eventUser, wristband, wristbandBatch, wristbandBatchChunk, event, type DB } from "@fesflow/db";
-import { eq, and, asc, desc, or, like, isNull, isNotNull, countDistinct, count, inArray, max } from "drizzle-orm";
+import { eq, and, asc, desc, or, like, isNull, isNotNull, countDistinct, count, inArray } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { hasPermission } from "../utils/auth";
 import { zBody, zQuery } from "../z-validator";
@@ -155,16 +155,19 @@ wristbandRoutes.get(
   }
 );
 
-/** イベント内で次に割り当てる呼出用 displayId を採番する。 */
-// 2026-07-08 (Phase5): db をモジュール Proxy ではなく引数で受け取る (Context を持たない
-// トップレベル関数のため、計画通り db を明示的な引数にした)。
-async function nextDisplayId(db: DB, eventId: string): Promise<number> {
-  const rows = await db
-    .select({ displayId: max(eventUser.displayId) })
-    .from(eventUser)
-    .where(eq(eventUser.eventId, eventId));
-  // 2026-10-06: バッチごとの全来場者走査を避け、履歴再開でもイベント規模に比例した読み込みをしない。
-  return (rows[0]?.displayId ?? 0) + 1;
+/** イベント内の呼出ID範囲をDBの単一書き込みで確保する。 */
+async function allocateDisplayIds(db: DB, eventId: string, count: number): Promise<number> {
+  // 2026-10-17: MAX(display_id)+1 は並行発行で衝突するため、D1のatomic upsertで範囲を予約する。
+  // 既存データの最大値も毎回下限に使い、導入時の既存来場者を安全に引き継ぐ。
+  const row = await db.$client.prepare(`
+    INSERT INTO event_user_sequence (event_id, value)
+    SELECT ?, COALESCE(MAX(display_id), 0) + ? FROM event_user WHERE event_id = ?
+    ON CONFLICT(event_id) DO UPDATE SET value =
+      max(event_user_sequence.value, (SELECT COALESCE(MAX(display_id), 0) FROM event_user WHERE event_id = ?)) + ?
+    RETURNING value
+  `).bind(eventId, count, eventId, eventId, count).first<{ value: number }>();
+  if (!row) throw new Error("来場者番号を確保できませんでした");
+  return row.value - count + 1;
 }
 
 // コード (リストバンドID、ユーザーID) によるユーザー照会
@@ -642,7 +645,6 @@ wristbandRoutes.patch(
     if (users.length === 0) {
       apiError("NOT_FOUND", "ユーザーが見つかりません");
     }
-
     // 2026-10-08: 来場者行から対象イベントを解決してから権限を確認し、
     // 別イベントのスタッフがIDを知っていてもプロフィールを変更できないようにする。
     const allowed = await hasPermission(c, null, "member:write", users[0]!.eventId);
@@ -817,6 +819,10 @@ wristbandRoutes.post(
     if (users.length === 0) {
       apiError("NOT_FOUND", "ユーザーが見つかりません");
     }
+    const [targetEvent] = await db.select().from(event).where(eq(event.id, users[0]!.eventId));
+    if (!targetEvent || targetEvent.deletedAt || !["upcoming", "live"].includes(targetEvent.lifecycleStatus)) {
+      apiError("BAD_REQUEST", "開催前または開催中のイベントでのみ発行できます");
+    }
 
     // 権限チェック (スタッフ member:write 権限が必要)。ユーザーの所属イベントで判定する。
     const allowed = await hasPermission(c, null, "member:write", users[0]!.eventId);
@@ -879,8 +885,17 @@ wristbandRoutes.post(
 
     const auth = c.get("auth");
     const session = await auth.api.getSession({ headers: c.req.raw.headers });
-    // 物理リストバンドの紐付け(wristbandId指定)がある場合のみログインと対象イベントのスタッフ権限を必須とする。
-    // wristbandIdがない場合はデジタルQRコードのセルフ発行であるため、セッションなしでも許可する。
+    const targetEvent = events[0]!;
+    if (targetEvent.deletedAt || !["upcoming", "live"].includes(targetEvent.lifecycleStatus)) {
+      apiError("BAD_REQUEST", "終了したイベントでは発行できません");
+    }
+    if (targetEvent.billingStatus === "suspended") {
+      apiError("FORBIDDEN", "停止中のイベントでは発行できません");
+    }
+    // 2026-10-17: 物理・デジタルとも開催前または開催中に限定し、セルフ発行はイベント設定で制御する。
+    if (!wristbandId && targetEvent.allowSelfIssue !== true) {
+      apiError("FORBIDDEN", "このイベントでは来場者によるセルフ発行を受け付けていません");
+    }
     if (wristbandId && (!session || !session.user)) {
       apiError("UNAUTHORIZED", "認証されていません");
     }
@@ -894,31 +909,20 @@ wristbandRoutes.post(
     }
 
     const userId = `usr_${nanoid(12)}`;
-    const displayId = await nextDisplayId(db, eventId);
-    await db.insert(eventUser).values({
+    const displayId = await allocateDisplayIds(db, eventId, 1);
+    const newUser = {
       id: userId,
       eventId,
       displayId,
       status: "available",
-    });
-
-    if (wristbandId) {
-      await db.insert(wristband).values({
-        id: wristbandId,
-        userId,
-        status: "active",
-        assignedAt: new Date(),
-      });
-    } else {
-      // 物理リストバンドIDが指定されない場合は、イベントの設定に関わらず
-      // 来場者自身のスマホで使えるようにスマホ用疑似リストバンド(smartphone)を常に登録する
-      await db.insert(wristband).values({
-        id: `sp_${userId}`,
-        userId,
-        status: "smartphone",
-        assignedAt: new Date(),
-      });
-    }
+    };
+    const assignedId = wristbandId ?? `sp_${userId}`;
+    const assignedStatus = wristbandId ? "active" : "smartphone";
+    // 2026-10-17: 来場者とバンドの片方だけが残る発行事故を避けるため、D1 batchで同時確定する。
+    await db.batch([
+      db.insert(eventUser).values(newUser),
+      db.insert(wristband).values({ id: assignedId, userId, status: assignedStatus, assignedAt: new Date() }),
+    ]);
 
     return c.json({ userId, displayId, wristbandId: wristbandId ?? null });
   }
@@ -1044,6 +1048,10 @@ wristbandRoutes.post("/batches/:batchId/process", async (c) => {
     apiError("FORBIDDEN", "この操作にはイベントの編集権限が必要です");
   }
   if (batch.status === "completed" || batch.status === "conflict") return c.json(batch);
+  const [targetEvent] = await db.select().from(event).where(eq(event.id, batch.eventId));
+  if (!targetEvent || targetEvent.deletedAt || !["upcoming", "live"].includes(targetEvent.lifecycleStatus)) {
+    apiError("BAD_REQUEST", "開催前または開催中のイベントでのみ発行できます");
+  }
 
   const chunkIndex = Math.floor(batch.processedCount / WRISTBAND_BATCH_CHUNK_SIZE);
   const [storedChunk] = await db
@@ -1075,7 +1083,7 @@ wristbandRoutes.post("/batches/:batchId/process", async (c) => {
     return c.json(conflicted);
   }
 
-  const firstDisplayId = await nextDisplayId(db, batch.eventId);
+  const firstDisplayId = await allocateDisplayIds(db, batch.eventId, ids.length);
   const userRows = ids.map((_, index) => ({
     id: `usr_${nanoid(12)}`,
     eventId: batch.eventId,
@@ -1158,6 +1166,9 @@ wristbandRoutes.post(
 
     const events = await db.select().from(event).where(eq(event.id, eventId));
     if (events.length === 0) apiError("NOT_FOUND", "イベントが見つかりません");
+    if (events[0]!.deletedAt || !["upcoming", "live"].includes(events[0]!.lifecycleStatus)) {
+      apiError("BAD_REQUEST", "開催前または開催中のイベントでのみ発行できます");
+    }
 
     const ids = urls.map((url) => {
       const match = url.match(/\/w\/([a-zA-Z0-9_-]+)(?:[?#].*)?$/);
@@ -1177,7 +1188,7 @@ wristbandRoutes.post(
       apiError("CONFLICT", `登録済みのリストバンドが ${existing.length} 件あります`);
     }
 
-    const startDisplayId = await nextDisplayId(db, eventId);
+    const startDisplayId = await allocateDisplayIds(db, eventId, wristbandIds.length);
     const userRows = wristbandIds.map((_, index) => ({
       id: `usr_${nanoid(12)}`,
       eventId,
@@ -1190,9 +1201,11 @@ wristbandRoutes.post(
       status: "active",
     }));
 
-    // D1の対話型トランザクションは使えないため、FKの親→子順でbulk insertする。
-    await db.insert(eventUser).values(userRows);
-    await db.insert(wristband).values(bandRows);
+    // 2026-10-17: CSV取込でも来場者と物理バンドを同じD1 batchで確定する。
+    await db.batch([
+      db.insert(eventUser).values(userRows),
+      db.insert(wristband).values(bandRows),
+    ]);
     return c.json({ imported: wristbandIds.length, firstDisplayId: startDisplayId });
   }
 );

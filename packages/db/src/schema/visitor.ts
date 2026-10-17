@@ -13,6 +13,14 @@ import {
 import { event, circle } from "./core";
 import { ulid } from "ulidx";
 
+// 2026-10-17: イベント内の表示番号を同時発行でも重複させないため、最後に確保した番号を保存する。
+export const eventUserSequence = sqliteTable("event_user_sequence", {
+  eventId: text("event_id")
+    .primaryKey()
+    .references(() => event.id, { onDelete: "cascade" }),
+  value: integer("value").notNull(),
+});
+
 // イベント来場ユーザーテーブル
 export const eventUser = sqliteTable(
   "event_user",
