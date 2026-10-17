@@ -421,6 +421,7 @@ async function getVisitorRally(db: AppEnv["Variables"]["db"], visitor: { id: str
 
 async function recordRedemption(
   db: AppEnv["Variables"]["db"],
+  d1: AppEnv["Bindings"]["DB"],
   eventId: string,
   eventUserId: string,
   staffId: string,
@@ -435,27 +436,40 @@ async function recordRedemption(
   const reward = progress.rewards.find((item) => item.id === rewardId) ??
     (rewardId === "default" ? progress.rewards[0] : undefined);
   if (!reward) return { error: "選択された景品は登録されていません" } as const;
-  if (reward.stockQuantity !== null) {
-    const stockRows = await db.select({ quantity: sql<number>`coalesce(sum(${stampRallyRedemption.quantity}), 0)` })
-      .from(stampRallyRedemption).where(and(
-        eq(stampRallyRedemption.eventId, eventId),
-        eq(stampRallyRedemption.rewardId, reward.id),
-      ));
-    if ((stockRows[0]?.quantity ?? 0) + quantity > reward.stockQuantity) {
-      return { error: "この景品の登録在庫を超える個数は交換できません" } as const;
+  const redemptionId = ulid();
+  const guardId = ulid();
+  const createdAt = Date.now();
+  try {
+    await d1.batch([
+      // 2026-10-17: 在庫と世帯上限をguard INSERT内で再確認し、確認と交換記録を同じD1 batchに入れる。
+      // 複数スタッフの同時処理で残数を二重使用する競合を防ぐ。
+      d1.prepare(`INSERT INTO order_write_guard (id, valid) SELECT ?, CASE WHEN
+        EXISTS (SELECT 1 FROM event_user WHERE id=? AND event_id=? AND status='available')
+        AND (SELECT count(*) FROM wristband WHERE user_id=? AND status IN ('active','smartphone')) -
+          MAX(COALESCE((SELECT sum(quantity) FROM stamp_rally_redemption
+            WHERE event_id=? AND event_user_id=?), 0),
+            CASE WHEN EXISTS (SELECT 1 FROM reward_redemption WHERE user_id=?) THEN 1 ELSE 0 END) >= ?
+        AND (? IS NULL OR COALESCE((SELECT sum(quantity) FROM stamp_rally_redemption
+          WHERE event_id=? AND reward_id=?), 0) + ? <= ?)
+        THEN 1 ELSE 0 END`).bind(
+          guardId, eventUserId, eventId, eventUserId, eventId, eventUserId, eventUserId, quantity,
+          reward.stockQuantity, eventId, reward.id, quantity, reward.stockQuantity,
+        ),
+      d1.prepare(`INSERT INTO stamp_rally_redemption
+        (id,event_id,event_user_id,staff_id,reward_id,reward_name,quantity,created_at)
+        VALUES (?,?,?,?,?,?,?,?)`).bind(
+          redemptionId, eventId, eventUserId, staffId, reward.id, reward.name, quantity, createdAt,
+        ),
+      d1.prepare("DELETE FROM order_write_guard WHERE id=?").bind(guardId),
+    ]);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.includes("order_write_guard_valid")) {
+      return { error: "在庫または交換可能数が更新されました。来場者情報を再照会してください" } as const;
     }
+    throw error;
   }
-  const inserted = await db.insert(stampRallyRedemption).values({
-    id: ulid(),
-    eventId,
-    eventUserId,
-    staffId,
-    rewardId: reward.id,
-    rewardName: reward.name,
-    quantity,
-  }).onConflictDoNothing().returning({ id: stampRallyRedemption.id, createdAt: stampRallyRedemption.createdAt });
-  if (inserted.length === 0) return { error: "景品交換を記録できませんでした。再照会してください" } as const;
-  return { redemption: inserted[0] } as const;
+  return { redemption: { id: redemptionId, createdAt: new Date(createdAt) } } as const;
 }
 
 // 来場者のスタンプ。対象エリアはイベント設定、サークルの場所は circle.settings.storeAreaId から解決する。
@@ -501,7 +515,7 @@ stampRoutes.post(
     const session = await getSession(c);
     if (!session?.user) apiError("FORBIDDEN", "ログインが必要です");
     const input = c.req.valid("json");
-    const result = await recordRedemption(db, eventId, visitor.id, session.user.id || session.user.email.toLowerCase(), input.rewardId, input.quantity);
+    const result = await recordRedemption(db, c.env.DB, eventId, visitor.id, session.user.id || session.user.email.toLowerCase(), input.rewardId, input.quantity);
     if ("error" in result && result.error) apiError("BAD_REQUEST", result.error);
     return c.json({ success: true, redemption: result.redemption }, 201);
   },
@@ -827,7 +841,7 @@ stampRoutes.post(
     }
     const session = await getSession(c);
     if (!session?.user) apiError("FORBIDDEN", "ログインが必要です");
-    const result = await recordRedemption(db, visitor.eventId, visitor.id, session.user.id || session.user.email.toLowerCase(), "default", 1);
+    const result = await recordRedemption(db, c.env.DB, visitor.eventId, visitor.id, session.user.id || session.user.email.toLowerCase(), "default", 1);
     if ("error" in result && result.error) apiError("BAD_REQUEST", result.error);
     return c.json({ success: true, redemption: result.redemption }, 201);
   },
