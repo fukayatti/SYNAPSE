@@ -1462,7 +1462,7 @@ export const wristbandApi = {
         `&bandType=${filters.bandType}&accountStatus=${filters.accountStatus}&profileStatus=${filters.profileStatus}` +
         `&offset=${pagination.offset}&limit=${pagination.limit}` +
         `&sortBy=${sorting.sortBy}&sortDirection=${sorting.sortDirection}`
-    ).catch(() => ({ items: [], total: 0, ...pagination })),
+    ),
   register: (userId: string, wristbandId: string) =>
     fetchApi<{ success: boolean; wristbandId: string }>("/api/wristbands/register", {
       method: "POST",
