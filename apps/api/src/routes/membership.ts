@@ -377,7 +377,11 @@ membershipRoutes.get("/my", async (c) => {
       return {
         ...m,
         circle: ci,
-        event: events.find((e) => e.id === m.eventId),
+        // 2026-10-19: サークル所属では membership.eventId が未設定の既存データもあるため、
+        // スペース切替表示用のイベント名はサークルの親イベントから補完する。
+        event:
+          events.find((e) => e.id === m.eventId) ??
+          (parentEvent ? { eventName: parentEvent.eventName } : undefined),
         // 画面の権限表示/ガード用。実際の可否は常にサーバーの hasPermission が決める。
         // 高度な権限管理 OFF のイベントでは circle_staff が circle_manager 相当になる。
         effectiveRole: ci ? effectiveCircleRole(m.role, parentEvent?.advancedPermissions) : m.role,
