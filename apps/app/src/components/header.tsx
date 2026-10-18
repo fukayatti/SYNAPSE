@@ -94,6 +94,13 @@ export default function Header() {
     if (activeMenu !== "nav") setMobileSection(null);
   }, [activeMenu]);
 
+  const isSpaceMenuOpen = spaceOpen || (mobileNavOpen && mobileSection === "space");
+  useEffect(() => {
+    if (!isSpaceMenuOpen) return;
+    // 2026-10-19: パネルを開くたび所属を先に再取得し、直近の削除・権限変更を一覧へ反映する。
+    void queryClient.invalidateQueries({ queryKey: ["mySpaces"] });
+  }, [isSpaceMenuOpen, queryClient]);
+
   const notifRef = useRef<HTMLDivElement>(null);
   const spaceRef = useRef<HTMLDivElement>(null);
   const accountRef = useRef<HTMLDivElement>(null);
@@ -155,7 +162,12 @@ export default function Header() {
     }
     if (role === "circle_manager" || role === "circle_admin" || role === "circle_staff") {
       const space = (spaces ?? []).find((m: any) => m.circleId === (getAuthInfo()?.circleId ?? null));
-      return space?.circle?.name || circleName || "店舗";
+      const eventName = space?.event?.eventName;
+      const currentCircleName = space?.circle?.name || circleName;
+      // 2026-10-19: ヘッダーでも所属イベントとサークルを並べ、同名サークルを区別しやすくする。
+      return eventName && currentCircleName
+        ? `${eventName} / ${currentCircleName}`
+        : currentCircleName || "店舗";
     }
     return role ? roleLabel(role) : "スペース選択";
   }, [role, eventId, spaces, circleName]);
@@ -247,6 +259,7 @@ export default function Header() {
       role: string;
       circleId?: string | null;
       eventId?: string | null;
+      circleName?: string;
     }> = [];
 
     // 1. システム管理 (実在する super_admin 所属を選択可能なスペースとして使う)
@@ -275,13 +288,19 @@ export default function Header() {
         }
       } else if (m.circleId) {
         if (!list.some(x => x.type === "circle" && x.circleId === m.circleId)) {
+          const eventName = m.event?.eventName;
+          const circleName = m.circle?.name;
           list.push({
             id: m.id,
             type: "circle",
-            name: m.circle?.name || `サークル: ${m.circleId}`,
-            role: m.role,
+            // 同名サークルをイベント間で見分けられるよう、切替候補は「イベント / サークル」で表示する。
+            name: eventName && circleName
+              ? `${eventName} / ${circleName}`
+              : circleName || `サークル: ${m.circleId}`,
+            circleName: circleName || undefined,
+            role: m.effectiveRole ?? m.role,
             circleId: m.circleId,
-            eventId: m.eventId,
+            eventId: m.eventId ?? m.circle?.eventId,
           });
         }
       }
@@ -340,7 +359,7 @@ export default function Header() {
         userName: name,
         role: space.role,
         membershipId: space.id,
-        circleName: space.name,
+        circleName: space.circleName || space.name,
         isEventAdmin: false,
       };
     }
