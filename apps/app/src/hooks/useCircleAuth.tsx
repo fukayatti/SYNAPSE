@@ -619,6 +619,10 @@ export function useMySpaces() {
     },
     enabled: !!email,
     refetchOnWindowFocus: true,
+    // 2026-10-19: 他の管理者による権限変更や論理削除はこのタブ内のイベントで通知されないため、
+    // 表示中のスペース一覧も定期取得し、リロードなしで切替候補とロール表示を追随させる。
+    refetchInterval: 15_000,
+    refetchIntervalInBackground: false,
   });
   return { ...query, sessionPending, sessionError: !!sessionError, sessionFetchError: sessionError, retrySession };
 }

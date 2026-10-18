@@ -36,6 +36,11 @@ export default function VisitorStampRallyPage() {
     queryKey: ["visitor-stamp-rally", userId],
     queryFn: () => stampRallyApi.visitor(userId!),
     enabled: !!userId,
+    // 2026-10-19: 店舗で受取処理が完了した後も来場者が画面を開いたまま確認できるよう、
+    // 別端末で追加されたスタンプと交換枠を定期的に取り直す。
+    refetchInterval: 15_000,
+    refetchIntervalInBackground: false,
+    refetchOnWindowFocus: true,
   });
 
   const data = query.data;
