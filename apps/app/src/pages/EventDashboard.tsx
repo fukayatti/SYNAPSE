@@ -196,7 +196,7 @@ export default function EventDashboard() {
           )}
 
           {activeTab === "stamp-rally" && eventData && (
-            <StampRallyTab eventId={eventId} event={eventData} />
+            <StampRallyTab eventId={eventId} event={eventData} onOpenStoreAreas={() => changeTab("store-areas")} />
           )}
 
           {/* TAB 2: 全体売上管理 */}

@@ -35,6 +35,7 @@ type StampRallySettings = {
   enabled: boolean;
   targetAreaIds: string[];
   requiredCount: number;
+  requiredCountByArea: Record<string, number>;
   rewardTitle: string;
   rewards: StampRallyReward[];
   redemptionLocation: string;
@@ -62,6 +63,7 @@ function parseStampRallySettings(raw: string | null | undefined): StampRallySett
     enabled: false,
     targetAreaIds: [],
     requiredCount: 3,
+    requiredCountByArea: {},
     rewardTitle: "景品交換",
     rewards: [{ id: "default", name: "景品交換", stockQuantity: null }],
     redemptionLocation: "",
@@ -95,6 +97,10 @@ function parseStampRallySettings(raw: string | null | undefined): StampRallySett
           }];
         })
       : [{ id: "default", name: rewardTitle, stockQuantity: null }];
+    const requiredCountByArea = value.requiredCountByArea && typeof value.requiredCountByArea === "object" && !Array.isArray(value.requiredCountByArea)
+      ? Object.fromEntries(Object.entries(value.requiredCountByArea)
+          .filter((entry): entry is [string, number] => typeof entry[0] === "string" && Number.isInteger(entry[1]) && Number(entry[1]) >= 1 && Number(entry[1]) <= 100))
+      : {};
     return {
       enabled: value.enabled === true,
       targetAreaIds: Array.isArray(value.targetAreaIds)
@@ -103,6 +109,7 @@ function parseStampRallySettings(raw: string | null | undefined): StampRallySett
       requiredCount: Number.isInteger(value.requiredCount) && Number(value.requiredCount) > 0
         ? Number(value.requiredCount)
         : (legacyAreas[0]?.requiredCount ?? defaults.requiredCount),
+      requiredCountByArea,
       rewardTitle,
       rewards: rewards.length > 0 ? rewards : [{ id: "default", name: rewardTitle, stockQuantity: null }],
       redemptionLocation: typeof value.redemptionLocation === "string"
@@ -335,7 +342,7 @@ async function getRallyProgress(db: AppEnv["Variables"]["db"], eventId: string, 
     ? configuredAreas.filter((area) => validTargetAreaIds.includes(area.id)).map((area) => ({
         id: area.id,
         name: area.name,
-        requiredCount: null as number | null,
+        requiredCount: settings.requiredCountByArea[area.id] ?? null,
         circles: circles
           .filter((row) => parseCircleStoreAreaId(row.settings) === area.id)
           .map(circleProgress),
@@ -352,9 +359,16 @@ async function getRallyProgress(db: AppEnv["Variables"]["db"], eventId: string, 
         }))
       : [];
 
+  const usesAreaRequirements = validTargetAreaIds.length > 0 &&
+    validTargetAreaIds.every((areaId) => settings.requiredCountByArea[areaId] != null);
+  // 2026-10-18: エリア別設定では、選択した全エリアの条件達成を景品獲得条件にする。
   const isQualified = useLegacyAreas
     ? areas.some((area) => area.circles.filter((item) => item.stamped).length >= (area.requiredCount ?? Infinity))
-    : settings.enabled && stampedCircleIds.length >= settings.requiredCount;
+    : usesAreaRequirements
+      ? settings.enabled && areas.length > 0 && areas.every((area) =>
+          area.requiredCount != null && area.circles.filter((item) => item.stamped).length >= area.requiredCount
+        )
+      : settings.enabled && stampedCircleIds.length >= settings.requiredCount;
   const redemptionTotals = await db.select({
     quantity: sql<number>`coalesce(sum(${stampRallyRedemption.quantity}), 0)`,
   })
@@ -384,7 +398,10 @@ async function getRallyProgress(db: AppEnv["Variables"]["db"], eventId: string, 
     stampedCircleIds,
     stampedCount: stampedCircleIds.length,
     targetCircleCount: uniqueTargetCircleIds.length,
-    requiredCount: settings.requiredCount,
+    requiredCount: usesAreaRequirements
+      ? validTargetAreaIds.reduce((sum, areaId) => sum + settings.requiredCountByArea[areaId]!, 0)
+      : settings.requiredCount,
+    requiredCountByArea: settings.requiredCountByArea,
     eligible: settings.enabled && isQualified,
     rewardTitle: settings.rewardTitle,
     familyMemberCount,
@@ -407,6 +424,7 @@ async function getVisitorRally(db: AppEnv["Variables"]["db"], visitor: { id: str
     stampedCount: 0,
     targetCircleCount: 0,
     requiredCount: 3,
+    requiredCountByArea: {},
     eligible: false,
     rewardTitle: "景品交換",
     familyMemberCount: 0,
@@ -479,7 +497,7 @@ stampRoutes.get("/visitor/:code", async (c) => {
   const code = c.req.param("code");
   const visitor = await resolveVisitorFromCode(db, code);
   if (!visitor) {
-    return c.json({ enabled: false, legacy: false, areas: [], stampedCircleIds: [], stampedCount: 0, targetCircleCount: 0, requiredCount: 3, eligible: false, rewardTitle: "景品交換", familyMemberCount: 0, redeemedCount: 0, remainingCount: 0, rewards: [], redemptionLocation: "", rulesUrl: "", redeemedAt: null });
+    return c.json({ enabled: false, legacy: false, areas: [], stampedCircleIds: [], stampedCount: 0, targetCircleCount: 0, requiredCount: 3, requiredCountByArea: {}, eligible: false, rewardTitle: "景品交換", familyMemberCount: 0, redeemedCount: 0, remainingCount: 0, rewards: [], redemptionLocation: "", rulesUrl: "", redeemedAt: null });
   }
   return c.json(await getVisitorRally(db, visitor));
 });
@@ -713,6 +731,38 @@ stampRoutes.get("/event/:eventId/usage", async (c) => {
         if (visitor.visitedStoreCount >= area.requiredCount) qualifiedIds.add(visitor.eventUserId);
       }
     }
+  } else if (validTargetAreaIds.length > 0 && validTargetAreaIds.every((areaId) => settings.requiredCountByArea[areaId] != null)) {
+    // 2026-10-18: 店舗・来場者ごとの利用を一度に取得し、エリア単位で達成者を集計する。
+    const areaIdByCircleId = new Map(circles
+      .filter((row) => validTargetAreaIds.includes(parseCircleStoreAreaId(row.settings) || ""))
+      .map((row) => [row.id, parseCircleStoreAreaId(row.settings)!]));
+    const areaVisitRows = uniqueTargetCircleIds.length > 0
+      ? await db.select({ eventUserId: eventUser.id, circleId: circle.id })
+          .from(order)
+          .innerJoin(circle, eq(order.circleId, circle.id))
+          .innerJoin(eventUser, and(eq(eventUser.id, order.userId), eq(eventUser.eventId, eventId)))
+          .where(and(
+            eq(circle.eventId, eventId),
+            isNull(circle.deletedAt),
+            targetCircleFilter,
+            ne(order.status, "cancelled"),
+            or(eq(order.status, "completed"), eq(order.completed, true)),
+          ))
+          .groupBy(eventUser.id, circle.id)
+      : [];
+    const visitCountsByArea = new Map<string, Map<string, number>>();
+    for (const row of areaVisitRows) {
+      const areaId = areaIdByCircleId.get(row.circleId);
+      if (!areaId) continue;
+      const visitorCountsByArea = visitCountsByArea.get(row.eventUserId) ?? new Map<string, number>();
+      visitorCountsByArea.set(areaId, (visitorCountsByArea.get(areaId) ?? 0) + 1);
+      visitCountsByArea.set(row.eventUserId, visitorCountsByArea);
+    }
+    for (const [eventUserId, countsByArea] of visitCountsByArea) {
+      if (validTargetAreaIds.every((areaId) =>
+        (countsByArea.get(areaId) ?? 0) >= settings.requiredCountByArea[areaId]!
+      )) qualifiedIds.add(eventUserId);
+    }
   } else {
     for (const visitor of visitorCounts) {
       if (visitor.visitedStoreCount >= settings.requiredCount) qualifiedIds.add(visitor.eventUserId);
@@ -757,7 +807,10 @@ stampRoutes.get("/event/:eventId/usage", async (c) => {
   return c.json({
     enabled: settings.enabled,
     targetStoreCount: uniqueTargetCircleIds.length,
-    requiredCount: settings.requiredCount,
+    requiredCount: validTargetAreaIds.length > 0 && validTargetAreaIds.every((areaId) => settings.requiredCountByArea[areaId] != null)
+      ? validTargetAreaIds.reduce((sum, areaId) => sum + settings.requiredCountByArea[areaId]!, 0)
+      : settings.requiredCount,
+    requiredCountByArea: settings.requiredCountByArea,
     participantAccountCount: participantIds.size,
     qualifiedAccountCount: qualifiedIds.size,
     redeemedAccountCount: redeemedIds.size,
