@@ -185,12 +185,14 @@ export default function DashboardLayout({
   ];
 
   // イベント管理のメニュー項目 (タブ切り替え, カテゴリ分け 2026-07-16)
+  // 2026-10-18: 実行委員が開催中と開催後で見る画面を迷わないよう、運営状況と振り返りを別メニューにする。
   // 「運営」= 開催中に頻繁に触る現場オペレーション、「売上・分析」= 数字・集計系、
   // 「管理」= イベント自体の設定・契約・人、「拡張」= オプション機能 (抽選など、無効時は非表示)。
   const eventGroups: MenuGroup[] = [
     {
       label: "運営",
       items: [
+        { title: "開催中の混雑・人員配置", tab: "behavior", icon: Activity },
         { title: "混雑モニター", tab: "congestion", icon: Gauge },
         { title: "注文モニタ", tab: "order-monitor", icon: MonitorCheck },
         { title: "在庫・売り切れ", tab: "inventory", icon: Boxes },
@@ -201,11 +203,15 @@ export default function DashboardLayout({
       ],
     },
     {
+      label: "開催後の振り返り",
+      items: [
+        { title: "イベント全体レポート", tab: "analytics", icon: BarChart3 },
+      ],
+    },
+    {
       label: "売上・分析",
       items: [
-        { title: "統計・分析", tab: "analytics", icon: BarChart3 },
         { title: "レビュー", tab: "reviews", icon: Star },
-        { title: "来場者行動分析", tab: "behavior", icon: Activity },
         { title: "全体売上管理", tab: "sales", icon: TrendingUp },
         { title: "精算", tab: "settlement", icon: Calculator },
         { title: "日次締め", tab: "daily-close", icon: CalendarCheck },

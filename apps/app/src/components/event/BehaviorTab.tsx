@@ -10,6 +10,7 @@ import { Activity, RefreshCw, Radio, Users, Clock, Repeat, Footprints, UserCheck
 // 「一人一人の行動ログ(注文・回遊・スタンプ・受付時刻)」の横断集計を表示する。
 // 既存の統計・分析タブ(売上/メニュー中心)では見えない、滞在・回遊・離脱・スタッフ負荷・動線を扱う。
 // バックエンド: GET /api/festivals/:id/behavior (sales:read 権限)。
+// 2026-10-18: 開催中の運営画面として案内するが、実人数ではなく記録ベースの活動傾向と明示する。
 
 function yen(n: number): string {
   return `¥${n.toLocaleString("ja-JP")}`;
@@ -83,22 +84,26 @@ export function BehaviorTab({ eventId }: { eventId: string }) {
       <div className="flex flex-col gap-3 border-b-thick border-border pb-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 className="text-sm font-bold flex items-center gap-2 uppercase tracking-wider">
-            <Activity className="h-4 w-4" /> 来場者行動分析
+            <Activity className="h-4 w-4" /> 開催中の混雑・人員配置
           </h2>
-          <p className="text-[10px] text-muted-foreground mt-1 font-mono">
-            一人一人の行動ログから、滞在・回遊・離脱とスタッフ配置の負荷・動線を可視化します。
+          <p className="mt-1 text-xs leading-5 text-muted-foreground">
+            開催中はこちら。時間帯ごとの行動ピークと店舗ごとの注文負荷を、応援や誘導の判断に使えます。
+          </p>
+          <p className="mt-1 max-w-3xl text-[11px] leading-5 text-muted-foreground">
+            注文・訪問・スタンプから集計する運営参考値です。実際の会場内人数ではなく、注文数は全期間累計、複数開催日は同じ時刻を合算します。スタッフ数は登録人数で、当日の出勤人数とは異なります。自動更新は15秒ごとです。
           </p>
         </div>
         <div className="flex items-center gap-2">
           <button
             type="button"
+            aria-pressed={live}
             onClick={() => setLive((v) => !v)}
             className={`flex items-center gap-1 font-mono text-[11px] uppercase border-thick px-2 py-1 transition-colors ${
               live ? "border-accent bg-accent text-accent-foreground" : "border-border hover:bg-muted"
             }`}
             title="ONで15秒ごとに自動更新 (開催中のライブ表示)"
           >
-            <Radio className={`h-3.5 w-3.5 ${live ? "animate-pulse" : ""}`} /> LIVE
+            <Radio className={`h-3.5 w-3.5 ${live ? "animate-pulse" : ""}`} /> 自動更新 {live ? "ON" : "OFF"}
           </button>
           <button
             type="button"
@@ -136,7 +141,7 @@ export function BehaviorTab({ eventId }: { eventId: string }) {
       {/* 時間帯別 混雑度 */}
       <section className="space-y-2">
         <h3 className="font-mono text-[11px] uppercase tracking-widest text-muted-foreground">
-          時間帯別 混雑度 (活動来場者)
+          時間帯別 活動状況 (全開催日を合算)
         </h3>
         {activeHours.length === 0 ? (
           <p className="font-mono text-[11px] text-muted-foreground">まだ行動データがありません。</p>
@@ -155,14 +160,14 @@ export function BehaviorTab({ eventId }: { eventId: string }) {
                       style={{ width: `${Math.max(2, (h.activeUsers / maxActive) * 100)}%` }}
                     />
                   </div>
-                  <span className="w-24 shrink-0 tabular-nums text-right text-muted-foreground">
-                    {h.activeUsers}人 / {h.orders}注文
+                  <span className="w-28 shrink-0 tabular-nums text-right text-muted-foreground">
+                    {h.activeUsers}アカウント / {h.orders}注文
                   </span>
                 </div>
               ))}
             </div>
             <p className="mt-2 text-[9px] text-muted-foreground font-sans">
-              ※混雑度=その時間帯に注文/回遊/スタンプいずれかの活動をした一意来場者数。
+              ※活動アカウント数=その時間帯に注文/訪問/スタンプのいずれかを記録した一意アカウント数。
             </p>
           </div>
         )}
