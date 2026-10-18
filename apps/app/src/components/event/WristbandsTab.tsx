@@ -122,6 +122,8 @@ export function WristbandsTab({ eventId, hasPhysicalWristband = true }: Wristban
   const {
     data: visitorSearch,
     isLoading,
+    isError,
+    error,
     isFetchingNextPage,
     hasNextPage,
     fetchNextPage,
@@ -965,6 +967,13 @@ export function WristbandsTab({ eventId, hasPhysicalWristband = true }: Wristban
                 <Loader2 className="h-4 w-4 animate-spin" />
                 データを読み込み中...
               </div>
+            ) : isError ? (
+              <div role="alert" className="flex flex-col items-center gap-3 p-8 text-center text-xs text-error">
+                <p>{error instanceof Error ? error.message : "来場者一覧を読み込めませんでした。"}</p>
+                <Button type="button" variant="outline" onClick={() => refetch()} className="border-thick border-border">
+                  再読み込み
+                </Button>
+              </div>
             ) : visitors.length === 0 ? (
               <div className="p-8 text-center text-xs text-muted-foreground">
                 該当する来場者が見つかりません。
@@ -1026,8 +1035,20 @@ export function WristbandsTab({ eventId, hasPhysicalWristband = true }: Wristban
                         </Badge>
                       </td>
                       <td className="p-3 font-mono text-[11px] select-all">
-                        {res.wristband?.id || <span className="text-muted-foreground text-[10px]">なし</span>}
-                        {(res.familyBandCount ?? 0) > 1 && <span className="ml-2 text-[9px] text-muted-foreground">家族 {res.familyBandCount}人</span>}
+                        {/* 2026-10-18: 家族アカウント内の物理・スマホ両方のIDを一覧に出し、先頭以外の発行済みバンドを見落とさないようにする。 */}
+                        {(res.familyWristbands?.length ? res.familyWristbands : res.wristband ? [res.wristband] : []).length > 0 ? (
+                          <div className="space-y-1">
+                            {(res.familyWristbands?.length ? res.familyWristbands : [res.wristband]).map((band: NonNullable<typeof res.wristband>) => (
+                              <div key={band.id} className="flex flex-wrap items-center gap-x-2">
+                                <span>{band.id}</span>
+                                {band.status === "smartphone" && <span className="text-[9px] text-info">スマホ</span>}
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <span className="text-muted-foreground text-[10px]">なし</span>
+                        )}
+                        {(res.familyBandCount ?? res.familyWristbands?.length ?? 0) > 1 && <span className="ml-2 text-[9px] text-muted-foreground">家族 {res.familyBandCount ?? res.familyWristbands?.length ?? 0}人</span>}
                       </td>
                       <td className="p-3">
                         {res.wristband ? (
