@@ -165,7 +165,11 @@ export function StampRallyUsageDashboard({ eventId }: { eventId: string }) {
           <section className="space-y-3" aria-labelledby="stamp-rally-funnel-title">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <h4 id="stamp-rally-funnel-title" className="text-xs font-bold">参加から交換まで</h4>
-              <span className="text-[10px] text-muted-foreground">条件: 対象店舗 {summary.requiredCount} 店以上で注文完了</span>
+              <span className="text-[10px] text-muted-foreground">
+                条件: {Object.keys(summary.requiredCountByArea).length > 0
+                  ? `各対象エリアで設定数以上の店舗を利用 (${Object.entries(summary.requiredCountByArea).map(([areaId, count]) => `${storeAreas.find(([id]) => id === areaId)?.[1] ?? "対象エリア"} ${count}店`).join(" / ")})`
+                  : `対象店舗 ${summary.requiredCount} 店以上で注文完了`}
+              </span>
             </div>
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
               {[

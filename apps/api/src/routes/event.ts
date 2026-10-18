@@ -161,6 +161,8 @@ eventRoutes.put(
       enabled: z.boolean(),
       targetAreaIds: z.array(z.string().min(1).max(64)).max(50).optional(),
       requiredCount: z.number().int().min(1).max(100).optional(),
+      // 2026-10-18: 新形式では対象エリアごとに達成に必要な利用店舗数を保存する。
+      requiredCountByArea: z.record(z.string().min(1).max(64), z.number().int().min(1).max(100)).optional(),
       rewardTitle: z.string().trim().max(100).optional(),
       // 2026-10-16: 景品別の在庫・交換数を照合し、複数景品を受付できるカタログ。
       rewards: z.array(z.object({
@@ -235,6 +237,27 @@ eventRoutes.put(
         }
       }).length;
       const requiredCount = settings.requiredCount ?? 3;
+      const requiredCountByArea = settings.requiredCountByArea ?? {};
+      if (Object.keys(requiredCountByArea).some((areaId) => !targetAreaIds.includes(areaId))) {
+        apiError("BAD_REQUEST", "利用条件は対象エリアごとに設定してください");
+      }
+      const targetCircleCountsByArea = new Map<string, number>();
+      for (const row of eventCircles) {
+        try {
+          const areaId = (JSON.parse(row.settings || "{}") as { storeAreaId?: unknown }).storeAreaId;
+          if (typeof areaId === "string" && targetAreaIds.includes(areaId)) {
+            targetCircleCountsByArea.set(areaId, (targetCircleCountsByArea.get(areaId) ?? 0) + 1);
+          }
+        } catch {
+          // 壊れたサークル設定はエリア未割当として扱う。
+        }
+      }
+      if (settings.enabled && Object.keys(requiredCountByArea).length > 0 && (
+        targetAreaIds.some((areaId) => requiredCountByArea[areaId] == null) ||
+        targetAreaIds.some((areaId) => requiredCountByArea[areaId]! > (targetCircleCountsByArea.get(areaId) ?? 0))
+      )) {
+        apiError("BAD_REQUEST", "有効化するには各対象エリアに必要数以上の店舗が必要です");
+      }
       const rewards = settings.rewards;
       if (rewards) {
         if (new Set(rewards.map((reward) => reward.id)).size !== rewards.length ||
@@ -243,7 +266,9 @@ eventRoutes.put(
         }
       }
       if (settings.enabled && (targetAreaIds.length === 0 || targetCircleCount < requiredCount)) {
-        apiError("BAD_REQUEST", "有効化するには対象エリアと必要数以上の店舗を指定してください");
+        if (Object.keys(requiredCountByArea).length === 0 || targetAreaIds.length === 0) {
+          apiError("BAD_REQUEST", "有効化するには対象エリアと必要数以上の店舗を指定してください");
+        }
       }
       if (settings.enabled && !settings.redemptionLocation?.trim()) {
         apiError("BAD_REQUEST", "スタンプラリーを有効にするには景品交換場所を入力してください");
@@ -252,6 +277,7 @@ eventRoutes.put(
         enabled: settings.enabled,
         targetAreaIds,
         requiredCount,
+        ...(Object.keys(requiredCountByArea).length > 0 ? { requiredCountByArea } : {}),
         rewardTitle: rewards?.[0]?.name || settings.rewardTitle || "景品交換",
         ...(rewards ? { rewards } : {}),
         redemptionLocation: settings.redemptionLocation || "",

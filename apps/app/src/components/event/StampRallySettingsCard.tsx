@@ -32,6 +32,7 @@ function parseSettings(raw?: string | null): ParsedSettings {
     enabled: false,
     targetAreaIds: [],
     requiredCount: 3,
+    requiredCountByArea: {},
     rewardTitle: "景品交換",
     rewards: [{ id: "default", name: "景品交換", stockQuantity: null }],
     redemptionLocation: "",
@@ -62,6 +63,10 @@ function parseSettings(raw?: string | null): ParsedSettings {
           }];
         })
       : [{ id: "default", name: rewardTitle, stockQuantity: null }];
+    const requiredCountByArea = parsed.requiredCountByArea && typeof parsed.requiredCountByArea === "object" && !Array.isArray(parsed.requiredCountByArea)
+      ? Object.fromEntries(Object.entries(parsed.requiredCountByArea)
+          .filter((entry): entry is [string, number] => typeof entry[0] === "string" && Number.isInteger(entry[1]) && Number(entry[1]) >= 1 && Number(entry[1]) <= 100))
+      : {};
     return {
       enabled: parsed.enabled === true,
       targetAreaIds: Array.isArray(parsed.targetAreaIds)
@@ -70,6 +75,7 @@ function parseSettings(raw?: string | null): ParsedSettings {
       requiredCount: Number.isInteger(parsed.requiredCount) && Number(parsed.requiredCount) > 0
         ? Number(parsed.requiredCount)
         : (Number.isInteger(firstLegacy?.requiredCount) ? Number(firstLegacy?.requiredCount) : empty.requiredCount),
+      requiredCountByArea,
       rewardTitle,
       rewards: rewards.length ? rewards : [{ id: "default", name: rewardTitle, stockQuantity: null }],
       redemptionLocation: typeof parsed.redemptionLocation === "string"
@@ -93,11 +99,10 @@ function getCircleStoreAreaId(circle: Circle): string | null {
 }
 
 // 2026-10-15 (#123): 会場エリアを使う条件設定をモーダルにまとめ、管理画面の縦長化を避ける。
-export function StampRallySettingsCard({ eventId, event }: { eventId: string; event: EventWithStoreAreas }) {
+export function StampRallySettingsCard({ eventId, event, onOpenStoreAreas }: { eventId: string; event: EventWithStoreAreas; onOpenStoreAreas: () => void }) {
   const queryClient = useQueryClient();
   const [settings, setSettings] = useState<ParsedSettings>(() => parseSettings(event.stampRallySettings));
   const [draftSettings, setDraftSettings] = useState<ParsedSettings>(() => parseSettings(event.stampRallySettings));
-  const [requiredCountInput, setRequiredCountInput] = useState(() => String(parseSettings(event.stampRallySettings).requiredCount));
   const [isEditorOpen, setIsEditorOpen] = useState(false);
   const storeAreas = useMemo(() => parseStoreAreas(event.storeAreas), [event.storeAreas]);
   const circlesQuery = useQuery({
@@ -106,14 +111,17 @@ export function StampRallySettingsCard({ eventId, event }: { eventId: string; ev
   });
   useEffect(() => setSettings(parseSettings(event.stampRallySettings)), [event.stampRallySettings]);
 
-  const circlesInTargets = (circlesQuery.data ?? []).filter((circle) =>
-    draftSettings.targetAreaIds.includes(getCircleStoreAreaId(circle) || "")
-  );
-  const persistedCircleCount = (circlesQuery.data ?? []).filter((circle) =>
-    settings.targetAreaIds.includes(getCircleStoreAreaId(circle) || "")
-  ).length;
-  const parsedRequiredCount = requiredCountInput.trim() === "" ? Number.NaN : Number(requiredCountInput);
-  const invalidRequiredCount = !/^\d+$/.test(requiredCountInput) || !Number.isInteger(parsedRequiredCount) || parsedRequiredCount < 1 || parsedRequiredCount > 100;
+  const circlesByArea = new Map<string, number>(storeAreas.map((area) => [
+    area.id,
+    (circlesQuery.data ?? []).filter((circle) => getCircleStoreAreaId(circle) === area.id).length,
+  ] as const));
+  const areaRequirement = (areaId: string) => draftSettings.requiredCountByArea?.[areaId] ?? draftSettings.requiredCount;
+  const requiredCountTotal = draftSettings.targetAreaIds.reduce((sum, areaId) => sum + areaRequirement(areaId), 0);
+  const invalidAreaRequirements = draftSettings.targetAreaIds.some((areaId) => {
+    const required = areaRequirement(areaId);
+    return !Number.isInteger(required) || required < 1 || required > 100 ||
+      (draftSettings.enabled && required > (circlesByArea.get(areaId) ?? 0));
+  });
   const invalidRulesUrl = (() => {
     const raw = draftSettings.rulesUrl.trim();
     if (!raw) return false;
@@ -131,11 +139,11 @@ export function StampRallySettingsCard({ eventId, event }: { eventId: string; ev
     new Set(draftSettings.rewards.map((reward) => reward.name.trim().toLocaleLowerCase())).size !== draftSettings.rewards.length;
   const invalidSettings = draftSettings.targetAreaIds.length > 50 ||
     new Set(draftSettings.targetAreaIds).size !== draftSettings.targetAreaIds.length ||
-    invalidRequiredCount || invalidRewards ||
+    invalidAreaRequirements || invalidRewards ||
     draftSettings.redemptionLocation.trim().length > 500 || draftSettings.rulesUrl.trim().length > 2048 || invalidRulesUrl ||
     (draftSettings.enabled && (
     draftSettings.targetAreaIds.length === 0 ||
-    parsedRequiredCount > circlesInTargets.length ||
+    draftSettings.targetAreaIds.some((areaId) => areaRequirement(areaId) > (circlesByArea.get(areaId) ?? 0)) ||
     !draftSettings.redemptionLocation.trim()
     ));
 
@@ -144,7 +152,8 @@ export function StampRallySettingsCard({ eventId, event }: { eventId: string; ev
       const payload: StampRallySettings = {
         enabled: draftSettings.enabled,
         targetAreaIds: draftSettings.targetAreaIds,
-        requiredCount: parsedRequiredCount,
+        requiredCount: Math.min(100, requiredCountTotal || draftSettings.requiredCount),
+        requiredCountByArea: draftSettings.requiredCountByArea ?? {},
         rewardTitle: draftSettings.rewards[0]?.name.trim() || draftSettings.rewardTitle.trim() || "景品交換",
         rewards: draftSettings.rewards.map((reward) => ({ ...reward, name: reward.name.trim() })),
         redemptionLocation: draftSettings.redemptionLocation.trim(),
@@ -154,10 +163,9 @@ export function StampRallySettingsCard({ eventId, event }: { eventId: string; ev
     },
     onSuccess: () => {
       toast.success("スタンプラリーの設定を保存しました");
-      const saved = { ...draftSettings, requiredCount: parsedRequiredCount };
+      const saved = { ...draftSettings, requiredCount: Math.min(100, requiredCountTotal || draftSettings.requiredCount) };
       setSettings(saved);
       setDraftSettings(saved);
-      setRequiredCountInput(String(parsedRequiredCount));
       setIsEditorOpen(false);
       queryClient.invalidateQueries({ queryKey: ["event", eventId] });
       queryClient.invalidateQueries({ queryKey: ["stamp-rally-usage", eventId] });
@@ -165,13 +173,9 @@ export function StampRallySettingsCard({ eventId, event }: { eventId: string; ev
     onError: (error: any) => toast.error(error?.message || "設定を保存できませんでした"),
   });
 
-  const editorDirty = isEditorOpen && (
-    JSON.stringify(draftSettings) !== JSON.stringify(settings) ||
-    requiredCountInput !== String(settings.requiredCount)
-  );
+  const editorDirty = isEditorOpen && JSON.stringify(draftSettings) !== JSON.stringify(settings);
   const discardEditor = () => {
     setDraftSettings(settings);
-    setRequiredCountInput(String(settings.requiredCount));
     setIsEditorOpen(false);
   };
   // 2026-10-16: 条件編集ポップアップの下書きを画面遷移ガードへ登録する。
@@ -182,16 +186,28 @@ export function StampRallySettingsCard({ eventId, event }: { eventId: string; ev
   });
 
   const openEditor = () => {
-    setDraftSettings(settings);
-    setRequiredCountInput(String(settings.requiredCount));
+    const requiredCountByArea = Object.fromEntries(settings.targetAreaIds.map((areaId) => {
+      const available = circlesByArea.get(areaId) ?? 0;
+      return [areaId, settings.requiredCountByArea?.[areaId] ?? Math.min(settings.requiredCount, Math.max(available, 1))];
+    }));
+    setDraftSettings({ ...settings, requiredCountByArea });
     setIsEditorOpen(true);
   };
 
-  const toggleTargetArea = (areaId: string) => setDraftSettings((current) => ({
-    ...current,
-    targetAreaIds: current.targetAreaIds.includes(areaId)
+  const toggleTargetArea = (areaId: string) => setDraftSettings((current) => {
+    const selected = current.targetAreaIds.includes(areaId);
+    const targetAreaIds = selected
       ? current.targetAreaIds.filter((id) => id !== areaId)
-      : [...current.targetAreaIds, areaId],
+      : [...current.targetAreaIds, areaId];
+    const requiredCountByArea = { ...(current.requiredCountByArea ?? {}) };
+    if (selected) delete requiredCountByArea[areaId];
+    else requiredCountByArea[areaId] ??= Math.min(current.requiredCount, Math.max(circlesByArea.get(areaId) ?? 0, 1));
+    return { ...current, targetAreaIds, requiredCountByArea };
+  });
+
+  const setAreaRequirement = (areaId: string, value: number) => setDraftSettings((current) => ({
+    ...current,
+    requiredCountByArea: { ...(current.requiredCountByArea ?? {}), [areaId]: value },
   }));
 
   return (
@@ -214,7 +230,7 @@ export function StampRallySettingsCard({ eventId, event }: { eventId: string; ev
             <p className="text-xs font-bold">
               <MapPin className="inline h-3.5 w-3.5 mr-1" />
               {settings.targetAreaIds.length
-                ? `${settings.targetAreaIds.length}エリア / ${settings.requiredCount}店舗以上`
+                ? `${settings.targetAreaIds.length}エリア / エリアごとに条件設定`
                 : "対象エリア未設定"}
             </p>
             <p className="text-[10px] text-muted-foreground">景品 {settings.rewards.length}種類</p>
@@ -228,7 +244,12 @@ export function StampRallySettingsCard({ eventId, event }: { eventId: string; ev
             </p>
           )}
           {settings.enabled && settings.redemptionLocation.trim().length === 0 && <p className="text-[10px] text-error" role="alert">景品交換場所を入力してください。</p>}
-          {settings.enabled && (settings.targetAreaIds.length === 0 || settings.requiredCount > persistedCircleCount) && <p className="text-[10px] text-error" role="alert">対象エリアの店舗数が必要数に足りません。サークルの場所を確認してください。</p>}
+          {settings.enabled && (settings.targetAreaIds.length === 0 || settings.targetAreaIds.some((areaId) => (settings.requiredCountByArea?.[areaId] ?? settings.requiredCount) > (circlesByArea.get(areaId) ?? 0))) && <p className="text-[10px] text-error" role="alert">対象エリアの店舗数が必要数に足りません。サークルの場所を確認してください。</p>}
+          {storeAreas.length === 0 && (
+            <Button type="button" variant="outline" size="sm" onClick={onOpenStoreAreas}>
+              <MapPin className="h-4 w-4" />店舗エリアを設定
+            </Button>
+          )}
         </CardContent>
       </Card>
 
@@ -254,51 +275,59 @@ export function StampRallySettingsCard({ eventId, event }: { eventId: string; ev
           <fieldset className="space-y-2">
             <legend className="text-xs font-bold">対象エリア</legend>
             {storeAreas.length === 0 ? (
-              <p className="text-xs text-muted-foreground border-thin border-border p-3">
-                先にイベント設定で会場エリアを登録してください。
-              </p>
+              <div className="space-y-3 border-thin border-border p-3">
+                <p className="text-xs text-muted-foreground">スタンプラリーの対象エリアがありません。店舗エリアを登録してください。</p>
+                <Button type="button" variant="outline" size="sm" onClick={onOpenStoreAreas}>
+                  <MapPin className="h-4 w-4" />店舗エリアを設定
+                </Button>
+              </div>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {storeAreas.map((area) => {
                   const selected = draftSettings.targetAreaIds.includes(area.id);
-                  const count = (circlesQuery.data ?? []).filter((circle) => getCircleStoreAreaId(circle) === area.id).length;
+                  const count = circlesByArea.get(area.id) ?? 0;
                   return (
-                    <button
-                      key={area.id}
-                      type="button"
-                      aria-pressed={selected}
-                      onClick={() => toggleTargetArea(area.id)}
-                      className={`border-thick border-border p-3 text-left transition-colors ${selected ? "bg-primary text-primary-foreground" : "bg-background hover:bg-muted"}`}
-                    >
-                      <span className="flex items-center justify-between gap-2 text-sm font-bold">
-                        <span className="truncate">{area.name}</span>
-                        <span className="text-[10px] shrink-0">{count}店舗</span>
-                      </span>
-                      <span className="block text-[10px] mt-1">{selected ? "対象エリアに含める" : "対象外"}</span>
-                    </button>
+                    <div key={area.id} className="space-y-2 border-thick border-border p-3">
+                      <button
+                        type="button"
+                        aria-pressed={selected}
+                        onClick={() => toggleTargetArea(area.id)}
+                        className={`w-full text-left transition-colors ${selected ? "text-primary" : "hover:text-primary"}`}
+                      >
+                        <span className="flex items-center justify-between gap-2 text-sm font-bold">
+                          <span className="truncate">{area.name}</span>
+                          <span className="text-[10px] shrink-0">{count}店舗</span>
+                        </span>
+                        <span className="block text-[10px] mt-1">{selected ? "対象エリアに設定済み" : "タップして対象に設定"}</span>
+                      </button>
+                      {selected && (
+                        <label className="block space-y-1 border-t-thin border-border pt-2">
+                          <span className="text-[10px] font-bold">このエリアで必要な利用店舗数</span>
+                          <Input
+                            type="number"
+                            min={1}
+                            max={Math.min(100, Math.max(count, 1))}
+                            value={areaRequirement(area.id)}
+                            aria-label={`${area.name}で必要な利用店舗数`}
+                            aria-invalid={areaRequirement(area.id) < 1 || areaRequirement(area.id) > 100 || (draftSettings.enabled && areaRequirement(area.id) > count)}
+                            onChange={(event) => setAreaRequirement(area.id, Number(event.target.value))}
+                          />
+                          <span className="block text-[10px] text-muted-foreground">このエリア内の異なる店舗を {count} 店舗利用できます。</span>
+                          {draftSettings.enabled && areaRequirement(area.id) > count && <span className="block text-[10px] text-error" role="alert">必要数に対して店舗が不足しています。</span>}
+                        </label>
+                      )}
+                    </div>
                   );
                 })}
               </div>
             )}
           </fieldset>
 
-          {/* 2026-10-16: 数値を空にしたり途中値を入力してもReactが既定値へ戻さず、保存時のみ整数として検証する。 */}
-          <label className="block space-y-1">
-            <span className="text-xs font-bold">景品を獲得する利用店舗数</span>
-            <Input
-              type="text"
-              inputMode="numeric"
-              pattern="[0-9]*"
-              maxLength={3}
-              value={requiredCountInput}
-              aria-describedby="stamp-required-count-help"
-              aria-invalid={invalidRequiredCount}
-              onChange={(e) => setRequiredCountInput(e.target.value)}
-            />
-            <span id="stamp-required-count-help" className="block text-[10px] text-muted-foreground">1〜100の整数。選択エリア全体で、注文完了した異なる店舗を数えます。</span>
-            {invalidRequiredCount && <span className="block text-[10px] text-error" role="alert">必要数は1〜100の整数で入力してください。</span>}
-            {!invalidRequiredCount && draftSettings.enabled && parsedRequiredCount > circlesInTargets.length && <span className="block text-[10px] text-error" role="alert">選択中の対象店舗は {circlesInTargets.length} 店舗です。必要数を減らすか、対象エリアを追加してください。</span>}
-          </label>
+          <p className="text-[10px] leading-relaxed text-muted-foreground">
+            {/* 2026-10-18: エリアごとの必要数を満たすことを達成条件として明示する。 */}
+            景品の獲得には、選択したすべてのエリアでそれぞれ設定数以上の異なる店舗を利用する必要があります。
+          </p>
+          {invalidAreaRequirements && <p className="text-[10px] text-error" role="alert">各エリアの必要数は1〜100の整数で設定し、受付中はそのエリアに登録された店舗数以下にしてください。</p>}
 
           <section className="space-y-2" aria-labelledby="stamp-reward-catalog-title">
             <div className="flex flex-wrap items-center justify-between gap-2">
@@ -385,7 +414,7 @@ export function StampRallySettingsCard({ eventId, event }: { eventId: string; ev
             {invalidRulesUrl && <span className="block text-[10px] text-error" role="alert">URLは http または https で入力してください。</span>}
           </label>
 
-          {invalidSettings && <p className="text-xs text-error" role="alert">設定内容を確認してください。必要数は1〜100の整数、対象エリアは50件までです。スタンプラリーを有効にする場合は、必要数以上の店舗があるエリアと景品交換場所を設定してください。</p>}
+          {invalidSettings && <p className="text-xs text-error" role="alert">設定内容を確認してください。各エリアの必要数は1〜100の整数、対象エリアは50件までです。受付中は各対象エリアに必要数以上の店舗と景品交換場所が必要です。</p>}
           {circlesQuery.isError && <p className="text-xs text-error" role="alert">サークルの場所を読み込めませんでした。通信状態を確認してページを再読み込みしてください。</p>}
           <div className="flex justify-end gap-2 border-t-thin border-border pt-3">
             <Button type="button" variant="outline" onClick={discardEditor}>キャンセル</Button>
