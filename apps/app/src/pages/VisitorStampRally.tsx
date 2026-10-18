@@ -36,11 +36,20 @@ export default function VisitorStampRallyPage() {
     queryKey: ["visitor-stamp-rally", userId],
     queryFn: () => stampRallyApi.visitor(userId!),
     enabled: !!userId,
+    // 2026-10-19: 店舗で受取処理が完了した後も来場者が画面を開いたまま確認できるよう、
+    // 別端末で追加されたスタンプと交換枠を定期的に取り直す。
+    refetchInterval: 15_000,
+    refetchIntervalInBackground: false,
+    refetchOnWindowFocus: true,
   });
 
   const data = query.data;
   const stampedCount = data?.stampedCount ?? 0;
   const requiredCount = data?.requiredCount ?? 0;
+  const areaRequirement = data?.qualification.minQualifiedAreaCount ?? null;
+  const areaRequirementActive = areaRequirement !== null;
+  const qualifiedAreaCount = data?.qualification.qualifiedAreaCount ?? 0;
+  const totalStoreRequirement = data?.qualification.minTotalDistinctCircles ?? (areaRequirementActive ? null : requiredCount);
   const rulesUrl = data?.rulesUrl ? safeHttpUrl(data.rulesUrl) : null;
 
   if (!isLoaded || query.isLoading) {
@@ -77,10 +86,22 @@ export default function VisitorStampRallyPage() {
                         : "景品交換まであと少し"}
                 </h2>
                 <p className={`text-xs mt-1 ${data.eligible && data.remainingCount > 0 ? "text-primary-foreground/85" : "text-muted-foreground"}`}>
-                  {data.legacy ? "エリアごとの条件で達成判定" : `利用店舗 ${stampedCount} / ${requiredCount} 店舗`}
+                  {data.legacy
+                    ? "エリアごとの条件で達成判定"
+                    : areaRequirementActive
+                      ? `達成エリア ${qualifiedAreaCount} / ${areaRequirement} エリア`
+                      : `利用店舗 ${stampedCount} / ${requiredCount} 店舗`}
                 </p>
+                {!data.legacy && areaRequirementActive && totalStoreRequirement !== null && (
+                  <p className="text-[10px] mt-0.5 text-muted-foreground">合計利用店舗 {stampedCount} / {totalStoreRequirement} 店舗</p>
+                )}
               </div>
-              <span className="text-xl font-black tabular-nums shrink-0">{data.legacy ? (data.eligible ? "達成" : "—") : <>{Math.min(stampedCount, requiredCount)}<span className="text-xs"> / {requiredCount}</span></>}</span>
+              <span className="text-xl font-black tabular-nums shrink-0">{data.legacy
+                ? (data.eligible ? "達成" : "—")
+                : areaRequirementActive
+                  ? <>{Math.min(qualifiedAreaCount, areaRequirement)}<span className="text-xs"> / {areaRequirement}</span></>
+                  : <>{Math.min(stampedCount, requiredCount)}<span className="text-xs"> / {requiredCount}</span></>}
+              </span>
             </div>
             <div className="grid grid-cols-3 gap-2 border-t-thin border-current/40 pt-2 text-center">
               <div><p className="text-[10px] opacity-80">家族</p><p className="font-black tabular-nums">{data.familyMemberCount}人</p></div>

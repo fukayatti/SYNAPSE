@@ -48,8 +48,10 @@ export function ExportTab({ eventId }: { eventId: string }) {
       const t = data.totals;
 
       const headers = ["指標名", "数値", "補足情報"];
+      // 2026-10-19: 統計APIと同じく、来場は入場済み家族アカウント、プロフィールは家族人数で書き出す。
       const rows = [
-        ["総来場者数", t.visitors, `オンボード率: ${t.onboardedRate}%`],
+        ["入場処理済みアカウント数（家族単位）", t.visitors, `事前登録: ${t.preRegisteredAccounts}件 · 入場処理率: ${t.entryRate}%`],
+        ["来場プロフィール数", t.visitorProfiles, "入場処理済みアカウント内のプロフィール数"],
         ["総売上", `¥${t.revenue.toLocaleString()}`, ""],
         ["総注文数", t.orders, `完了率: ${t.completedRate}%`],
         ["総客数", t.customers, `平均客単価: ¥${t.avgSpend.toLocaleString()}`],

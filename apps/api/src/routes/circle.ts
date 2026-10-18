@@ -7,13 +7,14 @@ import {
   event,
   membership,
   inviteToken,
+  eventUser,
   order,
   orderItem,
   review,
   circleVisit,
   menu,
 } from "@fesflow/db";
-import { eq, and, isNull, inArray } from "drizzle-orm";
+import { eq, and, isNull, isNotNull, gte, inArray } from "drizzle-orm";
 import { ulid } from "ulidx";
 import { hasPermission, isCircleOwner } from "../utils/auth";
 import { requireAuth } from "../middleware/auth";
@@ -138,7 +139,16 @@ circleRoutes.get("/:id/analytics", async (c) => {
     ? await db.select().from(orderItem).where(inArray(orderItem.orderId, orderIds))
     : [];
   const reviews = await db.select().from(review).where(eq(review.circleId, circleId));
-  const visits = await db.select().from(circleVisit).where(eq(circleVisit.circleId, circleId));
+  // 2026-10-19: 入場処理前のスキャンを来訪者数に含めないよう、入場確定後の記録だけを集計する。
+  const visits = await db
+    .select({ eventUserId: circleVisit.eventUserId })
+    .from(circleVisit)
+    .innerJoin(eventUser, eq(circleVisit.eventUserId, eventUser.id))
+    .where(and(
+      eq(circleVisit.circleId, circleId),
+      isNotNull(eventUser.onboardedAt),
+      gte(circleVisit.createdAt, eventUser.onboardedAt),
+    ));
   const menus = await db.select({ id: menu.id }).from(menu).where(eq(menu.circleId, circleId));
 
   const jstHour = (ms: number) => new Date(ms + 9 * 3600 * 1000).getUTCHours();

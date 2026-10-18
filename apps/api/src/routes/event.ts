@@ -163,6 +163,16 @@ eventRoutes.put(
       requiredCount: z.number().int().min(1).max(100).optional(),
       // 2026-10-18: 新形式では対象エリアごとに達成に必要な利用店舗数を保存する。
       requiredCountByArea: z.record(z.string().min(1).max(64), z.number().int().min(1).max(100)).optional(),
+      // 2026-10-19: エリア数と合計店舗数を独立して組み合わせられる条件設定。
+      qualification: z.object({
+        minQualifiedAreaCount: z.number().int().min(1).max(50).nullable(),
+        minDistinctCirclesPerArea: z.object({
+          default: z.number().int().min(1).max(100),
+          byArea: z.record(z.string().min(1).max(64), z.number().int().min(1).max(100)),
+        }),
+        requiredAreaIds: z.array(z.string().min(1).max(64)).max(50),
+        minTotalDistinctCircles: z.number().int().min(1).max(100).nullable(),
+      }).optional(),
       rewardTitle: z.string().trim().max(100).optional(),
       // 2026-10-16: 景品別の在庫・交換数を照合し、複数景品を受付できるカタログ。
       rewards: z.array(z.object({
@@ -241,6 +251,21 @@ eventRoutes.put(
       if (Object.keys(requiredCountByArea).some((areaId) => !targetAreaIds.includes(areaId))) {
         apiError("BAD_REQUEST", "利用条件は対象エリアごとに設定してください");
       }
+      const qualification = settings.qualification;
+      if (qualification) {
+        if (Object.keys(qualification.minDistinctCirclesPerArea.byArea).some((areaId) => !targetAreaIds.includes(areaId))) {
+          apiError("BAD_REQUEST", "エリアごとの必要店舗数は対象エリアに設定してください");
+        }
+        if (qualification.requiredAreaIds.some((areaId) => !targetAreaIds.includes(areaId))) {
+          apiError("BAD_REQUEST", "必須エリアは対象エリアから選択してください");
+        }
+        if (qualification.minQualifiedAreaCount !== null && qualification.minQualifiedAreaCount < qualification.requiredAreaIds.length) {
+          apiError("BAD_REQUEST", "達成エリア数は必須エリア数以上にしてください");
+        }
+        if (qualification.minQualifiedAreaCount === null && qualification.requiredAreaIds.length > 0) {
+          apiError("BAD_REQUEST", "必須エリアを指定するにはエリア達成条件が必要です");
+        }
+      }
       const targetCircleCountsByArea = new Map<string, number>();
       for (const row of eventCircles) {
         try {
@@ -252,11 +277,34 @@ eventRoutes.put(
           // 壊れたサークル設定はエリア未割当として扱う。
         }
       }
-      if (settings.enabled && Object.keys(requiredCountByArea).length > 0 && (
+      if (settings.enabled && !qualification && Object.keys(requiredCountByArea).length > 0 && (
         targetAreaIds.some((areaId) => requiredCountByArea[areaId] == null) ||
         targetAreaIds.some((areaId) => requiredCountByArea[areaId]! > (targetCircleCountsByArea.get(areaId) ?? 0))
       )) {
         apiError("BAD_REQUEST", "有効化するには各対象エリアに必要数以上の店舗が必要です");
+      }
+      if (settings.enabled && qualification) {
+        const qualifyingAreaCount = targetAreaIds.filter((areaId) => {
+          const required = qualification.minDistinctCirclesPerArea.byArea[areaId] ?? qualification.minDistinctCirclesPerArea.default;
+          return required <= (targetCircleCountsByArea.get(areaId) ?? 0);
+        }).length;
+        const requiredAreasArePossible = qualification.requiredAreaIds.every((areaId) => {
+          const required = qualification.minDistinctCirclesPerArea.byArea[areaId] ?? qualification.minDistinctCirclesPerArea.default;
+          return required <= (targetCircleCountsByArea.get(areaId) ?? 0);
+        });
+        if (targetAreaIds.length === 0 || (qualification.minQualifiedAreaCount === null && qualification.minTotalDistinctCircles === null)) {
+          apiError("BAD_REQUEST", "有効化するにはエリア条件または合計店舗数を指定してください");
+        }
+        if (qualification.minQualifiedAreaCount !== null && (
+          qualification.minQualifiedAreaCount > targetAreaIds.length ||
+          qualifyingAreaCount < qualification.minQualifiedAreaCount ||
+          !requiredAreasArePossible
+        )) {
+          apiError("BAD_REQUEST", "達成条件を満たせるエリア数が不足しています。対象店舗の場所を確認してください");
+        }
+        if (qualification.minTotalDistinctCircles !== null && qualification.minTotalDistinctCircles > targetCircleCount) {
+          apiError("BAD_REQUEST", "合計の必要店舗数に対して対象店舗が不足しています");
+        }
       }
       const rewards = settings.rewards;
       if (rewards) {
@@ -265,7 +313,7 @@ eventRoutes.put(
           apiError("BAD_REQUEST", "景品のIDと名前は重複できません");
         }
       }
-      if (settings.enabled && (targetAreaIds.length === 0 || targetCircleCount < requiredCount)) {
+      if (settings.enabled && !qualification && (targetAreaIds.length === 0 || targetCircleCount < requiredCount)) {
         if (Object.keys(requiredCountByArea).length === 0 || targetAreaIds.length === 0) {
           apiError("BAD_REQUEST", "有効化するには対象エリアと必要数以上の店舗を指定してください");
         }
@@ -278,6 +326,7 @@ eventRoutes.put(
         targetAreaIds,
         requiredCount,
         ...(Object.keys(requiredCountByArea).length > 0 ? { requiredCountByArea } : {}),
+        ...(qualification ? { qualification } : {}),
         rewardTitle: rewards?.[0]?.name || settings.rewardTitle || "景品交換",
         ...(rewards ? { rewards } : {}),
         redemptionLocation: settings.redemptionLocation || "",
@@ -903,6 +952,11 @@ eventRoutes.get("/:id/analytics", async (c) => {
     .select()
     .from(eventUser)
     .where(eq(eventUser.eventId, eventId));
+  // 2026-10-19: event_user は事前発行時に作られるため、入場確定時刻がある家族アカウントだけを来場者として数える。
+  const registeredVisitors = visitors.filter((visitor) => visitor.onboardedAt != null);
+  const enteredAtByVisitor = new Map(
+    registeredVisitors.map((visitor) => [visitor.id, visitor.onboardedAt!.getTime()] as const),
+  );
   // 家族プロフィールは共有アカウント(eventUser)ではなく、有効な各バンドに保存される。
   const activeWristbands = await db
     .select({ userId: wristband.userId, age: wristband.age })
@@ -917,9 +971,14 @@ eventRoutes.get("/:id/analytics", async (c) => {
   const reviews = circleIds.length
     ? await db.select().from(review).where(inArray(review.circleId, circleIds))
     : [];
-  const visits = circleIds.length
+  const allVisits = circleIds.length
     ? await db.select().from(circleVisit).where(inArray(circleVisit.circleId, circleIds))
     : [];
+  // 2026-10-19: 入場処理前のスキャン履歴は、来場者の回遊実績に含めない。
+  const visits = allVisits.filter((visit) => {
+    const enteredAt = enteredAtByVisitor.get(visit.eventUserId);
+    return enteredAt !== undefined && visit.createdAt.getTime() >= enteredAt;
+  });
 
   // JST の時刻に補正してから時間帯バケットを取る (文化祭は JST 前提)。
   const jstHour = (ms: number) => new Date(ms + 9 * 3600 * 1000).getUTCHours();
@@ -940,8 +999,8 @@ eventRoutes.get("/:id/analytics", async (c) => {
     byHour[h]!.orders += 1;
     byHour[h]!.revenue += o.totalPrice;
   }
-  for (const v of visitors) {
-    const h = jstHour(v.createdAt.getTime());
+  for (const v of registeredVisitors) {
+    const h = jstHour(v.onboardedAt!.getTime());
     byHour[h]!.visitors += 1;
   }
 
@@ -998,7 +1057,7 @@ eventRoutes.get("/:id/analytics", async (c) => {
     accountBands.push(band);
     wristbandsByAccount.set(band.userId, accountBands);
   }
-  const ageProfiles = visitors.flatMap((visitor) => {
+  const ageProfiles = registeredVisitors.flatMap((visitor) => {
     const accountBands = wristbandsByAccount.get(visitor.id) ?? [];
     // バンド記録がない従来/スマホ利用者はアカウントに残る申告年齢を1件として扱う。
     return accountBands.length > 0 ? accountBands : [{ userId: visitor.id, age: visitor.age }];
@@ -1015,8 +1074,8 @@ eventRoutes.get("/:id/analytics", async (c) => {
     .filter((label) => ageBucketsMap.has(label))
     .map((label) => ({ label, count: ageBucketsMap.get(label)! }));
 
-  const onboarded = visitors.filter((v) => v.onboardedAt).length;
   const uniqueVisitFrom = new Set(visits.map((v) => v.eventUserId)).size;
+  const entryRate = visitors.length ? Math.round((registeredVisitors.length / visitors.length) * 100) : 0;
 
   // 支払い方法別の集計 (2026-07-12)。未記録は「未設定」にまとめる。
   const payAgg = new Map<string, { orders: number; revenue: number }>();
@@ -1033,10 +1092,13 @@ eventRoutes.get("/:id/analytics", async (c) => {
 
   return c.json({
     totals: {
-      visitors: visitors.length,
+      visitors: registeredVisitors.length,
       visitorProfiles: ageProfiles.length,
-      onboarded,
-      onboardedRate: visitors.length ? Math.round((onboarded / visitors.length) * 100) : 0,
+      preRegisteredAccounts: visitors.length,
+      entryRate,
+      // 2026-10-19: 旧クライアント互換のため、従来の項目名も入場処理済み数/率として残す。
+      onboarded: registeredVisitors.length,
+      onboardedRate: entryRate,
       orders: liveOrders.length,
       revenue,
       customers,
@@ -1083,13 +1145,26 @@ eventRoutes.get("/:id/behavior", async (c) => {
     ? await db.select().from(order).where(inArray(order.circleId, circleIds))
     : [];
   const liveOrders = orders.filter((o) => o.status !== "cancelled");
-  const visitors = await db.select().from(eventUser).where(eq(eventUser.eventId, eventId));
-  const visits = circleIds.length
+  const accountRows = await db.select().from(eventUser).where(eq(eventUser.eventId, eventId));
+  // 2026-10-19: 発行済みアカウント数ではなく、入場確定済みの家族アカウントを行動分析の母数にする。
+  const visitors = accountRows.filter((visitor) => visitor.onboardedAt != null);
+  const enteredAtByVisitor = new Map(
+    visitors.map((visitor) => [visitor.id, visitor.onboardedAt!.getTime()] as const),
+  );
+  const allVisits = circleIds.length
     ? await db.select().from(circleVisit).where(inArray(circleVisit.circleId, circleIds))
     : [];
-  const stamps = circleIds.length
+  const visits = allVisits.filter((visit) => {
+    const enteredAt = enteredAtByVisitor.get(visit.eventUserId);
+    return enteredAt !== undefined && visit.createdAt.getTime() >= enteredAt;
+  });
+  const allStamps = circleIds.length
     ? await db.select().from(userStamp).where(inArray(userStamp.circleId, circleIds))
     : [];
+  const stamps = allStamps.filter((stamp) => {
+    const enteredAt = enteredAtByVisitor.get(stamp.userId);
+    return enteredAt !== undefined && stamp.createdAt.getTime() >= enteredAt;
+  });
   // スタッフ人数はメンバーシップ(実アカウント)で数える。circle_manager + circle_staff。
   const staffMemberships = circleIds.length
     ? await db
@@ -1106,7 +1181,7 @@ eventRoutes.get("/:id/behavior", async (c) => {
     orders: number;
     spend: number;
     circles: Set<string>;
-    first: number; // 最初の活動(受付含む)
+    first: number; // 入場処理時刻
     last: number; // 最後の活動
   };
   const journeys = new Map<string, Journey>();
@@ -1118,16 +1193,16 @@ eventRoutes.get("/:id/behavior", async (c) => {
     }
     return j;
   };
-  // 受付時刻(eventUser.createdAt)を起点にする
+  // event_user.createdAt は事前発行時刻なので、入場確定時刻を滞在時間の起点にする。
   for (const v of visitors) {
-    ensure(v.id, v.createdAt.getTime());
+    ensure(v.id, v.onboardedAt!.getTime());
   }
   const touch = (uid: string | null, circleId: string | null, ms: number, isOrder: boolean, spend: number) => {
-    if (!uid) return; // userId 未設定の注文(旧データ等)は個票に紐づけられないのでスキップ
-    // 受付されていない未知IDでも活動があれば拾う(念のため)
-    const j = ensure(uid, ms);
+    if (!uid) return;
+    const enteredAt = enteredAtByVisitor.get(uid);
+    if (enteredAt === undefined || ms < enteredAt) return;
+    const j = ensure(uid, enteredAt);
     if (circleId) j.circles.add(circleId);
-    if (ms < j.first) j.first = ms;
     if (ms > j.last) j.last = ms;
     if (isOrder) {
       j.orders += 1;
@@ -1138,8 +1213,7 @@ eventRoutes.get("/:id/behavior", async (c) => {
   for (const v of visits) touch(v.eventUserId, v.circleId, v.createdAt.getTime(), false, 0);
   for (const s of stamps) touch(s.userId, s.circleId, s.createdAt.getTime(), false, 0);
 
-  // 2026-10-16: 来場者率・分布の分母を受付済み eventUser に揃える。
-  // 過去データなどの未対応 userId は journey map に残すが、登録来場者の人数や率には混ぜない。
+  // 2026-10-19: journey は入場処理済みアカウントだけから組み立てる。
   const jList = visitors
     .map((visitor) => journeys.get(visitor.id))
     .filter((journey): journey is Journey => journey !== undefined);
@@ -1212,7 +1286,10 @@ eventRoutes.get("/:id/behavior", async (c) => {
     const h = jstHour(o.createdAt.getTime());
     byHour[h]!.orders += 1;
     byHour[h]!.revenue += o.totalPrice;
-    if (o.userId && registeredVisitorIds.has(o.userId)) hourUsers[h]!.add(o.userId);
+    const enteredAt = o.userId ? enteredAtByVisitor.get(o.userId) : undefined;
+    if (o.userId && enteredAt !== undefined && o.createdAt.getTime() >= enteredAt) {
+      hourUsers[h]!.add(o.userId);
+    }
   }
   for (const v of visits) {
     if (registeredVisitorIds.has(v.eventUserId)) hourUsers[jstHour(v.createdAt.getTime())]!.add(v.eventUserId);
@@ -1220,7 +1297,7 @@ eventRoutes.get("/:id/behavior", async (c) => {
   for (const s of stamps) {
     if (registeredVisitorIds.has(s.userId)) hourUsers[jstHour(s.createdAt.getTime())]!.add(s.userId);
   }
-  for (const v of visitors) byHour[jstHour(v.createdAt.getTime())]!.arrivals += 1;
+  for (const v of visitors) byHour[jstHour(v.onboardedAt!.getTime())]!.arrivals += 1;
   for (let h = 0; h < 24; h++) byHour[h]!.activeUsers = hourUsers[h]!.size;
   // 混雑のピーク時間帯 (activeUsers 最大)
   const peak = byHour.reduce((mx, r) => (r.activeUsers > mx.activeUsers ? r : mx), byHour[0]!);
@@ -1228,7 +1305,7 @@ eventRoutes.get("/:id/behavior", async (c) => {
   // ── 5. 購入ファネル (離脱の可視化) ───────────────────────
   const engaged = jList.filter((j) => j.circles.size > 0 || j.orders > 0).length;
   const funnel = [
-    { stage: "来場 (受付)", count: visitors.length },
+    { stage: "入場処理済みアカウント", count: visitors.length },
     { stage: "回遊 (1+サークル)", count: engaged },
     { stage: "購入 (1+注文)", count: buyers.length },
     { stage: "リピート購入 (2+注文)", count: repeatBuyers.length },
