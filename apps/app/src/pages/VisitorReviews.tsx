@@ -120,6 +120,7 @@ export default function VisitorReviewsPage() {
   const { userId, isLoaded } = useVisitor();
   const [editingTarget, setEditingTarget] = useState<VisitorReviewTarget | null>(null);
   const [selectedStore, setSelectedStore] = useState<VisitorReviewStoreSummary | null>(null);
+  const [selectedReviewRating, setSelectedReviewRating] = useState<number | null>(null);
   const targetsQuery = useQuery({
     queryKey: ["visitor-reviews", userId],
     queryFn: () => reviewApi.mine(userId!),
@@ -147,6 +148,8 @@ export default function VisitorReviewsPage() {
   const targets = targetsQuery.data ?? [];
   const stores = storesQuery.data ?? [];
   const selectedTarget = selectedStore ? targets.find((target) => target.circleId === selectedStore.circleId) : undefined;
+  // 2026-10-18: 店舗レビューは星ごとに読み分けられるようにし、評価概要は絞り込み後も全件の値を保つ。
+  const visibleStoreReviews = (storeReviewsQuery.data ?? []).filter((review) => selectedReviewRating === null || review.rating === selectedReviewRating);
 
   return (
     <main className="mx-auto max-w-2xl space-y-6 p-3 pb-24 sm:p-4 sm:pb-24">
@@ -210,7 +213,7 @@ export default function VisitorReviewsPage() {
               <li key={store.circleId}>
                 <button
                   type="button"
-                  onClick={() => setSelectedStore(store)}
+                  onClick={() => { setSelectedReviewRating(null); setSelectedStore(store); }}
                   className="flex min-h-16 w-full items-center justify-between gap-3 border-thick border-border p-3 text-left hover:bg-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-info"
                 >
                   <span className="flex min-w-0 items-center gap-3">
@@ -274,8 +277,24 @@ export default function VisitorReviewsPage() {
             <EmptyState icon={MessageSquareText} message="この店舗のレビューはまだありません" />
           ) : null}
           {!storeReviewsQuery.isLoading && !storeReviewsQuery.isError && storeReviewsQuery.data?.length ? (
-            <div>
-              {storeReviewsQuery.data.map((review, index) => <ReviewEntry key={`${selectedStore.circleId}-${index}`} review={review} />)}
+            <div className="space-y-3">
+              <fieldset className="space-y-2 border-b-thin border-border pb-3">
+                <legend className="text-xs font-bold">星の数で絞り込み</legend>
+                <div className="flex flex-wrap gap-2" role="group" aria-label="星の数でレビューを絞り込み">
+                  <button type="button" aria-pressed={selectedReviewRating === null} onClick={() => setSelectedReviewRating(null)} className={`min-h-10 border-thick px-3 text-xs font-bold focus-visible:outline focus-visible:outline-2 focus-visible:outline-info ${selectedReviewRating === null ? "bg-primary text-primary-foreground" : "bg-background hover:bg-muted"}`}>すべて</button>
+                  {[5, 4, 3, 2, 1].map((rating) => <button key={rating} type="button" aria-pressed={selectedReviewRating === rating} onClick={() => setSelectedReviewRating(rating)} className={`inline-flex min-h-10 items-center gap-1 border-thick px-3 text-xs font-bold focus-visible:outline focus-visible:outline-2 focus-visible:outline-info ${selectedReviewRating === rating ? "bg-primary text-primary-foreground" : "bg-background hover:bg-muted"}`}>
+                    {rating}<Star aria-hidden="true" className="h-3.5 w-3.5 fill-current text-warning" />
+                  </button>)}
+                </div>
+              </fieldset>
+              {visibleStoreReviews.length === 0 ? (
+                <EmptyState icon={MessageSquareText} message="この評価のレビューはありません" />
+              ) : (
+                <div aria-live="polite">
+                  <p className="mb-1 text-right text-[10px] text-muted-foreground">{visibleStoreReviews.length}件 / {storeReviewsQuery.data.length}件</p>
+                  {visibleStoreReviews.map((review, index) => <ReviewEntry key={`${selectedStore.circleId}-${index}`} review={review} />)}
+                </div>
+              )}
             </div>
           ) : null}
         </Modal>
