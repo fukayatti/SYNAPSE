@@ -10,7 +10,6 @@ import {
   BarChart3,
   Coins,
   Download,
-  Radio,
   Receipt,
   RefreshCw,
   Users,
@@ -18,6 +17,7 @@ import {
 } from "lucide-react";
 
 // 2026-10-16: 全期間の要約から時間帯・年代・注文・回遊へ掘り下げられる構成にし、集計単位も画面内で説明する。
+// 2026-10-18: 開催後の振り返り専用にし、開催中の自動更新は運営画面へ集約する。
 
 type TrendMetric = "visitors" | "orders" | "revenue";
 
@@ -312,19 +312,16 @@ function HourlyTrend({
 }
 
 export function AnalyticsTab({ eventId, eventName }: { eventId: string; eventName?: string }) {
-  const [live, setLive] = useState(false);
   const [trendMetric, setTrendMetric] = useState<TrendMetric>("visitors");
   const analyticsQuery = useQuery({
     queryKey: ["event-analytics", eventId],
     queryFn: () => eventApi.analytics(eventId),
     enabled: !!eventId,
-    refetchInterval: live ? 15_000 : false,
   });
   const behaviorQuery = useQuery({
     queryKey: ["event-behavior", eventId],
     queryFn: () => eventApi.behavior(eventId),
     enabled: !!eventId,
-    refetchInterval: live ? 15_000 : false,
   });
 
   if (analyticsQuery.isLoading) {
@@ -394,11 +391,14 @@ export function AnalyticsTab({ eventId, eventName }: { eventId: string; eventNam
         <div className="min-w-0">
           <p className="mb-1 flex items-center gap-2 font-mono text-[10px] font-bold uppercase tracking-[0.18em] text-muted-foreground">
             <BarChart3 aria-hidden="true" className="h-4 w-4" />
-            EVENT OVERVIEW
+            AFTER EVENT REVIEW
           </p>
-          <h2 className="text-xl font-bold sm:text-2xl">イベント実績の全体像</h2>
+          <h2 className="text-xl font-bold sm:text-2xl">開催後の振り返り</h2>
           <p className="mt-1 max-w-2xl text-xs leading-5 text-muted-foreground">
-            {eventName ? `${eventName}の` : ""}登録アカウント・注文・回遊をまとめて確認できます。表示範囲は全期間です。
+            {eventName ? `${eventName}の` : ""}開催期間全体を集計し、来場・売上・人気メニュー・行動の傾向を振り返る画面です。
+          </p>
+          <p className="mt-1 max-w-2xl text-[10px] leading-4 text-muted-foreground">
+            開催中の混雑やスタッフ配置は「開催中の混雑・人員配置」を確認してください。このレポートは自動更新せず、必要に応じて更新します。
           </p>
         </div>
         <div className="grid grid-cols-2 gap-2 sm:flex sm:shrink-0">
@@ -410,18 +410,6 @@ export function AnalyticsTab({ eventId, eventName }: { eventId: string; eventNam
           >
             <Download aria-hidden="true" className="h-4 w-4" />
             CSV
-          </button>
-          <button
-            type="button"
-            aria-pressed={live}
-            onClick={() => setLive((current) => !current)}
-            className={`inline-flex min-h-10 items-center justify-center gap-2 border-thick px-3 font-mono text-[10px] font-bold uppercase tracking-wider transition-colors focus-visible:border-heavy focus-visible:outline-none ${
-              live ? "border-accent bg-accent text-accent-foreground" : "border-border bg-background hover:bg-muted"
-            }`}
-            title="ライブ更新を有効にすると15秒ごとに再取得します"
-          >
-            <Radio aria-hidden="true" className={`h-4 w-4 ${live ? "animate-pulse" : ""}`} />
-            {live ? "LIVE ON" : "LIVE"}
           </button>
           <button
             type="button"
