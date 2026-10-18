@@ -98,6 +98,24 @@ export function StampRallyUsageDashboard({ eventId }: { eventId: string }) {
   const participantCount = summary?.participantAccountCount ?? 0;
   const qualifiedCount = summary?.qualifiedAccountCount ?? 0;
   const exchangeRateCount = summary?.qualifiedRedeemedAccountCount ?? 0;
+  const qualification = summary?.qualification;
+  const qualificationDescription = summary && qualification
+    ? [
+        qualification.minQualifiedAreaCount !== null
+          ? `対象${summary.targetAreaIds.length}エリアのうち${qualification.minQualifiedAreaCount}エリア以上（各エリア${qualification.minDistinctCirclesPerArea.default}店舗以上）`
+          : null,
+        // 2026-10-19: エリア条件を無効にした場合、保存されている個別値は達成条件として表示しない。
+        ...(qualification.minQualifiedAreaCount === null ? [] : Object.entries(qualification.minDistinctCirclesPerArea.byArea)
+          .filter(([areaId]) => summary.targetAreaIds.includes(areaId))
+          .map(([areaId, count]) => `${storeAreas.find(([id]) => id === areaId)?.[1] ?? "対象エリア"} ${count}店舗以上`)),
+        qualification.requiredAreaIds.length > 0
+          ? `必須エリア: ${qualification.requiredAreaIds.map((areaId) => storeAreas.find(([id]) => id === areaId)?.[1] ?? "対象エリア").join("・")}`
+          : null,
+        qualification.minTotalDistinctCircles !== null
+          ? `合計${qualification.minTotalDistinctCircles}店舗以上`
+          : null,
+      ].filter(Boolean).join(" / ")
+    : `対象店舗 ${summary?.requiredCount ?? 0} 店以上で注文完了`;
 
   if (summaryQuery.isLoading) {
     return (
@@ -166,9 +184,7 @@ export function StampRallyUsageDashboard({ eventId }: { eventId: string }) {
             <div className="flex flex-wrap items-center justify-between gap-2">
               <h4 id="stamp-rally-funnel-title" className="text-xs font-bold">参加から交換まで</h4>
               <span className="text-[10px] text-muted-foreground">
-                条件: {Object.keys(summary.requiredCountByArea).length > 0
-                  ? `各対象エリアで設定数以上の店舗を利用 (${Object.entries(summary.requiredCountByArea).map(([areaId, count]) => `${storeAreas.find(([id]) => id === areaId)?.[1] ?? "対象エリア"} ${count}店`).join(" / ")})`
-                  : `対象店舗 ${summary.requiredCount} 店以上で注文完了`}
+                条件: {qualificationDescription}
               </span>
             </div>
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
