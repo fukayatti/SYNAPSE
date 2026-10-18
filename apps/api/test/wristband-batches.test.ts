@@ -234,3 +234,40 @@ describe("リストバンド発行履歴", () => {
     expect(await db.select().from(wristband).where(eq(wristband.id, "duplicate-id"))).toHaveLength(1);
   });
 });
+
+describe("来場者のリストバンド検索", () => {
+  it("500件ページで来場者一覧を取得できる", async () => {
+    const { db, eventId, headers } = await createEventManager();
+    const users = Array.from({ length: 500 }, (_, index) => ({
+      id: uid("search-visitor"),
+      eventId,
+      displayId: index + 1,
+    }));
+
+    // 2026-10-19: テストデータの作成はD1のバインド上限に合わせ、25件ずつ挿入する。
+    for (let offset = 0; offset < users.length; offset += 25) {
+      await db.insert(eventUser).values(users.slice(offset, offset + 25));
+    }
+    // 2026-10-19: 分割の最初と最後のチャンクにもバンドを置き、関連データが保持されることを確認する。
+    await db.insert(wristband).values([
+      { id: uid("search-band-first"), userId: users[0]!.id, status: "active" },
+      { id: uid("search-band-last"), userId: users[users.length - 1]!.id, status: "smartphone" },
+    ]);
+
+    const response = await request(`/api/wristbands/search?eventId=${eventId}&limit=500`, { headers });
+
+    expect(response.status).toBe(200);
+    const result = (await response.json()) as {
+      items: Array<{ user: { id: string }; familyWristbands: Array<{ id: string }>; familyBandCount: number }>;
+      total: number;
+    };
+    expect(result.total).toBe(users.length);
+    expect(result.items).toHaveLength(users.length);
+    const firstBandOwner = result.items.find((item) => item.user.id === users[0]!.id);
+    const lastBandOwner = result.items.find((item) => item.user.id === users[users.length - 1]!.id);
+    expect(firstBandOwner?.familyBandCount).toBe(1);
+    expect(firstBandOwner?.familyWristbands[0]?.id).toContain("search-band-first");
+    expect(lastBandOwner?.familyBandCount).toBe(1);
+    expect(lastBandOwner?.familyWristbands[0]?.id).toContain("search-band-last");
+  });
+});

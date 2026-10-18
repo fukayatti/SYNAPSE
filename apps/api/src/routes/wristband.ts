@@ -11,6 +11,7 @@ import { JAPANESE_ALLERGENS_28 } from "@fesflow/config/allergens";
 
 
 const wristbandRoutes = new Hono<AppEnv>();
+const WRISTBAND_SEARCH_USER_ID_CHUNK_SIZE = 98;
 const allergyListSchema = z.array(z.enum(JAPANESE_ALLERGENS_28)).max(28)
   .refine((allergies) => new Set(allergies).size === allergies.length, "アレルギー項目の重複を解消してください");
 
@@ -130,16 +131,19 @@ wristbandRoutes.get(
       .offset(offset);
 
     const userIds = rows.map((r) => r.user.id);
-    const familyWristbands = userIds.length > 0
-      ? await db
-          .select()
-          .from(wristband)
-          .where(and(
-            inArray(wristband.userId, userIds),
-            or(eq(wristband.status, "active"), eq(wristband.status, "smartphone"))
-          ))
-          .orderBy(asc(wristband.assignedAt), asc(wristband.id))
-      : [];
+    const familyWristbands: Awaited<ReturnType<typeof getFamilyWristbands>> = [];
+    // 2026-10-19: D1の100バインド上限から状態条件2件分を引き、500人表示時のIN句失敗を防ぐ。
+    for (const userIdChunk of chunkItems(userIds, WRISTBAND_SEARCH_USER_ID_CHUNK_SIZE)) {
+      const chunkWristbands = await db
+        .select()
+        .from(wristband)
+        .where(and(
+          inArray(wristband.userId, userIdChunk),
+          or(eq(wristband.status, "active"), eq(wristband.status, "smartphone"))
+        ))
+        .orderBy(asc(wristband.assignedAt), asc(wristband.id));
+      familyWristbands.push(...chunkWristbands);
+    }
 
     return c.json({
       items: rows.map((r) => ({
