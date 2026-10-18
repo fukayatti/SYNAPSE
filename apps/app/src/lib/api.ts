@@ -601,6 +601,7 @@ export interface StampRallySettings {
   enabled: boolean;
   targetAreaIds: string[];
   requiredCount: number;
+  requiredCountByArea?: Record<string, number>;
   rewardTitle: string;
   rewards?: StampRallyReward[];
   redemptionLocation: string;
@@ -639,6 +640,7 @@ export interface VisitorStampRally {
   stampedCount: number;
   targetCircleCount: number;
   requiredCount: number;
+  requiredCountByArea: Record<string, number>;
   eligible: boolean;
   rewardTitle: string;
   familyMemberCount: number;
@@ -693,6 +695,7 @@ export interface StampRallyUsageSummary {
   enabled: boolean;
   targetStoreCount: number;
   requiredCount: number;
+  requiredCountByArea: Record<string, number>;
   participantAccountCount: number;
   qualifiedAccountCount: number;
   redeemedAccountCount: number;
@@ -1462,7 +1465,7 @@ export const wristbandApi = {
         `&bandType=${filters.bandType}&accountStatus=${filters.accountStatus}&profileStatus=${filters.profileStatus}` +
         `&offset=${pagination.offset}&limit=${pagination.limit}` +
         `&sortBy=${sorting.sortBy}&sortDirection=${sorting.sortDirection}`
-    ).catch(() => ({ items: [], total: 0, ...pagination })),
+    ),
   register: (userId: string, wristbandId: string) =>
     fetchApi<{ success: boolean; wristbandId: string }>("/api/wristbands/register", {
       method: "POST",
