@@ -18,11 +18,12 @@ import {
 
 // 2026-10-16: 全期間の要約から時間帯・年代・注文・回遊へ掘り下げられる構成にし、集計単位も画面内で説明する。
 // 2026-10-18: 開催後の振り返り専用にし、開催中の自動更新は運営画面へ集約する。
+// 2026-10-19: 来場者数と時間帯の来場系列は入場処理済みアカウントを基準にし、事前発行分と区別する。
 
 type TrendMetric = "visitors" | "orders" | "revenue";
 
 const trendMetrics: { key: TrendMetric; label: string }[] = [
-  { key: "visitors", label: "アカウント作成" },
+  { key: "visitors", label: "入場処理" },
   { key: "orders", label: "注文数" },
   { key: "revenue", label: "売上" },
 ];
@@ -70,12 +71,12 @@ function downloadCsv(eventLabel: string, analytics: EventAnalytics) {
   ]);
   const lines: (string | number | null)[][] = [
     ["イベント統計サマリ"],
-    ["来場アカウント数", "登録プロフィール数", "受付完了アカウント数", "受付完了率", "売上", "注文数", "注文完了率", "注文記録上の延べ人数"],
+    ["入場処理済みアカウント数（家族単位）", "来場プロフィール数", "事前登録アカウント数", "入場処理率", "売上", "注文数", "注文完了率", "注文記録上の延べ人数"],
     [
       totals.visitors,
       totals.visitorProfiles,
-      totals.onboarded,
-      `${totals.onboardedRate}%`,
+      totals.preRegisteredAccounts,
+      `${totals.entryRate}%`,
       totals.revenue,
       totals.orders,
       `${totals.completedRate}%`,
@@ -83,7 +84,7 @@ function downloadCsv(eventLabel: string, analytics: EventAnalytics) {
     ],
     [],
     ["時間帯別 (日本時間・全開催日の合算)"],
-    ["時刻", "アカウント作成数", "注文数", "売上"],
+    ["時刻", "入場処理済みアカウント数", "注文数", "売上"],
     ...analytics.byHour.map((row) => [hourLabel(row.hour), row.visitors, row.orders, row.revenue]),
     [],
     ["年代構成 (リストバンド/プロフィール単位)"],
@@ -427,14 +428,14 @@ export function AnalyticsTab({ eventId, eventName }: { eventId: string; eventNam
         <StatCard
           label="登録アカウント"
           value={`${integer(totals.visitors)}件`}
-          note={`受付登録完了 ${integer(totals.onboarded)}件 · ${totals.onboardedRate}%`}
+          note={`事前登録 ${integer(totals.preRegisteredAccounts)}件中 · 入場処理 ${totals.entryRate}% · 家族単位`}
           icon={Users}
           accent
         />
         <StatCard
           label="来場プロフィール"
           value={`${integer(totals.visitorProfiles)}件`}
-          note="家族を含む · 有効バンド/単独登録プロフィール"
+          note="入場処理済みアカウント内 · 家族を含むプロフィール数"
           icon={Users}
         />
         <StatCard
@@ -610,7 +611,7 @@ export function AnalyticsTab({ eventId, eventName }: { eventId: string; eventNam
       </section>
 
       <footer className="border-t-thin border-border pt-3 text-[10px] leading-4 text-muted-foreground">
-        来場登録数・注文者数・回遊はアカウント単位です。年代は有効なリストバンドごとのプロフィールを家族分も含めて集計し、アカウントにバンドがない場合はアカウントの申告年齢を1件として扱います。家族で注文を共有するため、注文・売上を年代別には配賦しません。売上・注文はキャンセルを除外し、注文完了率は完了済みの注文数から計算しています。時間帯は日本時間で、全開催日の同じ時刻を合算しています。
+        登録アカウント数・注文者数・回遊は入場処理済みアカウント（家族単位）で集計します。プロフィール数・年代は有効バンドごとに家族分も含め、バンド未紐付けの場合はアカウントプロフィールを1件として扱います。年代の未回答は {integer(ageUnansweredCount)}人です。家族で注文を共有するため、注文・売上を年代別には配賦しません。売上・注文はキャンセルを除外し、注文完了率は完了済みの注文数から計算しています。時間帯は日本時間で、全開催日の同じ時刻を合算しています。
         {behaviorQuery.isError && (
           <span className="mt-1 block">
             回遊・注文者の補足データを取得できませんでした。{" "}
