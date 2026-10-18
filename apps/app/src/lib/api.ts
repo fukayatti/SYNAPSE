@@ -602,10 +602,29 @@ export interface StampRallySettings {
   targetAreaIds: string[];
   requiredCount: number;
   requiredCountByArea?: Record<string, number>;
+  qualification?: StampRallyQualificationRule;
   rewardTitle: string;
   rewards?: StampRallyReward[];
   redemptionLocation: string;
   rulesUrl: string;
+}
+
+export interface StampRallyQualificationRule {
+  minQualifiedAreaCount: number | null;
+  minDistinctCirclesPerArea: {
+    default: number;
+    byArea: Record<string, number>;
+  };
+  requiredAreaIds: string[];
+  minTotalDistinctCircles: number | null;
+}
+
+export interface VisitorStampRallyQualification {
+  minQualifiedAreaCount: number | null;
+  qualifiedAreaCount: number;
+  qualifiedAreaIds: string[];
+  requiredAreaIds: string[];
+  minTotalDistinctCircles: number | null;
 }
 
 export interface StampRallyReward {
@@ -641,6 +660,7 @@ export interface VisitorStampRally {
   targetCircleCount: number;
   requiredCount: number;
   requiredCountByArea: Record<string, number>;
+  qualification: VisitorStampRallyQualification;
   eligible: boolean;
   rewardTitle: string;
   familyMemberCount: number;
@@ -693,9 +713,11 @@ export interface StampRallyUsageStore {
 
 export interface StampRallyUsageSummary {
   enabled: boolean;
+  targetAreaIds: string[];
   targetStoreCount: number;
   requiredCount: number;
   requiredCountByArea: Record<string, number>;
+  qualification: StampRallyQualificationRule;
   participantAccountCount: number;
   qualifiedAccountCount: number;
   redeemedAccountCount: number;
