@@ -4,7 +4,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { and, eq } from "drizzle-orm";
-import { membership, circle, order, eventUser } from "@fesflow/db";
+import { membership, circle, order, eventUser, circleVisit, wristband } from "@fesflow/db";
 import { request, testDb, uid } from "./helpers";
 
 function cookieOf(res: Response): string {
@@ -25,7 +25,7 @@ async function signUp(prefix: string) {
 }
 
 describe("イベント統計 analytics", () => {
-	it("event_manager が来場者/売上/注文の集計を取得できる", async () => {
+	it("入場処理済みアカウントと家族プロフィールを入場時刻・入場後の行動で集計する", async () => {
 		const owner = await signUp("analytics");
 		const db = testDb();
 
@@ -43,7 +43,7 @@ describe("イベント統計 analytics", () => {
 			.where(and(eq(membership.eventId, eventId), eq(membership.role, "event_manager")));
 		const activeId = em[0]!.id;
 
-		// サークル + 注文 + 来場者を用意
+		// サークル + 注文 + 事前登録/入場済みアカウントを用意
 		const cId = uid("c");
 		await db.insert(circle).values({ id: cId, eventId, name: uid("店") });
 		await db.insert(order).values({
@@ -55,21 +55,114 @@ describe("イベント統計 analytics", () => {
 			status: "completed",
 			completed: true,
 		});
-		await db.insert(eventUser).values({ id: uid("u"), eventId, displayId: 1 });
-		await db.insert(eventUser).values({ id: uid("u"), eventId, displayId: 2 });
+		const enteredId = uid("entered");
+		const pendingId = uid("pending");
+		const createdAt = new Date("2026-10-18T00:00:00.000Z"); // 09:00 JST
+		const enteredAt = new Date("2026-10-18T02:00:00.000Z"); // 11:00 JST
+		await db.insert(eventUser).values({
+			id: enteredId,
+			eventId,
+			displayId: 1,
+			createdAt,
+			onboardedAt: enteredAt,
+		});
+		await db.insert(eventUser).values({
+			id: pendingId,
+			eventId,
+			displayId: 2,
+			createdAt: new Date("2026-10-18T01:00:00.000Z"), // 10:00 JST、入場処理前
+		});
+		await db.insert(wristband).values([
+			{
+				id: uid("wb-main"),
+				userId: enteredId,
+				status: "active",
+				age: 18,
+				onboardedAt: enteredAt,
+			},
+			{
+				id: uid("wb-family"),
+				userId: enteredId,
+				status: "smartphone",
+				age: 35,
+				onboardedAt: enteredAt,
+			},
+			{ id: uid("wb-pending"), userId: pendingId, status: "active", age: 48 },
+		]);
+		await db.insert(circleVisit).values([
+			{
+				id: uid("visit-before-entry"),
+				eventUserId: enteredId,
+				circleId: cId,
+				createdAt: new Date(enteredAt.getTime() - 30 * 60_000),
+			},
+			{
+				id: uid("visit-after-entry"),
+				eventUserId: enteredId,
+				circleId: cId,
+				createdAt: new Date(enteredAt.getTime() + 60 * 60_000),
+			},
+			{
+				id: uid("visit-pending"),
+				eventUserId: pendingId,
+				circleId: cId,
+				createdAt: new Date(enteredAt.getTime() + 60 * 60_000),
+			},
+		]);
 
 		const res = await request(`/api/festivals/${eventId}/analytics`, {
 			headers: { Cookie: owner.cookie, "X-Active-Membership-Id": activeId },
 		});
 		expect(res.status).toBe(200);
 		const a = (await res.json()) as {
-			totals: { visitors: number; revenue: number; orders: number; customers: number; circles: number };
+			totals: {
+				visitors: number;
+				visitorProfiles: number;
+				preRegisteredAccounts: number;
+				entryRate: number;
+				circleVisits: number;
+				visitingUsers: number;
+				revenue: number;
+				orders: number;
+				customers: number;
+				circles: number;
+			};
+			byHour: { hour: number; visitors: number }[];
 		};
-		expect(a.totals.visitors).toBe(2);
+		expect(a.totals.visitors).toBe(1);
+		expect(a.totals.visitorProfiles).toBe(2);
+		expect(a.totals.preRegisteredAccounts).toBe(2);
+		expect(a.totals.entryRate).toBe(50);
+		expect(a.totals.circleVisits).toBe(1);
+		expect(a.totals.visitingUsers).toBe(1);
+		expect(a.byHour.find((row) => row.hour === 11)?.visitors).toBe(1);
+		expect(a.byHour.find((row) => row.hour === 9)?.visitors).toBe(0);
+		expect(a.byHour.find((row) => row.hour === 10)?.visitors).toBe(0);
 		expect(a.totals.revenue).toBe(800);
 		expect(a.totals.orders).toBe(1);
 		expect(a.totals.customers).toBe(2);
 		expect(a.totals.circles).toBe(1);
+
+		const behaviorRes = await request(`/api/festivals/${eventId}/behavior`, {
+			headers: { Cookie: owner.cookie, "X-Active-Membership-Id": activeId },
+		});
+		expect(behaviorRes.status).toBe(200);
+		const behavior = (await behaviorRes.json()) as {
+			journey: { visitors: number; avgCirclesPerVisitor: number };
+			byHour: { hour: number; activeUsers: number; arrivals: number }[];
+		};
+		expect(behavior.journey.visitors).toBe(1);
+		expect(behavior.journey.avgCirclesPerVisitor).toBe(1);
+		expect(behavior.byHour.find((row) => row.hour === 11)?.arrivals).toBe(1);
+		expect(behavior.byHour.find((row) => row.hour === 12)?.activeUsers).toBe(1);
+		expect(behavior.byHour.find((row) => row.hour === 10)?.activeUsers).toBe(0);
+
+		const circleAnalyticsRes = await request(`/api/circles/${cId}/analytics`, {
+			headers: { Cookie: owner.cookie, "X-Active-Membership-Id": activeId },
+		});
+		expect(circleAnalyticsRes.status).toBe(200);
+		const circleAnalytics = (await circleAnalyticsRes.json()) as { totals: { visitors: number } };
+		expect(circleAnalytics.totals.visitors).toBe(1);
 	});
 
 	it("super_admin かつ当該イベントの event_manager なら、active=super_admin でも analytics を見られる", async () => {

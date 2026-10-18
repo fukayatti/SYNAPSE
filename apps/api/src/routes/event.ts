@@ -952,6 +952,11 @@ eventRoutes.get("/:id/analytics", async (c) => {
     .select()
     .from(eventUser)
     .where(eq(eventUser.eventId, eventId));
+  // 2026-10-19: event_user は事前発行時に作られるため、入場確定時刻がある家族アカウントだけを来場者として数える。
+  const registeredVisitors = visitors.filter((visitor) => visitor.onboardedAt != null);
+  const enteredAtByVisitor = new Map(
+    registeredVisitors.map((visitor) => [visitor.id, visitor.onboardedAt!.getTime()] as const),
+  );
   // 家族プロフィールは共有アカウント(eventUser)ではなく、有効な各バンドに保存される。
   const activeWristbands = await db
     .select({ userId: wristband.userId, age: wristband.age })
@@ -966,9 +971,14 @@ eventRoutes.get("/:id/analytics", async (c) => {
   const reviews = circleIds.length
     ? await db.select().from(review).where(inArray(review.circleId, circleIds))
     : [];
-  const visits = circleIds.length
+  const allVisits = circleIds.length
     ? await db.select().from(circleVisit).where(inArray(circleVisit.circleId, circleIds))
     : [];
+  // 2026-10-19: 入場処理前のスキャン履歴は、来場者の回遊実績に含めない。
+  const visits = allVisits.filter((visit) => {
+    const enteredAt = enteredAtByVisitor.get(visit.eventUserId);
+    return enteredAt !== undefined && visit.createdAt.getTime() >= enteredAt;
+  });
 
   // JST の時刻に補正してから時間帯バケットを取る (文化祭は JST 前提)。
   const jstHour = (ms: number) => new Date(ms + 9 * 3600 * 1000).getUTCHours();
@@ -989,8 +999,8 @@ eventRoutes.get("/:id/analytics", async (c) => {
     byHour[h]!.orders += 1;
     byHour[h]!.revenue += o.totalPrice;
   }
-  for (const v of visitors) {
-    const h = jstHour(v.createdAt.getTime());
+  for (const v of registeredVisitors) {
+    const h = jstHour(v.onboardedAt!.getTime());
     byHour[h]!.visitors += 1;
   }
 
@@ -1047,7 +1057,7 @@ eventRoutes.get("/:id/analytics", async (c) => {
     accountBands.push(band);
     wristbandsByAccount.set(band.userId, accountBands);
   }
-  const ageProfiles = visitors.flatMap((visitor) => {
+  const ageProfiles = registeredVisitors.flatMap((visitor) => {
     const accountBands = wristbandsByAccount.get(visitor.id) ?? [];
     // バンド記録がない従来/スマホ利用者はアカウントに残る申告年齢を1件として扱う。
     return accountBands.length > 0 ? accountBands : [{ userId: visitor.id, age: visitor.age }];
@@ -1064,8 +1074,8 @@ eventRoutes.get("/:id/analytics", async (c) => {
     .filter((label) => ageBucketsMap.has(label))
     .map((label) => ({ label, count: ageBucketsMap.get(label)! }));
 
-  const onboarded = visitors.filter((v) => v.onboardedAt).length;
   const uniqueVisitFrom = new Set(visits.map((v) => v.eventUserId)).size;
+  const entryRate = visitors.length ? Math.round((registeredVisitors.length / visitors.length) * 100) : 0;
 
   // 支払い方法別の集計 (2026-07-12)。未記録は「未設定」にまとめる。
   const payAgg = new Map<string, { orders: number; revenue: number }>();
@@ -1082,10 +1092,13 @@ eventRoutes.get("/:id/analytics", async (c) => {
 
   return c.json({
     totals: {
-      visitors: visitors.length,
+      visitors: registeredVisitors.length,
       visitorProfiles: ageProfiles.length,
-      onboarded,
-      onboardedRate: visitors.length ? Math.round((onboarded / visitors.length) * 100) : 0,
+      preRegisteredAccounts: visitors.length,
+      entryRate,
+      // 2026-10-19: 旧クライアント互換のため、従来の項目名も入場処理済み数/率として残す。
+      onboarded: registeredVisitors.length,
+      onboardedRate: entryRate,
       orders: liveOrders.length,
       revenue,
       customers,
@@ -1132,13 +1145,26 @@ eventRoutes.get("/:id/behavior", async (c) => {
     ? await db.select().from(order).where(inArray(order.circleId, circleIds))
     : [];
   const liveOrders = orders.filter((o) => o.status !== "cancelled");
-  const visitors = await db.select().from(eventUser).where(eq(eventUser.eventId, eventId));
-  const visits = circleIds.length
+  const accountRows = await db.select().from(eventUser).where(eq(eventUser.eventId, eventId));
+  // 2026-10-19: 発行済みアカウント数ではなく、入場確定済みの家族アカウントを行動分析の母数にする。
+  const visitors = accountRows.filter((visitor) => visitor.onboardedAt != null);
+  const enteredAtByVisitor = new Map(
+    visitors.map((visitor) => [visitor.id, visitor.onboardedAt!.getTime()] as const),
+  );
+  const allVisits = circleIds.length
     ? await db.select().from(circleVisit).where(inArray(circleVisit.circleId, circleIds))
     : [];
-  const stamps = circleIds.length
+  const visits = allVisits.filter((visit) => {
+    const enteredAt = enteredAtByVisitor.get(visit.eventUserId);
+    return enteredAt !== undefined && visit.createdAt.getTime() >= enteredAt;
+  });
+  const allStamps = circleIds.length
     ? await db.select().from(userStamp).where(inArray(userStamp.circleId, circleIds))
     : [];
+  const stamps = allStamps.filter((stamp) => {
+    const enteredAt = enteredAtByVisitor.get(stamp.userId);
+    return enteredAt !== undefined && stamp.createdAt.getTime() >= enteredAt;
+  });
   // スタッフ人数はメンバーシップ(実アカウント)で数える。circle_manager + circle_staff。
   const staffMemberships = circleIds.length
     ? await db
@@ -1155,7 +1181,7 @@ eventRoutes.get("/:id/behavior", async (c) => {
     orders: number;
     spend: number;
     circles: Set<string>;
-    first: number; // 最初の活動(受付含む)
+    first: number; // 入場処理時刻
     last: number; // 最後の活動
   };
   const journeys = new Map<string, Journey>();
@@ -1167,16 +1193,16 @@ eventRoutes.get("/:id/behavior", async (c) => {
     }
     return j;
   };
-  // 受付時刻(eventUser.createdAt)を起点にする
+  // event_user.createdAt は事前発行時刻なので、入場確定時刻を滞在時間の起点にする。
   for (const v of visitors) {
-    ensure(v.id, v.createdAt.getTime());
+    ensure(v.id, v.onboardedAt!.getTime());
   }
   const touch = (uid: string | null, circleId: string | null, ms: number, isOrder: boolean, spend: number) => {
-    if (!uid) return; // userId 未設定の注文(旧データ等)は個票に紐づけられないのでスキップ
-    // 受付されていない未知IDでも活動があれば拾う(念のため)
-    const j = ensure(uid, ms);
+    if (!uid) return;
+    const enteredAt = enteredAtByVisitor.get(uid);
+    if (enteredAt === undefined || ms < enteredAt) return;
+    const j = ensure(uid, enteredAt);
     if (circleId) j.circles.add(circleId);
-    if (ms < j.first) j.first = ms;
     if (ms > j.last) j.last = ms;
     if (isOrder) {
       j.orders += 1;
@@ -1187,8 +1213,7 @@ eventRoutes.get("/:id/behavior", async (c) => {
   for (const v of visits) touch(v.eventUserId, v.circleId, v.createdAt.getTime(), false, 0);
   for (const s of stamps) touch(s.userId, s.circleId, s.createdAt.getTime(), false, 0);
 
-  // 2026-10-16: 来場者率・分布の分母を受付済み eventUser に揃える。
-  // 過去データなどの未対応 userId は journey map に残すが、登録来場者の人数や率には混ぜない。
+  // 2026-10-19: journey は入場処理済みアカウントだけから組み立てる。
   const jList = visitors
     .map((visitor) => journeys.get(visitor.id))
     .filter((journey): journey is Journey => journey !== undefined);
@@ -1261,7 +1286,10 @@ eventRoutes.get("/:id/behavior", async (c) => {
     const h = jstHour(o.createdAt.getTime());
     byHour[h]!.orders += 1;
     byHour[h]!.revenue += o.totalPrice;
-    if (o.userId && registeredVisitorIds.has(o.userId)) hourUsers[h]!.add(o.userId);
+    const enteredAt = o.userId ? enteredAtByVisitor.get(o.userId) : undefined;
+    if (o.userId && enteredAt !== undefined && o.createdAt.getTime() >= enteredAt) {
+      hourUsers[h]!.add(o.userId);
+    }
   }
   for (const v of visits) {
     if (registeredVisitorIds.has(v.eventUserId)) hourUsers[jstHour(v.createdAt.getTime())]!.add(v.eventUserId);
@@ -1269,7 +1297,7 @@ eventRoutes.get("/:id/behavior", async (c) => {
   for (const s of stamps) {
     if (registeredVisitorIds.has(s.userId)) hourUsers[jstHour(s.createdAt.getTime())]!.add(s.userId);
   }
-  for (const v of visitors) byHour[jstHour(v.createdAt.getTime())]!.arrivals += 1;
+  for (const v of visitors) byHour[jstHour(v.onboardedAt!.getTime())]!.arrivals += 1;
   for (let h = 0; h < 24; h++) byHour[h]!.activeUsers = hourUsers[h]!.size;
   // 混雑のピーク時間帯 (activeUsers 最大)
   const peak = byHour.reduce((mx, r) => (r.activeUsers > mx.activeUsers ? r : mx), byHour[0]!);
@@ -1277,7 +1305,7 @@ eventRoutes.get("/:id/behavior", async (c) => {
   // ── 5. 購入ファネル (離脱の可視化) ───────────────────────
   const engaged = jList.filter((j) => j.circles.size > 0 || j.orders > 0).length;
   const funnel = [
-    { stage: "来場 (受付)", count: visitors.length },
+    { stage: "入場処理済みアカウント", count: visitors.length },
     { stage: "回遊 (1+サークル)", count: engaged },
     { stage: "購入 (1+注文)", count: buyers.length },
     { stage: "リピート購入 (2+注文)", count: repeatBuyers.length },

@@ -820,9 +820,14 @@ export function parseEventPaymentMethods(raw?: string | null): string[] {
 // イベント統計 (GET /api/festivals/:id/analytics) のレスポンス
 export interface EventAnalytics {
   totals: {
+    // 2026-10-19: visitors は入場処理済みの家族アカウント数。事前発行分は別フィールドで返す。
     visitors: number;
     visitorProfiles: number;
+    preRegisteredAccounts: number;
+    entryRate: number;
+    /** @deprecated 2026-10-19: use visitors for the entered family-account count. */
     onboarded: number;
+    /** @deprecated 2026-10-19: use entryRate. */
     onboardedRate: number;
     orders: number;
     revenue: number;
