@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, Clock3, History, Loader2, Plus, Save, Trash2, Users } from "lucide-react";
+import { AlertTriangle, Camera, Clock3, History, Loader2, Plus, Save, Trash2, Users } from "lucide-react";
 import { toast } from "sonner";
 import { useUnsavedChanges } from "@/components/UnsavedNavigationGuard";
 import { AllergenSelector } from "@/components/menu/AllergenSelector";
+import { QrScannerModal } from "@/components/pos/qr-scanner-modal";
 import { Button } from "@/components/ui/button";
 import { FormField, FormSelect, formControlClassName } from "@/components/ui/FormField";
 import { Input } from "@/components/ui/input";
@@ -17,6 +18,7 @@ import {
   type VisitorAdminEditorUpdate,
   type WristbandStatus,
 } from "@/lib/api";
+import { extractIdFromCode } from "@/lib/utils";
 
 type EditorDraft = {
   profile: {
@@ -151,6 +153,8 @@ export function VisitorRecordEditor({
   const [savedDraft, setSavedDraft] = useState<EditorDraft | null>(null);
   const [confirmClose, setConfirmClose] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [scannerTargetBandKey, setScannerTargetBandKey] = useState<string | null>(null);
+  const [isBandScannerOpen, setIsBandScannerOpen] = useState(false);
 
   useEffect(() => {
     if (detailQuery.data && draft === null) {
@@ -432,7 +436,27 @@ export function VisitorRecordEditor({
                   </div>
 
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                    <FormField id={`band-id-${band.draftKey}`} label="リストバンドID" value={band.id} disabled={!band.isNew} onChange={(event) => editBand(index, { id: event.target.value })} />
+                    {band.isNew ? (
+                      <div className="space-y-1">
+                        <label htmlFor={`band-id-${band.draftKey}`} className="block text-xs font-bold uppercase">物理リストバンドID</label>
+                        <div className="flex gap-2">
+                          <Input id={`band-id-${band.draftKey}`} value={band.id} onChange={(event) => editBand(index, { id: event.target.value })} className={formControlClassName} />
+                          <Button
+                            type="button"
+                            variant="outline"
+                            aria-label="物理リストバンドのQRを読み取る"
+                            title="カメラでQRを読み取る"
+                            onClick={() => { setScannerTargetBandKey(band.draftKey); setIsBandScannerOpen(true); }}
+                            className="h-10 shrink-0 border-thick border-border px-3"
+                          >
+                            <Camera className="h-4 w-4" aria-hidden="true" />
+                          </Button>
+                        </div>
+                        <p className="text-[10px] text-muted-foreground">入力するか、カメラで物理バンドのQRを読み取れます。</p>
+                      </div>
+                    ) : (
+                      <FormField id={`band-id-${band.draftKey}`} label="リストバンドID" value={band.id} disabled onChange={() => undefined} />
+                    )}
                     <FormSelect id={`band-status-${band.draftKey}`} label="リストバンド・QRの利用状態" value={band.status} onChange={(event) => {
                       const nextStatus = event.target.value as WristbandStatus;
                       const isEnabled = nextStatus === "active" || nextStatus === "smartphone";
@@ -528,6 +552,29 @@ export function VisitorRecordEditor({
         </div>
         </div>
       </Modal>
+
+      {/* 2026-10-20: 登録済みの物理バンドQRを読み取り、新規バンド欄のIDだけに反映する。 */}
+      <QrScannerModal
+        circleId="visitor-admin-wristband-registration"
+        isOpen={isBandScannerOpen}
+        onClose={() => { setIsBandScannerOpen(false); setScannerTargetBandKey(null); }}
+        mode="customer"
+        onCustomerScanned={(_, wristbandId, _familyBandCount, _allergies, wristbandStatus) => {
+          if (!wristbandId || wristbandStatus !== "active" || !scannerTargetBandKey) {
+            toast.error("物理リストバンドのQRを読み取ってください");
+            return;
+          }
+          const bandIndex = draft.wristbands.findIndex((band) => band.draftKey === scannerTargetBandKey && band.isNew);
+          if (bandIndex < 0) {
+            toast.error("登録対象のバンド欄が見つかりません。もう一度選択してください。");
+            setIsBandScannerOpen(false);
+            return;
+          }
+          editBand(bandIndex, { id: extractIdFromCode(wristbandId) });
+          setIsBandScannerOpen(false);
+          setScannerTargetBandKey(null);
+        }}
+      />
 
       <UnsavedChangesDialog
         isOpen={confirmClose}

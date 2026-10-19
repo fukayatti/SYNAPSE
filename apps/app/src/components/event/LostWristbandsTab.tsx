@@ -74,7 +74,7 @@ export function LostWristbandsTab({ eventId, onBack }: { eventId: string; onBack
           <h2 id="lost-wristbands-title" className="flex items-center gap-2 text-sm font-bold uppercase tracking-wider">
             <ShieldAlert className="h-4 w-4 text-error" aria-hidden="true" />紛失リストバンド対応
           </h2>
-          <p className="text-[10px] text-muted-foreground">紛失報告でロックされたバンドを確認し、発行済みの新しい物理バンドを紐付けます。</p>
+          <p className="text-[10px] text-muted-foreground">紛失したバンドのIDだけを新しい物理バンドへ交換します。来場者アカウントや家族情報、他のバンドはそのままです。</p>
         </div>
         <span className="w-fit border-thick border-border px-3 py-2 text-xs font-bold">該当 {total.toLocaleString("ja-JP")} 件</span>
       </header>
@@ -145,7 +145,7 @@ export function LostWristbandsTab({ eventId, onBack }: { eventId: string; onBack
                     onClick={() => replaceMutation.mutate({ item, code })}
                   >
                     {isPending && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" aria-hidden="true" />}
-                    再発行して紐付け
+                    IDだけを交換
                   </Button>
                 </div>
               </li>
@@ -167,8 +167,8 @@ export function LostWristbandsTab({ eventId, onBack }: { eventId: string; onBack
         isOpen={isScannerOpen}
         onClose={() => setIsScannerOpen(false)}
         mode="customer"
-        onCustomerScanned={(_, wristbandId) => {
-          if (!scannerTarget || !wristbandId) {
+        onCustomerScanned={(_, wristbandId, _familyBandCount, _allergies, wristbandStatus) => {
+          if (!scannerTarget || !wristbandId || wristbandStatus !== "active") {
             toast.error("発行済み物理リストバンドのQRを読み取ってください");
             return;
           }

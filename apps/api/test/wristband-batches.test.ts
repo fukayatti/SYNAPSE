@@ -132,6 +132,71 @@ describe("リストバンド発行履歴", () => {
     expect((await target.db.select().from(wristband).where(eq(wristband.id, targetBandId)))[0]?.status).toBe("active");
   });
 
+  // 2026-10-20: 紛失交換で家族の有効バンドや紛失バンドの個人情報が失われないことを確認する。
+  it("紛失交換では指定IDだけを差し替え、家族バンドとバンドプロフィールを保つ", async () => {
+    const { db, eventId, headers } = await createEventManager();
+    const issueBand = async (wristbandId: string) => {
+      const response = await request("/api/wristbands/issue", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ eventId, wristbandId }),
+      });
+      expect(response.status).toBe(200);
+      return (await response.json()) as { userId: string };
+    };
+
+    const target = await issueBand(uid("lost-target"));
+    const replacementBandId = uid("replacement-band");
+    const replacement = await issueBand(replacementBandId);
+    const lostBandId = uid("lost-physical-band");
+    const familyBandId = uid("active-family-band");
+    const lostOnboardedAt = new Date("2026-10-01T01:02:03.000Z");
+    await db.insert(wristband).values([
+      {
+        id: lostBandId,
+        userId: target.userId,
+        status: "lost",
+        nickname: "家族A",
+        birthdayMonthDay: "04-05",
+        age: 12,
+        onboardedAt: lostOnboardedAt,
+        deactivatedAt: new Date("2026-10-19T00:00:00.000Z"),
+      },
+      { id: familyBandId, userId: target.userId, status: "active", nickname: "家族B" },
+    ]);
+
+    const response = await request("/api/wristbands/register", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        userId: target.userId,
+        wristbandId: replacementBandId,
+        replacesWristbandId: lostBandId,
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect((await db.select().from(wristband).where(eq(wristband.id, lostBandId)))[0]).toMatchObject({
+      userId: target.userId,
+      status: "replaced",
+      nickname: "家族A",
+    });
+    expect((await db.select().from(wristband).where(eq(wristband.id, replacementBandId)))[0]).toMatchObject({
+      userId: target.userId,
+      status: "active",
+      nickname: "家族A",
+      birthdayMonthDay: "04-05",
+      age: 12,
+      onboardedAt: lostOnboardedAt,
+    });
+    expect((await db.select().from(wristband).where(eq(wristband.id, familyBandId)))[0]).toMatchObject({
+      userId: target.userId,
+      status: "active",
+      nickname: "家族B",
+    });
+    expect((await db.select().from(wristband).where(eq(wristband.id, replacementBandId)))[0]?.userId).not.toBe(replacement.userId);
+  });
+
   it("他人に紐付いた無効バンドは匿名で再割当・再有効化できない", async () => {
     const { db, eventId, headers } = await createEventManager();
     const wristbandId = uid("inactive-owned-band");

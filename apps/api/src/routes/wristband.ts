@@ -732,6 +732,7 @@ wristbandRoutes.post(
     const bandOwner = bandExists
       ? await db.select().from(eventUser).where(eq(eventUser.id, bandNow[0]!.userId))
       : [];
+    let replacementSource: typeof wristband.$inferSelect | undefined;
 
     // 2026-10-08: 来場登録QRは同一イベント内で既発行バンドを紐付ける導線。
     // 既存バンドの所属イベントと対象ユーザーのイベントが異なる場合は、管理者権限があっても移管させない。
@@ -753,9 +754,13 @@ wristbandRoutes.post(
       if (!lostBand || !targetEventId) {
         apiError("NOT_FOUND", "置き換える紛失リストバンドが見つかりません");
       }
+      if (!bandExists) {
+        apiError("BAD_REQUEST", "先に発行済みの物理リストバンドIDを指定してください");
+      }
       if (!(await hasPermission(c, null, "member:write", targetEventId))) {
         apiError("FORBIDDEN", "紛失リストバンドの再発行にはスタッフ権限が必要です");
       }
+      replacementSource = lostBand;
     }
 
     // 2026-07-11: 権限ゲート。以下はいずれも本部(スタッフ member:write)権限を要求する:
@@ -804,22 +809,36 @@ wristbandRoutes.post(
       });
     }
 
-    // 既存のアクティブなリストバンドがあれば無効化 (replaced)
-    await db
-      .update(wristband)
-      .set({ status: "replaced", deactivatedAt: new Date() })
-      .where(and(eq(wristband.userId, userId), eq(wristband.status, "active")));
+    // 2026-10-20: 紛失バンド交換は指定されたIDだけを差し替え、家族など別の有効バンドを停止しない。
+    if (!replacementSource) {
+      await db
+        .update(wristband)
+        .set({ status: "replaced", deactivatedAt: new Date() })
+        .where(and(eq(wristband.userId, userId), eq(wristband.status, "active")));
+    }
 
     if (bandExists) {
       // 既に登録されているリストバンド (本部発行済み) を本人に紐付けてアクティブ化
       await db
         .update(wristband)
-        .set({
-          userId,
-          status: "active",
-          assignedAt: new Date(),
-          deactivatedAt: null,
-        })
+        .set(replacementSource
+          ? {
+              // 物理IDの交換後も、紛失バンドに付いていた家族プロフィールを引き継ぐ。
+              userId,
+              status: "active",
+              nickname: replacementSource.nickname,
+              birthdayMonthDay: replacementSource.birthdayMonthDay,
+              age: replacementSource.age,
+              onboardedAt: replacementSource.onboardedAt,
+              assignedAt: new Date(),
+              deactivatedAt: null,
+            }
+          : {
+              userId,
+              status: "active",
+              assignedAt: new Date(),
+              deactivatedAt: null,
+            })
         .where(eq(wristband.id, wristbandId));
     } else {
       // ここに来るのはスタッフ権限で新規バンドを発行する場合のみ (上のゲートを通過済み)
