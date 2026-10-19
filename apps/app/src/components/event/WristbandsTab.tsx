@@ -18,7 +18,6 @@ import {
   ChevronRight,
   Edit,
   FileUp,
-  ShieldAlert,
 } from "lucide-react";
 import { toast } from "sonner";
 import { QrScannerModal } from "@/components/pos/qr-scanner-modal";
@@ -34,7 +33,6 @@ interface WristbandsTabProps {
   eventId: string;
   hasPhysicalWristband?: boolean;
   allowSelfIssue?: boolean;
-  onOpenLossHandling: () => void;
 }
 
 type VisitorFilters = {
@@ -58,7 +56,7 @@ const VISITOR_SORT_COLUMNS: { label: string; field: Exclude<VisitorSortField, "c
   { label: "バンド状態", field: "bandStatus" },
 ];
 
-export function WristbandsTab({ eventId, hasPhysicalWristband = true, allowSelfIssue = true, onOpenLossHandling }: WristbandsTabProps) {
+export function WristbandsTab({ eventId, hasPhysicalWristband = true, allowSelfIssue = true }: WristbandsTabProps) {
   const queryClient = useQueryClient();
 
   // 検索・表示関連の状態
@@ -358,18 +356,11 @@ export function WristbandsTab({ eventId, hasPhysicalWristband = true, allowSelfI
             来場者・リストバンド管理
           </h2>
           <p className="text-[10px] text-muted-foreground mt-1">
-            来場者アカウント情報とバンド登録を管理します。紛失したバンドのID交換は専用画面で行います。
+            来場者アカウント情報とバンド登録を管理します。
           </p>
         </div>
         <div className="flex w-full max-w-full flex-col gap-2 sm:w-auto sm:flex-row">
-          <Button
-            onClick={onOpenLossHandling}
-            variant="outline"
-            className="w-full sm:w-auto border-thick border-error h-9 text-xs font-bold rounded-none shadow-none px-3"
-          >
-            <ShieldAlert className="h-4 w-4 mr-1.5" />
-            紛失バンド交換
-          </Button>
+          {/* 2026-10-20: 紛失交換は独立画面へ分離したため、一覧に重複導線を置かない。 */}
           <Button
             onClick={() => {
               setLookupCode("");

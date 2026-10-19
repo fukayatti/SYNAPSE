@@ -305,7 +305,6 @@ export default function EventDashboard() {
               eventId={eventId}
               hasPhysicalWristband={eventData?.hasPhysicalWristband}
               allowSelfIssue={eventData?.allowSelfIssue}
-              onOpenLossHandling={() => changeTab("wristband-loss")}
             />
           )}
 
