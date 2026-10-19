@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useRef } from "react";
+import { useState, useMemo, useEffect, useLayoutEffect, useRef } from "react";
 import { Link, useNavigate, useLocation } from "react-router-dom";
 import { Button } from "./ui/button";
 import { toast } from "sonner";
@@ -49,8 +49,8 @@ import { authClient } from "@/lib/auth-client";
 //     を使うと、以前のhover判定にも干渉したため廃止した)
 //
 // モバイルでは通知/組織切り替え/アカウントを1つのメニュートリガーへまとめる。
-// 2026-10-20: 各項目は情報量に合った個別ウィンドウで表示し、横並びの詳細ペインを避ける。
-// 最上位の開閉は activeMenu、表示中のウィンドウは mobileSection で管理する。
+// 2026-10-20: 親メニューを残して選択行から横へ子ウィンドウを開き、OSメニューと同じ階層を示す。
+// 画面幅が足りない場合だけ一覧を詳細ウィンドウに置き換えて、横はみ出しを防ぐ。
 type MenuKey = "notif" | "space" | "account" | "nav" | null;
 // 3本線メニューで開いている個別ウィンドウ (null = メニュー項目一覧)
 type MobileSection = "notif" | "space" | "account" | null;
@@ -90,10 +90,22 @@ export default function Header() {
     return () => window.removeEventListener("fesflow:dashboard-menu-state", syncDashboardMenu);
   }, []);
 
-  // 個別ウィンドウは1つだけ表示し、メニューを閉じたら項目一覧へ戻す。
+  // 2026-10-20: サブメニューの位置を選択行へ結び付け、親を残せる幅があるかを保持する。
   const [mobileSection, setMobileSection] = useState<MobileSection>(null);
+  const [mobileCascadeMode, setMobileCascadeMode] = useState(false);
+  const [mobileSubmenuTop, setMobileSubmenuTop] = useState(0);
+  const [mobileSubmenuLeft, setMobileSubmenuLeft] = useState(0);
+  const [mobileSubmenuWidth, setMobileSubmenuWidth] = useState(0);
+  const [mobileSubmenuRowOffset, setMobileSubmenuRowOffset] = useState(0);
+  const [mobileSubmenuKeyboardFocus, setMobileSubmenuKeyboardFocus] = useState(false);
+  const [mobileFocusReturnSection, setMobileFocusReturnSection] = useState<MobileSection>(null);
   useEffect(() => {
-    if (activeMenu !== "nav") setMobileSection(null);
+    if (activeMenu !== "nav") {
+      setMobileSection(null);
+      setMobileCascadeMode(false);
+      setMobileSubmenuKeyboardFocus(false);
+      setMobileFocusReturnSection(null);
+    }
   }, [activeMenu]);
 
   const isSpaceMenuOpen = spaceOpen || (mobileNavOpen && mobileSection === "space");
@@ -107,11 +119,96 @@ export default function Header() {
   const spaceRef = useRef<HTMLDivElement>(null);
   const accountRef = useRef<HTMLDivElement>(null);
   const navRef = useRef<HTMLDivElement>(null);
+  const mobileMenuRef = useRef<HTMLDivElement>(null);
+  const mobileSubmenuRef = useRef<HTMLElement>(null);
 
   // クリック(タップ)でのトグル。開閉の基本操作はこれで、タッチ環境ではこれが唯一の操作手段になる。
   const toggleMenu = (key: Exclude<MenuKey, null>) => {
     setActiveMenu((prev) => (prev === key ? null : key));
   };
+
+  const openMobileSection = (
+    section: Exclude<MobileSection, null>,
+    button: HTMLButtonElement,
+    moveFocusToSubmenu = false,
+  ) => {
+    const menuRect = mobileMenuRef.current?.getBoundingClientRect();
+    const navRect = navRef.current?.getBoundingClientRect();
+    const rowRect = button.getBoundingClientRect();
+    const panelWidth = section === "notif" ? 416 : section === "space" ? 448 : 336;
+    const gap = 4;
+    const spaceRight = menuRect ? window.innerWidth - menuRect.right : 0;
+    const spaceLeft = menuRect?.left ?? 0;
+    const opensRight = spaceRight >= panelWidth + gap;
+    const canCascade = opensRight || spaceLeft >= panelWidth + gap;
+
+    // 2026-10-20: 十分な幅があれば余裕のある側へ選択行から開き、実際の高さに合わせて上下を収める。
+    setMobileSubmenuLeft(menuRect ? (opensRight ? menuRect.right + gap : menuRect.left - panelWidth - gap) : 0);
+    setMobileSubmenuWidth(panelWidth);
+    setMobileSubmenuTop(rowRect.top);
+    setMobileSubmenuRowOffset(menuRect ? rowRect.top - menuRect.top : 0);
+    setMobileSubmenuKeyboardFocus(moveFocusToSubmenu);
+    setMobileCascadeMode(canCascade);
+    setMobileSection(section);
+  };
+
+  useEffect(() => {
+    if (!mobileNavOpen || !mobileSection) return;
+    const repositionSubmenu = () => {
+      const navRect = navRef.current?.getBoundingClientRect();
+      if (!navRect) return;
+
+      const panelWidth = mobileSection === "notif" ? 416 : mobileSection === "space" ? 448 : 336;
+      const rootWidth = Math.min(256, Math.max(0, window.innerWidth - 16));
+      const rootRight = navRect.right;
+      const rootLeft = rootRight - rootWidth;
+      const gap = 4;
+      const opensRight = window.innerWidth - rootRight >= panelWidth + gap;
+      const canCascade = opensRight || rootLeft >= panelWidth + gap;
+      const rootRow = mobileMenuRef.current?.querySelector<HTMLElement>(
+        `[data-mobile-menu-section="${mobileSection}"]`,
+      );
+
+      setMobileCascadeMode(canCascade);
+      if (!canCascade) return;
+
+      // 2026-10-20: 画面回転やリサイズ後も、親項目と子ウィンドウの相対位置を保つ。
+      setMobileSubmenuLeft(opensRight ? rootRight + gap : rootLeft - panelWidth - gap);
+      setMobileSubmenuWidth(panelWidth);
+      const requestedTop = rootRow?.getBoundingClientRect().top ?? navRect.bottom + 8 + mobileSubmenuRowOffset;
+      const panelHeight = mobileSubmenuRef.current?.getBoundingClientRect().height ?? 400;
+      const maxTop = Math.max(8, window.innerHeight - panelHeight - 8);
+      setMobileSubmenuTop(Math.min(Math.max(8, requestedTop), maxTop));
+    };
+
+    window.addEventListener("resize", repositionSubmenu);
+    return () => window.removeEventListener("resize", repositionSubmenu);
+  }, [mobileNavOpen, mobileSection, mobileSubmenuRowOffset]);
+
+  useLayoutEffect(() => {
+    if (!mobileNavOpen || !mobileSection || !mobileCascadeMode) return;
+    const panelHeight = mobileSubmenuRef.current?.getBoundingClientRect().height;
+    if (!panelHeight) return;
+    const maxTop = Math.max(8, window.innerHeight - panelHeight - 8);
+    setMobileSubmenuTop((current) => Math.min(Math.max(8, current), maxTop));
+  }, [mobileNavOpen, mobileSection, mobileCascadeMode]);
+
+  useLayoutEffect(() => {
+    if (!mobileNavOpen || !mobileSubmenuKeyboardFocus || !mobileSection) return;
+    const firstAction = mobileSubmenuRef.current?.querySelector<HTMLElement>(
+      'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    );
+    firstAction?.focus();
+    setMobileSubmenuKeyboardFocus(false);
+  }, [mobileNavOpen, mobileSection, mobileSubmenuKeyboardFocus]);
+
+  useLayoutEffect(() => {
+    if (!mobileNavOpen || mobileSection || !mobileFocusReturnSection) return;
+    mobileMenuRef.current
+      ?.querySelector<HTMLButtonElement>(`[data-mobile-menu-section="${mobileFocusReturnSection}"]`)
+      ?.focus();
+    setMobileFocusReturnSection(null);
+  }, [mobileNavOpen, mobileSection, mobileFocusReturnSection]);
 
   // 2026-10-07: ヘッダーメニューは誤展開を防ぎ、マウスとタッチで同じ操作にするためクリックでのみ開閉する。
 
@@ -851,8 +948,8 @@ export default function Header() {
                 )}
               </div>
 
-              {/* 3本線メニュー (1024px未満のみ)。カテゴリごとに幅を変えた単独ウィンドウを開き、
-                  小さい画面でも一覧と詳細を横並びにせず、タップで切り替える (2026-10-20)。 */}
+              {/* 3本線メニュー (1024px未満のみ)。2026-10-20: 親項目を残したカスケード表示で階層を示し、
+                  横幅が足りない時は詳細だけのウィンドウへ切り替えて画面内に収める。 */}
               <div ref={navRef} className="relative lg:hidden">
                 <button
                   onClick={() => toggleMenu("nav")}
@@ -877,17 +974,17 @@ export default function Header() {
                 {mobileNavOpen && (
                   <div
                     className={`absolute right-0 top-full z-50 pt-2 ${
-                      mobileSection === "notif"
-                        ? "w-[min(26rem,calc(100vw-1rem))]"
-                        : mobileSection === "space"
-                          ? "w-[min(28rem,calc(100vw-1rem))]"
-                          : mobileSection === "account"
-                            ? "w-[min(21rem,calc(100vw-1rem))]"
-                            : "w-[min(18rem,calc(100vw-1rem))]"
+                      mobileSection && !mobileCascadeMode
+                        ? mobileSection === "notif"
+                          ? "w-[min(26rem,calc(100vw-1rem))]"
+                          : mobileSection === "space"
+                            ? "w-[min(28rem,calc(100vw-1rem))]"
+                            : "w-[min(21rem,calc(100vw-1rem))]"
+                        : "w-[min(16rem,calc(100vw-1rem))]"
                     }`}
                   >
-                    {mobileSection === null ? (
-                      <div role="dialog" aria-label="管理画面メニュー" className="max-h-[calc(100dvh-5rem)] overflow-y-auto border-thick border-border bg-background text-left shadow-none">
+                    {(!mobileSection || mobileCascadeMode) && (
+                      <div ref={mobileMenuRef} role="dialog" aria-label="管理画面メニュー" className="max-h-[calc(100dvh-5rem)] overflow-y-auto border-thick border-border bg-background text-left shadow-none">
                         <div className="flex items-center justify-between gap-2 border-b-thin border-border px-3 py-2.5">
                           <span className="text-[11px] font-black uppercase tracking-wider">[メニュー]</span>
                           <button
@@ -902,8 +999,16 @@ export default function Header() {
                           <button
                             type="button"
                             aria-haspopup="dialog"
-                            onClick={() => setMobileSection("notif")}
-                            className="flex min-h-12 min-w-0 items-center justify-between gap-2 border-b-thin border-border px-3 py-3 text-left font-headline text-[11px] uppercase tracking-wide transition-all hover:bg-muted sm:text-[13px]"
+                            aria-expanded={mobileSection === "notif"}
+                            data-mobile-menu-section="notif"
+                            onClick={(event) => openMobileSection("notif", event.currentTarget)}
+                            onKeyDown={(event) => {
+                              if (event.key === "ArrowRight") {
+                                event.preventDefault();
+                                openMobileSection("notif", event.currentTarget, true);
+                              }
+                            }}
+                            className={`flex min-h-12 min-w-0 items-center justify-between gap-2 border-b-thin border-border px-3 py-3 text-left font-headline text-[11px] uppercase tracking-wide transition-all sm:text-[13px] ${mobileCascadeMode && mobileSection === "notif" ? "bg-muted" : "hover:bg-muted"}`}
                           >
                             <span className="flex min-w-0 items-center gap-2">
                               <span className="relative flex shrink-0 items-center justify-center">
@@ -922,8 +1027,16 @@ export default function Header() {
                           <button
                             type="button"
                             aria-haspopup="dialog"
-                            onClick={() => setMobileSection("space")}
-                            className="flex min-h-12 min-w-0 items-center justify-between gap-2 border-b-thin border-border px-3 py-3 text-left font-headline text-[11px] uppercase tracking-wide transition-all hover:bg-muted sm:text-[13px]"
+                            aria-expanded={mobileSection === "space"}
+                            data-mobile-menu-section="space"
+                            onClick={(event) => openMobileSection("space", event.currentTarget)}
+                            onKeyDown={(event) => {
+                              if (event.key === "ArrowRight") {
+                                event.preventDefault();
+                                openMobileSection("space", event.currentTarget, true);
+                              }
+                            }}
+                            className={`flex min-h-12 min-w-0 items-center justify-between gap-2 border-b-thin border-border px-3 py-3 text-left font-headline text-[11px] uppercase tracking-wide transition-all sm:text-[13px] ${mobileCascadeMode && mobileSection === "space" ? "bg-muted" : "hover:bg-muted"}`}
                           >
                             <span className="flex min-w-0 items-center gap-2">
                               {pathname.startsWith("/sys") ? <Shield className="h-3.5 w-3.5 shrink-0" /> :
@@ -937,8 +1050,16 @@ export default function Header() {
                           <button
                             type="button"
                             aria-haspopup="dialog"
-                            onClick={() => setMobileSection("account")}
-                            className="flex min-h-12 min-w-0 items-center justify-between gap-2 border-b-thin border-border px-3 py-3 text-left font-headline text-[11px] uppercase tracking-wide transition-all hover:bg-muted sm:text-[13px]"
+                            aria-expanded={mobileSection === "account"}
+                            data-mobile-menu-section="account"
+                            onClick={(event) => openMobileSection("account", event.currentTarget)}
+                            onKeyDown={(event) => {
+                              if (event.key === "ArrowRight") {
+                                event.preventDefault();
+                                openMobileSection("account", event.currentTarget, true);
+                              }
+                            }}
+                            className={`flex min-h-12 min-w-0 items-center justify-between gap-2 border-b-thin border-border px-3 py-3 text-left font-headline text-[11px] uppercase tracking-wide transition-all sm:text-[13px] ${mobileCascadeMode && mobileSection === "account" ? "bg-muted" : "hover:bg-muted"}`}
                           >
                             <span className="flex min-w-0 items-center gap-2">
                               {me?.image ? (
@@ -968,44 +1089,57 @@ export default function Header() {
                           ))}
                         </nav>
                       </div>
-                    ) : (
-                      <section
-                        role="dialog"
-                        aria-modal="false"
-                        aria-label={mobileSection === "notif" ? "お知らせ・通知" : mobileSection === "space" ? "組織切り替え" : "アカウント"}
-                        className="max-h-[calc(100dvh-5rem)] overflow-y-auto border-thick border-border bg-background text-left shadow-none"
-                      >
-                        <div className="sticky top-0 z-10 flex items-center justify-between gap-2 border-b-thin border-border bg-background px-2 py-2.5 sm:px-3">
-                          <button
-                            type="button"
-                            onClick={() => setMobileSection(null)}
-                            aria-label="メニュー一覧に戻る"
-                            className="shrink-0 px-1 text-[10px] font-bold underline hover:text-primary"
-                          >
-                            ‹ メニュー
-                          </button>
-                          <span className="min-w-0 truncate text-center text-[10px] font-black uppercase tracking-wider sm:text-[11px]">
-                            {mobileSection === "notif" && "[お知らせ・通知]"}
-                            {mobileSection === "space" && "[組織切り替え]"}
-                            {mobileSection === "account" && "[アカウント]"}
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => setActiveMenu(null)}
-                            aria-label="メニューを閉じる"
-                            className="shrink-0 px-1 text-[10px] underline hover:text-primary"
-                          >
-                            閉じる
-                          </button>
-                        </div>
-                        <div className="min-w-0 max-w-full overflow-x-hidden p-2 sm:p-3">
-                          {mobileSection === "notif" && notifPanelBody}
-                          {mobileSection === "space" && spacePanelBody}
-                          {mobileSection === "account" && accountPanelBody}
-                        </div>
-                      </section>
                     )}
                   </div>
+                )}
+                {mobileNavOpen && mobileSection && (
+                  <section
+                    ref={mobileSubmenuRef}
+                    role="dialog"
+                    aria-modal="false"
+                    aria-label={mobileSection === "notif" ? "お知らせ・通知" : mobileSection === "space" ? "組織切り替え" : "アカウント"}
+                    style={mobileCascadeMode ? { top: mobileSubmenuTop, left: mobileSubmenuLeft, width: mobileSubmenuWidth } : undefined}
+                    onKeyDown={(event) => {
+                      if (event.key === "ArrowLeft") {
+                        event.preventDefault();
+                        setMobileFocusReturnSection(mobileSection);
+                        setMobileSection(null);
+                        setMobileCascadeMode(false);
+                      }
+                    }}
+                    className={`${mobileCascadeMode ? "fixed z-[60] max-h-[calc(100dvh-1rem)]" : "absolute right-0 top-full z-50 mt-2 max-h-[calc(100dvh-5rem)] w-[min(26rem,calc(100vw-1rem))]"} overflow-y-auto border-thick border-border bg-background text-left shadow-none ${!mobileCascadeMode && mobileSection === "space" ? "w-[min(28rem,calc(100vw-1rem))]" : ""} ${!mobileCascadeMode && mobileSection === "account" ? "w-[min(21rem,calc(100vw-1rem))]" : ""}`}
+                  >
+                    <div className="sticky top-0 z-10 flex items-center justify-between gap-2 border-b-thin border-border bg-background px-2 py-2.5 sm:px-3">
+                      {!mobileCascadeMode && (
+                        <button
+                          type="button"
+                          onClick={() => { setMobileFocusReturnSection(mobileSection); setMobileSection(null); setMobileCascadeMode(false); }}
+                          aria-label="メニュー一覧に戻る"
+                          className="shrink-0 px-1 text-[10px] font-bold underline hover:text-primary"
+                        >
+                          ‹ メニュー
+                        </button>
+                      )}
+                      <span className="min-w-0 truncate text-center text-[10px] font-black uppercase tracking-wider sm:text-[11px]">
+                        {mobileSection === "notif" && "[お知らせ・通知]"}
+                        {mobileSection === "space" && "[組織切り替え]"}
+                        {mobileSection === "account" && "[アカウント]"}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setActiveMenu(null)}
+                        aria-label="メニューを閉じる"
+                        className="shrink-0 px-1 text-[10px] underline hover:text-primary"
+                      >
+                        閉じる
+                      </button>
+                    </div>
+                    <div className="min-w-0 max-w-full overflow-x-hidden p-2 sm:p-3">
+                      {mobileSection === "notif" && notifPanelBody}
+                      {mobileSection === "space" && spacePanelBody}
+                      {mobileSection === "account" && accountPanelBody}
+                    </div>
+                  </section>
                 )}
               </div>
             </div>
