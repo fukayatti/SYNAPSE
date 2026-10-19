@@ -19,7 +19,8 @@ export default function MyPage() {
   const { session, userId, isLoaded } = useVisitor();
   const [origin, setOrigin] = useState("");
   const [isIssuing, setIsIssuing] = useState(false);
-  const settingsEventId = eventId || session?.eventId || null;
+  // 2026-10-20: QR表示条件はURLで切り替えられないよう、入場中イベントの設定を優先する。
+  const settingsEventId = session?.eventId || eventId || null;
   const eventSettingsQuery = useQuery({
     queryKey: ["visitor-event-settings", settingsEventId],
     queryFn: () => eventApi.get(settingsEventId!),
