@@ -9,16 +9,11 @@ import { Badge } from "@/components/ui/badge";
 import {
   Search,
   RefreshCw,
-  Users,
   Camera,
   Plus,
   Smartphone,
   Loader2,
   IdCard,
-  Ban,
-  CheckCircle,
-  XCircle,
-  HelpCircle,
   Copy,
   ChevronRight,
   Edit,
@@ -26,7 +21,6 @@ import {
   ShieldAlert,
 } from "lucide-react";
 import { toast } from "sonner";
-import { useUnsavedChanges } from "@/components/UnsavedNavigationGuard";
 import { QrScannerModal } from "@/components/pos/qr-scanner-modal";
 import { Modal } from "@/components/ui/Modal";
 import { QRCodeSVG } from "qrcode.react";
@@ -35,6 +29,7 @@ import { visitorUrl } from "@/lib/visitor-url";
 import { generateWristbandIds } from "@/lib/wristband-id-generator";
 import { WristbandBatchHistory } from "@/components/event/WristbandBatchHistory";
 import { LostWristbandsTab } from "@/components/event/LostWristbandsTab";
+import { VisitorRecordEditor } from "@/components/event/VisitorRecordEditor";
 
 interface WristbandsTabProps {
   eventId: string;
@@ -92,18 +87,13 @@ export function WristbandsTab({ eventId, hasPhysicalWristband = true, allowSelfI
   const [isGenerateModalOpen, setIsGenerateModalOpen] = useState(false);
   const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
   const [isScannerOpen, setIsScannerOpen] = useState(false);
-  const [scannerTarget, setScannerTarget] = useState<"search" | "reissue" | "lookup">("lookup");
+  const [scannerTarget, setScannerTarget] = useState<"search" | "lookup">("lookup");
 
   // スキャン・照会モーダル用の手入力コード
   const [lookupCode, setLookupCode] = useState("");
 
   // 詳細編集モーダル用の状態
   const [selectedUser, setSelectedUser] = useState<WristbandLookupResult | null>(null);
-  const [editNickname, setEditNickname] = useState("");
-  const [editFavoriteDate, setEditFavoriteDate] = useState("");
-  const [editDisplayId, setEditDisplayId] = useState<number | "">("");
-  const [editUserStatus, setEditUserStatus] = useState("available");
-  const [reissueWristbandId, setReissueWristbandId] = useState("");
 
   // 新規スマホ用来場者発行モーダル用の状態
   const [issuedUser, setIssuedUser] = useState<{ userId: string; displayId: number } | null>(null);
@@ -174,22 +164,6 @@ export function WristbandsTab({ eventId, hasPhysicalWristband = true, allowSelfI
     return () => observer.disconnect();
   }, [fetchNextPage, hasNextPage, isFetchingNextPage, isVisitorTableOpen]);
 
-  // 詳細編集モーダルのデータ同期
-  useEffect(() => {
-    if (selectedUser?.user) {
-      setEditNickname(selectedUser.user.nickname || "");
-      setEditFavoriteDate(selectedUser.user.favoriteDate || "");
-      setEditDisplayId(selectedUser.user.displayId || "");
-      setEditUserStatus(selectedUser.user.status || "available");
-    } else {
-      setEditNickname("");
-      setEditFavoriteDate("");
-      setEditDisplayId("");
-      setEditUserStatus("available");
-    }
-    setReissueWristbandId("");
-  }, [selectedUser]);
-
   // リストバンド照会 API
   const lookupMutation = useMutation({
     mutationFn: (code: string) => {
@@ -211,27 +185,6 @@ export function WristbandsTab({ eventId, hasPhysicalWristband = true, allowSelfI
     },
   });
 
-  // プロフィール更新 API
-  const updateProfileMutation = useMutation({
-    mutationFn: (input: { userId: string; nickname: string | null; favoriteDate: string | null; displayId: number; status: string }) =>
-      wristbandApi.updateUser(input.userId, {
-        nickname: input.nickname,
-        favoriteDate: input.favoriteDate,
-        displayId: input.displayId,
-        status: input.status,
-      }),
-    onSuccess: (_, variables) => {
-      toast.success("ユーザー情報を更新しました");
-      // キャッシュ更新
-      queryClient.invalidateQueries({ queryKey: ["eventVisitors"] });
-      // 詳細データを再照会
-      lookupMutation.mutate(variables.userId);
-    },
-    onError: (err: any) => {
-      toast.error(err.message || "プロフィールの更新に失敗しました");
-    },
-  });
-
   // リストバンド状態更新 API
   const updateWristbandMutation = useMutation({
     mutationFn: (input: { id: string; status: any; userId?: string }) =>
@@ -246,38 +199,6 @@ export function WristbandsTab({ eventId, hasPhysicalWristband = true, allowSelfI
     },
     onError: (err: any) => {
       toast.error(err.message || "リストバンド状態の更新に失敗しました");
-    },
-  });
-
-  // 物理リストバンド新規紐付け・再発行 API
-  const registerWristbandMutation = useMutation({
-    mutationFn: (input: { userId: string; wristbandId: string }) =>
-      wristbandApi.register(input.userId, input.wristbandId),
-    onSuccess: () => {
-      toast.success("新しいリストバンドをアカウントに紐付けました");
-      setReissueWristbandId("");
-      queryClient.invalidateQueries({ queryKey: ["eventVisitors"] });
-      queryClient.invalidateQueries({ queryKey: ["lostWristbands", eventId] });
-      if (selectedUser?.user?.id) {
-        lookupMutation.mutate(selectedUser.user.id);
-      }
-    },
-    onError: (err: any) => {
-      toast.error(err.message || "紐付けに失敗しました");
-    },
-  });
-
-  // 既存の未紐付けユーザーにスマホ用デジタルIDを発行する API (2026-07-14)
-  // 物理リストバンドを紐付けずに、その場でスマホ単体で使えるIDを立ち上げる導線。
-  const issueSmartphoneMutation = useMutation({
-    mutationFn: (userId: string) => wristbandApi.issueSmartphone(userId),
-    onSuccess: (_, userId) => {
-      toast.success("スマホ用リストバンドIDを発行しました");
-      queryClient.invalidateQueries({ queryKey: ["eventVisitors"] });
-      lookupMutation.mutate(userId);
-    },
-    onError: (err: any) => {
-      toast.error(err.message || "スマホ用IDの発行に失敗しました");
     },
   });
 
@@ -396,66 +317,18 @@ export function WristbandsTab({ eventId, hasPhysicalWristband = true, allowSelfI
     updateWristbandMutation.mutate({ id: wbId, status: "lost" });
   };
 
-  const handleUnlinkWristband = (wbId: string) => {
-    if (!window.confirm("このリストバンドの紐付けを解除しますか？")) return;
-    updateWristbandMutation.mutate({ id: wbId, status: "revoked", userId: "" });
-  };
-
   const handleScannerScan = (userId: string, wristbandId: string | null) => {
     const code = wristbandId || userId;
     if (scannerTarget === "lookup") {
       setLookupCode(code);
       lookupMutation.mutate(code);
-    } else if (scannerTarget === "reissue") {
-      setReissueWristbandId(code);
     } else if (scannerTarget === "search") {
       setSearchInput(code);
       setSearchQuery(code);
     }
   };
 
-  // プロフィール編集フォームに未保存の変更があるか判定する (2026-07-14)。
-  // 閉じる際にこの結果を見て、破棄確認を出すかどうかを決める。
-  const isProfileDirty =
-    !!selectedUser?.user &&
-    (editNickname !== (selectedUser.user.nickname || "") ||
-      editFavoriteDate !== (selectedUser.user.favoriteDate || "") ||
-      String(editDisplayId) !== String(selectedUser.user.displayId ?? "") ||
-      editUserStatus !== (selectedUser.user.status || "available"));
-
-  const saveProfile = async () => {
-    if (!selectedUser?.user) return;
-    if (editDisplayId === "") throw new Error("呼出IDを入力してください。");
-    await updateProfileMutation.mutateAsync({
-      userId: selectedUser.user.id,
-      nickname: editNickname.trim() || null,
-      favoriteDate: editFavoriteDate.trim() || null,
-      displayId: Number(editDisplayId),
-      status: editUserStatus,
-    });
-  };
-
-  // 2026-10-16: 来場者プロフィールの編集も画面遷移前に同じ保存処理へ接続する。
-  useUnsavedChanges({
-    isDirty: isDetailsModalOpen && isProfileDirty,
-    onSave: saveProfile,
-    onDiscard: () => {
-      if (selectedUser?.user) {
-        setEditNickname(selectedUser.user.nickname || "");
-        setEditFavoriteDate(selectedUser.user.favoriteDate || "");
-        setEditDisplayId(selectedUser.user.displayId ?? "");
-        setEditUserStatus(selectedUser.user.status || "available");
-      }
-      setIsDetailsModalOpen(false);
-      setSelectedUser(null);
-    },
-  });
-
-  // 詳細編集モーダルを閉じる。未保存の変更があれば確認を挟み、破棄を選んだ場合のみ閉じる。
   const closeDetailsModal = () => {
-    if (isProfileDirty && !window.confirm("保存していないプロフィールの変更があります。破棄して閉じますか？")) {
-      return;
-    }
     setIsDetailsModalOpen(false);
     setSelectedUser(null);
   };
@@ -484,7 +357,6 @@ export function WristbandsTab({ eventId, hasPhysicalWristband = true, allowSelfI
   const getVisitorLink = (userId: string) => {
     return visitorUrl(`/w/${userId}`);
   };
-  const selectedWristband = selectedUser?.wristband;
   // 2026-09-27 Issue #56: QRの内容を表示中の発行URLと同じ MyPage 発行アクションに揃える。
   const selfIssueUrl = digitalQrIssueUrl(window.location.origin, eventId);
 
@@ -1290,271 +1162,14 @@ export function WristbandsTab({ eventId, hasPhysicalWristband = true, allowSelfI
         </div>
       </Modal>
 
-      {/* ==========================================
-          3. 来場者・リストバンド詳細編集モーダル
-         ========================================== */}
-      <Modal
-        isOpen={isDetailsModalOpen}
-        title="来場者情報を編集"
-        subtitle="来場者の基本プロフィール情報、および紐付く物理リストバンドの状態変更・再発行・紐付け解除を行います。"
-        onClose={closeDetailsModal}
-        maxWidth="xl"
-      >
-        {selectedUser && (
-          <div className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {/* 左カラム: アカウントプロフィール情報 */}
-              <div className="space-y-4 border-b md:border-b-0 md:border-r border-border pb-6 md:pb-0 md:pr-6">
-                <h3 className="font-black text-xs uppercase tracking-wider text-primary border-b border-border pb-1">
-                  アカウントプロフィール
-                </h3>
-
-                <div className="space-y-3 text-xs">
-                  <div>
-                    <label className="block text-[10px] uppercase font-bold text-muted-foreground mb-1">ユーザーID (システムID)</label>
-                    <div className="flex gap-1.5">
-                      <Input
-                        value={selectedUser.user.id}
-                        disabled
-                        className="bg-muted border-thick border-border rounded-none h-8 text-xs font-mono select-all flex-1"
-                      />
-                      <Button
-                        onClick={() => copyToClipboard(selectedUser.user.id)}
-                        variant="outline"
-                        size="sm"
-                        className="border-thick border-border h-8 px-2 rounded-none"
-                      >
-                        <Copy className="h-3.5 w-3.5" />
-                      </Button>
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-[10px] uppercase font-bold text-muted-foreground mb-1">表示用呼出ID (※重複不可)</label>
-                    <Input
-                      type="number"
-                      value={editDisplayId}
-                      onChange={(e) => setEditDisplayId(e.target.value === "" ? "" : Number(e.target.value))}
-                      className="border-thick border-border rounded-none h-8 text-xs font-mono"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-[10px] uppercase font-bold text-muted-foreground mb-1">ニックネーム</label>
-                    <Input
-                      value={editNickname}
-                      onChange={(e) => setEditNickname(e.target.value)}
-                      placeholder="ニックネーム未入力"
-                      className="border-thick border-border rounded-none h-8 text-xs font-mono"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-[10px] uppercase font-bold text-muted-foreground mb-1">お好きな日付 (YYYY-MM-DD)</label>
-                    <Input
-                      value={editFavoriteDate}
-                      onChange={(e) => setEditFavoriteDate(e.target.value)}
-                      placeholder="例: 2000-01-01"
-                      className="border-thick border-border rounded-none h-8 text-xs font-mono"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-[10px] uppercase font-bold text-muted-foreground mb-1">アカウント制限状態</label>
-                    <select
-                      value={editUserStatus}
-                      onChange={(e) => setEditUserStatus(e.target.value)}
-                      className="w-full border-thick border-border bg-background p-1.5 text-xs font-bold font-mono rounded-none"
-                    >
-                      <option value="available">利用可能 (Available)</option>
-                      <option value="banned">アクセス禁止 (Banned)</option>
-                    </select>
-                  </div>
-                </div>
-              </div>
-
-              {/* 右カラム: リストバンド管理 */}
-              <div className="space-y-4">
-                <h3 className="font-black text-xs uppercase tracking-wider text-primary border-b border-border pb-1">
-                  リストバンドの紐付け
-                </h3>
-
-                {(selectedUser.familyWristbands?.length ?? 0) > 1 && (
-                  <div className="space-y-1 border border-border bg-muted/10 p-2 text-[10px]">
-                    <p className="font-bold">家族の登録人数: {selectedUser.familyBandCount}人</p>
-                    {selectedUser.familyWristbands.map((band) => (
-                      <p key={band.id} className="flex justify-between gap-2">
-                        <span className="truncate">{band.nickname || "ニックネーム未設定"} · {band.age == null ? "年齢未設定" : `${band.age}歳`}</span>
-                        <span className="shrink-0 text-muted-foreground">{band.birthdayMonthDay || "誕生日未設定"}</span>
-                      </p>
-                    ))}
-                  </div>
-                )}
-
-                {selectedWristband ? (
-                  <div className="space-y-4 text-xs">
-                    <div className="bg-muted/20 p-3 border border-border space-y-2 font-mono">
-                      <p className="flex justify-between items-center">
-                        <span>バンドID: <span className="font-bold select-all">{selectedWristband.id}</span></span>
-                        <Button
-                          onClick={() => copyToClipboard(selectedWristband.id)}
-                          variant="ghost"
-                          size="sm"
-                          className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground"
-                        >
-                          <Copy className="h-3 w-3" />
-                        </Button>
-                      </p>
-                      {/* 2026-10-08: Badge renders a div; a div wrapper avoids invalid paragraph nesting and React hydration warnings. */}
-                      <div className="flex items-center gap-2">
-                        <span>ステータス:</span>
-                        <Badge
-                          variant="default"
-                          className={`rounded-none text-[8px] font-mono border-thick border-border uppercase ${
-                            selectedWristband.status === "active"
-                              ? "bg-success/10 text-success border-success"
-                              : selectedWristband.status === "smartphone"
-                              ? "bg-info/10 text-info border-info"
-                              : "bg-error/10 text-error border-error"
-                          }`}
-                        >
-                          {selectedWristband.status === "active"
-                            ? "有効 (Active)"
-                            : selectedWristband.status === "smartphone"
-                            ? "スマホ専用 (Smartphone)"
-                            : selectedWristband.status === "lost"
-                            ? "紛失 (Lost)"
-                            : selectedWristband.status === "replaced"
-                            ? "再発行済 (Replaced)"
-                            : "無効化 (Revoked)"}
-                        </Badge>
-                      </div>
-                      <p className="text-[10px] text-muted-foreground">
-                        割当日時: {new Date(selectedWristband.assignedAt).toLocaleString("ja-JP")}
-                      </p>
-                    </div>
-
-                    <div className="flex flex-col gap-2 border-t border-border pt-3">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="font-bold text-[10px] uppercase text-muted-foreground">ステータス手動変更:</span>
-                        <select
-                          value={selectedWristband.status}
-                          onChange={(e) => updateWristbandMutation.mutate({ id: selectedWristband.id, status: e.target.value })}
-                          disabled={updateWristbandMutation.isPending}
-                          className="border-thick border-border bg-background p-1.5 text-xs font-bold font-mono rounded-none"
-                        >
-                          <option value="active">有効 (Active)</option>
-                          <option value="smartphone">スマホ用 (Smartphone)</option>
-                          <option value="lost">紛失 (Lost / ロック)</option>
-                          <option value="replaced">再発行済 (Replaced)</option>
-                          <option value="revoked">無効化 (Revoked)</option>
-                        </select>
-                      </div>
-
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleUnlinkWristband(selectedWristband.id)}
-                        disabled={updateWristbandMutation.isPending}
-                        className="w-full rounded-none text-[10px] font-bold h-8 uppercase shadow-none border-thick border-border hover:bg-destructive hover:text-white mt-1"
-                      >
-                        紐付け解除 (Unlink)
-                      </Button>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="bg-muted/10 p-4 text-center border border-dashed border-border space-y-3">
-                    <p className="text-muted-foreground text-xs font-mono">
-                      現在、有効なリストバンドは紐付いていません
-                    </p>
-                    {/* 未紐付けの来場者に、物理バンドなしでスマホ単体で使えるデジタルIDを発行する (2026-07-14) */}
-                    <Button
-                      onClick={() => issueSmartphoneMutation.mutate(selectedUser.user.id)}
-                      disabled={issueSmartphoneMutation.isPending}
-                      className="w-full border-thick border-primary bg-primary text-primary-foreground hover:bg-background hover:text-foreground h-9 text-xs font-bold rounded-none shadow-none flex items-center justify-center gap-1.5"
-                    >
-                      {issueSmartphoneMutation.isPending ? (
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      ) : (
-                        <Smartphone className="h-3.5 w-3.5" />
-                      )}
-                      スマホ用リストバンドIDを発行
-                    </Button>
-                    <p className="text-[10px] text-muted-foreground leading-normal font-sans">
-                      物理リストバンドを使わずに、この来場者のスマホ単体で決済・スタンプが使えるデジタルID（sp_）を即時発行します。
-                    </p>
-                  </div>
-                )}
-
-                {/* 新しいリストバンドの登録・再発行 */}
-                <div className="border-t border-border pt-4 mt-2 space-y-2">
-                  <h4 className="font-bold uppercase text-[10px] text-muted-foreground">
-                    リストバンドを新しく紐付ける・再発行する
-                  </h4>
-                  <p className="text-[10px] text-muted-foreground leading-normal font-sans">
-                    新しいリストバンドのQR/コード値を入力して登録します。（古いリストバンドは自動的に無効化されロックされます）
-                  </p>
-                  <div className="flex gap-2">
-                    <Input
-                      placeholder="新規リストバンドIDを入力"
-                      value={reissueWristbandId}
-                      onChange={(e) => setReissueWristbandId(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") {
-                          e.preventDefault();
-                          if (reissueWristbandId.trim()) {
-                            const parsed = extractIdFromCode(reissueWristbandId);
-                            registerWristbandMutation.mutate({ userId: selectedUser.user.id, wristbandId: parsed });
-                          }
-                        }
-                      }}
-                      className="border-thick border-border rounded-none focus-visible:ring-0 h-9 text-xs bg-background font-mono flex-1"
-                    />
-                    <Button
-                      onClick={() => {
-                        setScannerTarget("reissue");
-                        setIsScannerOpen(true);
-                      }}
-                      variant="outline"
-                      className="border-thick border-border h-9 px-3 rounded-none"
-                    >
-                      <Camera className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      onClick={() => {
-                        const parsed = extractIdFromCode(reissueWristbandId);
-                        registerWristbandMutation.mutate({ userId: selectedUser.user.id, wristbandId: parsed });
-                      }}
-                      disabled={!reissueWristbandId.trim() || registerWristbandMutation.isPending}
-                      className="border-thick border-border bg-background text-foreground hover:bg-primary hover:text-primary-foreground h-9 text-xs font-bold rounded-none shadow-none px-3"
-                    >
-                      登録
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            </div>
-            {/* フッター: プロフィール保存を閉じるの隣に配置。保存せず離脱したい場合は「閉じる」で破棄して閉じる (2026-07-14) */}
-            <div className="flex justify-end gap-2 pt-4 border-t border-border">
-              <Button
-                onClick={() => void saveProfile().catch(() => undefined)}
-                disabled={updateProfileMutation.isPending}
-                className="border-thick border-primary bg-primary text-primary-foreground hover:bg-background hover:text-foreground h-9 text-xs font-bold rounded-none shadow-none px-5 flex items-center justify-center gap-1"
-              >
-                {updateProfileMutation.isPending && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-                プロフィール情報を保存
-              </Button>
-              <Button
-                onClick={closeDetailsModal}
-                variant="outline"
-                className="border-thick border-border bg-background text-foreground hover:bg-primary hover:text-primary-foreground h-9 text-xs font-bold rounded-none shadow-none px-5"
-              >
-                閉じる
-              </Button>
-            </div>
-          </div>
-        )}
-      </Modal>
+      {isDetailsModalOpen && selectedUser?.user && (
+        <VisitorRecordEditor
+          key={selectedUser.user.id}
+          eventId={eventId}
+          userId={selectedUser.user.id}
+          onClose={closeDetailsModal}
+        />
+      )}
 
       {/* カメラQRスキャナーモーダル */}
       <QrScannerModal

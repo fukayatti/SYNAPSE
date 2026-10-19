@@ -1441,6 +1441,77 @@ export interface WristbandLookupResult {
   familyBandCount: number;
 }
 
+export type WristbandStatus = "active" | "lost" | "replaced" | "revoked" | "smartphone";
+export type VisitorAccountStatus = "available" | "banned";
+
+export interface VisitorAdminEditorData {
+  user: {
+    id: string;
+    eventId: string;
+    displayId: number;
+    status: VisitorAccountStatus;
+    nickname: string | null;
+    favoriteDate: string | null;
+    birthdayMonthDay: string | null;
+    age: number | null;
+    allergies: string | null;
+    onboardedAt: string | null;
+    createdAt: string;
+    updatedAt: string;
+  };
+  wristbands: Array<{
+    id: string;
+    userId: string;
+    status: WristbandStatus;
+    nickname: string | null;
+    birthdayMonthDay: string | null;
+    age: number | null;
+    onboardedAt: string | null;
+    assignedAt: string;
+    deactivatedAt: string | null;
+  }>;
+  circleVisits: Array<{
+    id: string;
+    circleId: string;
+    circleName: string;
+    staffId: string | null;
+    createdAt: string;
+  }>;
+  circles: Array<{ id: string; name: string }>;
+}
+
+export interface VisitorAdminEditorUpdate {
+  profile: {
+    displayId: number;
+    status: VisitorAccountStatus;
+    nickname: string | null;
+    favoriteDate: string | null;
+    birthdayMonthDay: string | null;
+    age: number | null;
+    allergies: JapaneseAllergen[] | null;
+    onboardedAt: string | null;
+  };
+  wristbands: Array<{
+    id: string;
+    isNew?: boolean;
+    status: WristbandStatus;
+    nickname: string | null;
+    birthdayMonthDay: string | null;
+    age: number | null;
+    onboardedAt: string | null;
+    assignedAt: string;
+    deactivatedAt: string | null;
+  }>;
+  circleVisits: Array<{
+    id?: string;
+    isNew?: boolean;
+    isDeleted?: boolean;
+    circleId: string;
+    staffId: string | null;
+    createdAt: string;
+  }>;
+}
+
 export interface LostWristbandItem {
   user: {
     id: string;
@@ -1483,6 +1554,16 @@ export const wristbandApi = {
   // 呼び出し側 (Entry の入場エラー / MyPage の ErrorState) で扱う。
   lookup: (code: string) =>
     fetchApi<WristbandLookupResult>(`/api/wristbands/lookup/${encodeURIComponent(code)}`),
+  // 2026-10-20: 来場者情報の管理はスキャン用lookupと分離し、イベント単位で権限確認された全関連データを編集する。
+  adminEditor: (eventId: string, userId: string) =>
+    fetchApi<VisitorAdminEditorData>(
+      `/api/wristbands/event/${encodeURIComponent(eventId)}/admin/${encodeURIComponent(userId)}`,
+    ),
+  updateAdminEditor: (eventId: string, userId: string, data: VisitorAdminEditorUpdate) =>
+    fetchApi<{ success: boolean }>(
+      `/api/wristbands/event/${encodeURIComponent(eventId)}/admin/${encodeURIComponent(userId)}`,
+      { method: "PUT", body: data },
+    ),
   search: (
     eventId: string,
     query: string,
