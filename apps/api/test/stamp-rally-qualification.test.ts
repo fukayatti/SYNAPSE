@@ -28,8 +28,8 @@ describe("スタンプラリー条件", () => {
     expect(after).toMatchObject({ eligible: true, qualifiedAreaCount: 3, qualifiedAreaIds: ["a", "b", "c"] });
   });
 
-  it("エリア条件がない場合は合計の異なる店舗数だけで達成する", () => {
-    const qualification = resolveStampRallyQualification(null, ["a", "b"], 3, {});
+  it("設定未保存時は現行の3店舗条件を初期値にする", () => {
+    const qualification = resolveStampRallyQualification(null);
     const result = evaluateStampRallyQualification({
       qualification,
       targetAreaIds: ["a", "b"],
@@ -37,6 +37,7 @@ describe("スタンプラリー条件", () => {
       totalStampedCircleCount: 3,
     });
     expect(qualification.minQualifiedAreaCount).toBeNull();
+    expect(qualification.minTotalDistinctCircles).toBe(3);
     expect(result.eligible).toBe(true);
   });
 

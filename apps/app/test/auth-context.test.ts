@@ -46,12 +46,12 @@ describe("tab-scoped active space context", () => {
     expect(readAuthContext()).toEqual({ circleId: "circle-b", eventId: "event-b", membershipId: "member-b" });
   });
 
-  it("migrates an existing shared context into the current tab", () => {
+  it("does not read an auth context from shared local storage", () => {
     sharedLocalStorage.setItem("circleAuth", JSON.stringify({ circleId: "legacy", membershipId: "legacy-member" }));
     selectTab(firstTab);
 
-    expect(readAuthContext()).toEqual({ circleId: "legacy", membershipId: "legacy-member" });
-    expect(firstTab.sessionStorage.getItem("circleAuth")).toBe(sharedLocalStorage.getItem("circleAuth"));
+    expect(readAuthContext()).toBeNull();
+    expect(firstTab.sessionStorage.getItem("circleAuth")).toBeNull();
   });
 
   it("rejects corrupt context and does not revive it after clearing the tab", () => {

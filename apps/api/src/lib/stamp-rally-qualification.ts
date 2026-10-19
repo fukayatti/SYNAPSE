@@ -45,25 +45,16 @@ export function parseStampRallyQualification(value: unknown): StampRallyQualific
   };
 }
 
-export function resolveStampRallyQualification(
-  raw: unknown,
-  targetAreaIds: string[],
-  requiredCount: number,
-  requiredCountByArea: Record<string, number>,
-): StampRallyQualification {
+// 2026-10-20: 旧 requiredCount 系への読み替えを終了し、条件未設定時は現行初期条件を使う。
+export function resolveStampRallyQualification(raw: unknown): StampRallyQualification {
   const parsed = parseStampRallyQualification(raw);
   if (parsed) return parsed;
 
-  // 2026-10-19: 旧設定は保存時の意味を保つ。全エリア別設定は全対象エリア達成、その他は合計店舗数で判定する。
-  const hasLegacyAreaRequirements = targetAreaIds.length > 0 && targetAreaIds.every((areaId) => requiredCountByArea[areaId] != null);
   return {
-    minQualifiedAreaCount: hasLegacyAreaRequirements ? targetAreaIds.length : null,
-    minDistinctCirclesPerArea: {
-      default: 1,
-      byArea: hasLegacyAreaRequirements ? { ...requiredCountByArea } : {},
-    },
+    minQualifiedAreaCount: null,
+    minDistinctCirclesPerArea: { default: 1, byArea: {} },
     requiredAreaIds: [],
-    minTotalDistinctCircles: hasLegacyAreaRequirements ? null : requiredCount,
+    minTotalDistinctCircles: 3,
   };
 }
 

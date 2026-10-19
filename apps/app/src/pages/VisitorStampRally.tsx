@@ -45,11 +45,10 @@ export default function VisitorStampRallyPage() {
 
   const data = query.data;
   const stampedCount = data?.stampedCount ?? 0;
-  const requiredCount = data?.requiredCount ?? 0;
   const areaRequirement = data?.qualification.minQualifiedAreaCount ?? null;
   const areaRequirementActive = areaRequirement !== null;
   const qualifiedAreaCount = data?.qualification.qualifiedAreaCount ?? 0;
-  const totalStoreRequirement = data?.qualification.minTotalDistinctCircles ?? (areaRequirementActive ? null : requiredCount);
+  const totalStoreRequirement = data?.qualification.minTotalDistinctCircles ?? null;
   const rulesUrl = data?.rulesUrl ? safeHttpUrl(data.rulesUrl) : null;
 
   if (!isLoaded || query.isLoading) {
@@ -86,21 +85,17 @@ export default function VisitorStampRallyPage() {
                         : "景品交換まであと少し"}
                 </h2>
                 <p className={`text-xs mt-1 ${data.eligible && data.remainingCount > 0 ? "text-primary-foreground/85" : "text-muted-foreground"}`}>
-                  {data.legacy
-                    ? "エリアごとの条件で達成判定"
-                    : areaRequirementActive
-                      ? `達成エリア ${qualifiedAreaCount} / ${areaRequirement} エリア`
-                      : `利用店舗 ${stampedCount} / ${requiredCount} 店舗`}
+                  {areaRequirementActive
+                    ? `達成エリア ${qualifiedAreaCount} / ${areaRequirement} エリア`
+                    : `利用店舗 ${stampedCount} / ${totalStoreRequirement ?? 0} 店舗`}
                 </p>
-                {!data.legacy && areaRequirementActive && totalStoreRequirement !== null && (
+                {areaRequirementActive && totalStoreRequirement !== null && (
                   <p className="text-[10px] mt-0.5 text-muted-foreground">合計利用店舗 {stampedCount} / {totalStoreRequirement} 店舗</p>
                 )}
               </div>
-              <span className="text-xl font-black tabular-nums shrink-0">{data.legacy
-                ? (data.eligible ? "達成" : "—")
-                : areaRequirementActive
-                  ? <>{Math.min(qualifiedAreaCount, areaRequirement)}<span className="text-xs"> / {areaRequirement}</span></>
-                  : <>{Math.min(stampedCount, requiredCount)}<span className="text-xs"> / {requiredCount}</span></>}
+              <span className="text-xl font-black tabular-nums shrink-0">{areaRequirementActive
+                ? <>{Math.min(qualifiedAreaCount, areaRequirement)}<span className="text-xs"> / {areaRequirement}</span></>
+                : <>{Math.min(stampedCount, totalStoreRequirement ?? 0)}<span className="text-xs"> / {totalStoreRequirement ?? 0}</span></>}
               </span>
             </div>
             <div className="grid grid-cols-3 gap-2 border-t-thin border-current/40 pt-2 text-center">

@@ -61,7 +61,7 @@ describe("atomic order commits", () => {
     expect(bodies[0]!.id).not.toBe(bodies[1]!.id);
   });
 
-  it("continues from the highest legacy number on the first write of the day", async () => {
+  it("starts the current year-prefixed sequence independently of old short-date numbers", async () => {
     const f = await seed();
     const today = new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10).replaceAll("-", "");
     const legacyPrefix = `${f.circleId.slice(0, 4)}-${today.slice(4)}-`;
@@ -77,7 +77,7 @@ describe("atomic order commits", () => {
 
     const response = await postJson("/api/orders", f.body, headers);
     expect(response.status).toBe(201);
-    expect(await response.json()).toHaveProperty("orderNumber", `${f.circleId.slice(0, 4)}-${today}-008`);
+    expect(await response.json()).toHaveProperty("orderNumber", `${f.circleId.slice(0, 4)}-${today}-001`);
   });
 
   // 2026-10-04 (#81): 取消後も履歴を残し、同じ店舗・営業日の表示番号を再利用しない。

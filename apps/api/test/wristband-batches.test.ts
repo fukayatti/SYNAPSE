@@ -66,12 +66,10 @@ describe("リストバンド発行履歴", () => {
     const { userId: issuedUserId } = (await allowed.json()) as { userId: string };
     expect(await target.db.select().from(wristband).where(eq(wristband.id, wristbandId))).toHaveLength(1);
 
-    const unrelatedProfileEdit = await request(`/api/wristbands/user/${issuedUserId}`, {
-      method: "PATCH",
+    const unrelatedEditorRead = await request(`/api/wristbands/event/${target.eventId}/admin/${issuedUserId}`, {
       headers: unrelated.headers,
-      body: JSON.stringify({ status: "banned" }),
     });
-    expect(unrelatedProfileEdit.status).toBe(403);
+    expect(unrelatedEditorRead.status).toBe(403);
     expect((await target.db.select().from(eventUser).where(eq(eventUser.id, issuedUserId)))[0]?.status).toBe("available");
 
     const unrelatedBandEdit = await request(`/api/wristbands/${wristbandId}`, {
@@ -82,12 +80,10 @@ describe("リストバンド発行履歴", () => {
     expect(unrelatedBandEdit.status).toBe(403);
     expect((await target.db.select().from(wristband).where(eq(wristband.id, wristbandId)))[0]?.status).toBe("active");
 
-    const allowedProfileEdit = await request(`/api/wristbands/user/${issuedUserId}`, {
-      method: "PATCH",
+    const allowedEditorRead = await request(`/api/wristbands/event/${target.eventId}/admin/${issuedUserId}`, {
       headers: target.headers,
-      body: JSON.stringify({ nickname: "same-event-edit" }),
     });
-    expect(allowedProfileEdit.status).toBe(200);
+    expect(allowedEditorRead.status).toBe(200);
 
     const selfIssued = await request("/api/wristbands/issue", {
       method: "POST",

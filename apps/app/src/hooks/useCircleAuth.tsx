@@ -1,6 +1,6 @@
 
 import { useNavigate } from "react-router-dom";
-import { AUTH_CONTEXT_KEY, clearAuthContext, readAuthContext, readLegacyCircleId, writeAuthContext } from "@/lib/auth-context";
+import { AUTH_CONTEXT_KEY, clearAuthContext, readAuthContext, writeAuthContext } from "@/lib/auth-context";
 import { useEffect, useState, useCallback } from "react";
 import Loader from "@/components/loader";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -52,25 +52,7 @@ export function getAuthInfo(): AuthInfo | null {
   if (typeof window === "undefined") return null;
 
   const stored = readAuthContext<AuthInfo>();
-  if (stored) {
-    if (!stored.circleName) stored.circleName = window.sessionStorage.getItem("circleName") || null;
-    return stored;
-  }
-
-  // 後方互換性: 古い形式からの移行
-  const circleId = readLegacyCircleId();
-  if (circleId) {
-    return {
-      circleId,
-      eventId: null,
-      userEmail: null,
-      userName: null,
-      role: null,
-      membershipId: null,
-    };
-  }
-
-  return null;
+  return stored;
 }
 
 // 認証情報をクリア
@@ -156,7 +138,7 @@ export function useAuth() {
     };
 
     const handleStorageChange = (e: StorageEvent) => {
-      if (e.key === AUTH_STORAGE_KEY || e.key === "circleName") {
+      if (e.key === AUTH_STORAGE_KEY) {
         handleAuthChange();
       }
     };

@@ -600,9 +600,7 @@ export interface StampRallyArea {
 export interface StampRallySettings {
   enabled: boolean;
   targetAreaIds: string[];
-  requiredCount: number;
-  requiredCountByArea?: Record<string, number>;
-  qualification?: StampRallyQualificationRule;
+  qualification: StampRallyQualificationRule;
   rewardTitle: string;
   rewards?: StampRallyReward[];
   redemptionLocation: string;
@@ -654,12 +652,9 @@ export interface StampRallyOrder {
 
 export interface VisitorStampRally {
   enabled: boolean;
-  legacy: boolean;
   stampedCircleIds: string[];
   stampedCount: number;
   targetCircleCount: number;
-  requiredCount: number;
-  requiredCountByArea: Record<string, number>;
   qualification: VisitorStampRallyQualification;
   eligible: boolean;
   rewardTitle: string;
@@ -715,8 +710,6 @@ export interface StampRallyUsageSummary {
   enabled: boolean;
   targetAreaIds: string[];
   targetStoreCount: number;
-  requiredCount: number;
-  requiredCountByArea: Record<string, number>;
   qualification: StampRallyQualificationRule;
   participantAccountCount: number;
   qualifiedAccountCount: number;
@@ -744,12 +737,6 @@ export interface StampRallyStoreVisitorsPage {
 }
 
 export interface VisitorStampRallyArea extends StampRallyArea {}
-
-export interface LegacyVisitorStampRally {
-  enabled: boolean;
-  stampedCircleIds: string[];
-  areas: VisitorStampRallyArea[];
-}
 
 export const stampRallyApi = {
   visitor: (code: string) =>
@@ -1362,8 +1349,6 @@ export interface CreateInviteInput {
   role: Role;
   expiresInHours?: number;
   maxUses?: number | null;
-  // 2026-07-15: バックエンドでセッションから自動設定されるようになったためオプショナルに変更
-  createdBy?: string;
   targetEmail?: string;
 }
 
@@ -1665,11 +1650,7 @@ export const wristbandApi = {
       method: "PATCH",
       body: data,
     }),
-  updateUser: (userId: string, data: { nickname?: string | null; favoriteDate?: string | null; displayId?: number; status?: string }) =>
-    fetchApi<{ success: boolean }>(`/api/wristbands/user/${encodeURIComponent(userId)}`, {
-      method: "PATCH",
-      body: data,
-    }),
+
 };
 
 // 来場者オンボーディング API (2026-07-04)

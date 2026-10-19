@@ -115,7 +115,7 @@ export function StampRallyUsageDashboard({ eventId }: { eventId: string }) {
           ? `合計${qualification.minTotalDistinctCircles}店舗以上`
           : null,
       ].filter(Boolean).join(" / ")
-    : `対象店舗 ${summary?.requiredCount ?? 0} 店以上で注文完了`;
+    : "達成条件を設定してください";
 
   if (summaryQuery.isLoading) {
     return (
