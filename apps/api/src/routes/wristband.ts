@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { z } from "zod";
-import { eventUser, wristband, wristbandBatch, wristbandBatchChunk, event, type DB } from "@fesflow/db";
+import { circle, circleVisit, eventUser, wristband, wristbandBatch, wristbandBatchChunk, event, type DB } from "@fesflow/db";
 import { eq, and, asc, desc, or, like, isNull, isNotNull, countDistinct, count, inArray } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { hasPermission } from "../utils/auth";
@@ -358,6 +358,209 @@ wristbandRoutes.get("/lookup/:code{.+}", async (c) => {
   // POST /register (能動的なリストバンド登録操作) で行う。
   apiError("NOT_FOUND", "ユーザーが見つかりません");
 });
+
+// 2026-10-20: 公開スキャン用 lookup に管理情報を混ぜず、イベント権限を確認した編集専用 API で
+// 来場者・家族バンド・サークル体験ログをまとめて取得/保存する。内部IDは履歴参照のため変更させない。
+const visitorEditorProfileSchema = z.object({
+  displayId: z.number().int().positive(),
+  status: z.enum(["available", "banned"]),
+  nickname: z.string().trim().max(30).nullable(),
+  favoriteDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable(),
+  birthdayMonthDay: z.string().regex(/^\d{2}-\d{2}$/).nullable(),
+  age: z.number().int().min(0).max(120).nullable(),
+  allergies: allergyListSchema.nullable(),
+  onboardedAt: z.string().datetime().nullable(),
+});
+
+const visitorEditorWristbandSchema = z.object({
+  id: z.string().trim().min(1).max(180),
+  isNew: z.boolean().optional().default(false),
+  status: z.enum(["active", "lost", "replaced", "revoked", "smartphone"]),
+  nickname: z.string().trim().max(30).nullable(),
+  birthdayMonthDay: z.string().regex(/^\d{2}-\d{2}$/).nullable(),
+  age: z.number().int().min(0).max(120).nullable(),
+  onboardedAt: z.string().datetime().nullable(),
+  assignedAt: z.string().datetime(),
+  deactivatedAt: z.string().datetime().nullable(),
+});
+
+const visitorEditorCircleVisitSchema = z.object({
+  id: z.string().optional(),
+  isNew: z.boolean().optional().default(false),
+  isDeleted: z.boolean().optional().default(false),
+  circleId: z.string().min(1),
+  staffId: z.string().trim().max(100).nullable(),
+  createdAt: z.string().datetime(),
+});
+
+const visitorEditorUpdateSchema = z.object({
+  profile: visitorEditorProfileSchema,
+  wristbands: z.array(visitorEditorWristbandSchema).max(100),
+  circleVisits: z.array(visitorEditorCircleVisitSchema).max(200),
+});
+
+function isValidBirthdayMonthDay(value: string | null): boolean {
+  if (value === null) return true;
+  const [month = 0, day = 0] = value.split("-").map(Number);
+  const date = new Date(Date.UTC(2000, month - 1, day));
+  return date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
+}
+
+wristbandRoutes.get(
+  "/event/:eventId/admin/:userId",
+  async (c) => {
+    const db = c.get("db");
+    const eventId = c.req.param("eventId");
+    const userId = c.req.param("userId");
+    if (!(await hasPermission(c, null, "member:read", eventId))) {
+      apiError("FORBIDDEN", "来場者情報を閲覧するイベントスタッフ権限が必要です");
+    }
+
+    const [user] = await db.select().from(eventUser).where(eq(eventUser.id, userId));
+    if (!user || user.eventId !== eventId) apiError("NOT_FOUND", "イベント内の来場者が見つかりません");
+
+    const [wristbands, visits, circles] = await Promise.all([
+      db.select().from(wristband).where(eq(wristband.userId, userId))
+        .orderBy(asc(wristband.assignedAt), asc(wristband.id)),
+      db.select({
+        id: circleVisit.id,
+        circleId: circleVisit.circleId,
+        circleName: circle.name,
+        staffId: circleVisit.staffId,
+        createdAt: circleVisit.createdAt,
+      })
+        .from(circleVisit)
+        .innerJoin(circle, eq(circleVisit.circleId, circle.id))
+        .where(eq(circleVisit.eventUserId, userId))
+        .orderBy(desc(circleVisit.createdAt), desc(circleVisit.id)),
+      db.select({ id: circle.id, name: circle.name }).from(circle)
+        .where(eq(circle.eventId, eventId)).orderBy(asc(circle.name), asc(circle.id)),
+    ]);
+
+    return c.json({ user, wristbands, circleVisits: visits, circles });
+  },
+);
+
+wristbandRoutes.put(
+  "/event/:eventId/admin/:userId",
+  zBody(visitorEditorUpdateSchema),
+  async (c) => {
+    const db = c.get("db");
+    const eventId = c.req.param("eventId");
+    const userId = c.req.param("userId");
+    const { profile, wristbands, circleVisits } = c.req.valid("json");
+    if (!(await hasPermission(c, null, "member:write", eventId))) {
+      apiError("FORBIDDEN", "来場者情報を編集するイベントスタッフ権限が必要です");
+    }
+
+    const [user] = await db.select().from(eventUser).where(eq(eventUser.id, userId));
+    if (!user || user.eventId !== eventId) apiError("NOT_FOUND", "イベント内の来場者が見つかりません");
+    if (!isValidBirthdayMonthDay(profile.birthdayMonthDay)) {
+      apiError("BAD_REQUEST", "来場者の誕生日（月日）を確認してください");
+    }
+    if (profile.favoriteDate && Number.isNaN(Date.parse(`${profile.favoriteDate}T00:00:00Z`))) {
+      apiError("BAD_REQUEST", "お好きな日付を確認してください");
+    }
+    const duplicateUsers = await db.select({ id: eventUser.id }).from(eventUser).where(and(
+      eq(eventUser.eventId, eventId),
+      eq(eventUser.displayId, profile.displayId),
+    ));
+    if (duplicateUsers.some((candidate) => candidate.id !== userId)) {
+      apiError("CONFLICT", "この呼出IDは別の来場者が使用しています");
+    }
+    for (const band of wristbands) {
+      if (!isValidBirthdayMonthDay(band.birthdayMonthDay)) {
+        apiError("BAD_REQUEST", "リストバンドの誕生日（月日）を確認してください");
+      }
+    }
+
+    const [existingBands, existingVisits] = await Promise.all([
+      db.select().from(wristband).where(eq(wristband.userId, userId)),
+      db.select({ id: circleVisit.id }).from(circleVisit).where(eq(circleVisit.eventUserId, userId)),
+    ]);
+    const existingBandById = new Map(existingBands.map((band) => [band.id, band]));
+    const existingVisitIds = new Set(existingVisits.map((visit) => visit.id));
+    const newBandIds = wristbands.filter((band) => band.isNew).map((band) => band.id);
+    const duplicateBandIds = new Set<string>();
+    for (const id of wristbands.map((band) => band.id)) {
+      if (duplicateBandIds.has(id)) apiError("BAD_REQUEST", "リストバンドIDが重複しています");
+      duplicateBandIds.add(id);
+    }
+    if (wristbands.some((band) => !band.isNew && !existingBandById.has(band.id))) {
+      apiError("FORBIDDEN", "この来場者に紐付いていないリストバンドは編集できません");
+    }
+    if (newBandIds.length > 0) {
+      const [conflict] = await db.select({ id: wristband.id }).from(wristband).where(inArray(wristband.id, newBandIds)).limit(1);
+      if (conflict) apiError("CONFLICT", "登録済みのリストバンドIDがあります");
+    }
+
+    const visitIds = circleVisits.flatMap((visit) => visit.id && !visit.isNew ? [visit.id] : []);
+    if (visitIds.length !== new Set(visitIds).size) apiError("BAD_REQUEST", "サークル利用実績IDが重複しています");
+    if (circleVisits.some((visit) => !visit.isNew && (!visit.id || !existingVisitIds.has(visit.id)))) {
+      apiError("FORBIDDEN", "この来場者に紐付いていないサークル利用実績は編集できません");
+    }
+    const circleIds = [...new Set(circleVisits.filter((visit) => !visit.isDeleted).map((visit) => visit.circleId))];
+    if (circleIds.length > 0) {
+      const allowedCircles = await db.select({ id: circle.id }).from(circle)
+        .where(and(eq(circle.eventId, eventId), inArray(circle.id, circleIds)));
+      if (allowedCircles.length !== circleIds.length) {
+        apiError("BAD_REQUEST", "別イベントのサークルは利用実績に設定できません");
+      }
+    }
+
+    const statements: Array<Parameters<DB["batch"]>[0][number]> = [
+      db.update(eventUser).set({
+        displayId: profile.displayId,
+        status: profile.status,
+        nickname: profile.nickname || null,
+        favoriteDate: profile.favoriteDate,
+        birthdayMonthDay: profile.birthdayMonthDay,
+        age: profile.age,
+        allergies: profile.allergies === null ? null : JSON.stringify(profile.allergies),
+        onboardedAt: profile.onboardedAt ? new Date(profile.onboardedAt) : null,
+      }).where(and(eq(eventUser.id, userId), eq(eventUser.eventId, eventId))),
+    ];
+
+    for (const band of wristbands) {
+      const values = {
+        status: band.status,
+        nickname: band.nickname || null,
+        birthdayMonthDay: band.birthdayMonthDay,
+        age: band.age,
+        onboardedAt: band.onboardedAt ? new Date(band.onboardedAt) : null,
+        assignedAt: new Date(band.assignedAt),
+        deactivatedAt: band.deactivatedAt ? new Date(band.deactivatedAt) : null,
+      };
+      statements.push(band.isNew
+        ? db.insert(wristband).values({ id: band.id, userId, ...values })
+        : db.update(wristband).set(values).where(and(eq(wristband.id, band.id), eq(wristband.userId, userId))));
+    }
+
+    for (const visit of circleVisits) {
+      if (visit.isNew && visit.isDeleted) continue;
+      if (visit.isDeleted) {
+        statements.push(db.delete(circleVisit).where(and(eq(circleVisit.id, visit.id!), eq(circleVisit.eventUserId, userId))));
+      } else if (visit.isNew) {
+        statements.push(db.insert(circleVisit).values({
+          id: nanoid(),
+          eventUserId: userId,
+          circleId: visit.circleId,
+          staffId: visit.staffId || null,
+          createdAt: new Date(visit.createdAt),
+        }));
+      } else {
+        statements.push(db.update(circleVisit).set({
+          circleId: visit.circleId,
+          staffId: visit.staffId || null,
+          createdAt: new Date(visit.createdAt),
+        }).where(and(eq(circleVisit.id, visit.id!), eq(circleVisit.eventUserId, userId))));
+      }
+    }
+
+    await db.batch(statements as [Parameters<DB["batch"]>[0][number], ...Parameters<DB["batch"]>[0][number][]]);
+    return c.json({ success: true });
+  },
+);
 
 
 
