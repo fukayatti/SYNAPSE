@@ -36,6 +36,10 @@ import { EventReviewsTab } from "@/pages/dashboard/Reviews";
 export default function EventDashboard() {
   const navigate = useNavigate();
   const { eventId, role, isLoading: authLoading, isAuthenticated } = useAuth();
+  // 2026-10-20: 当日スタッフはイベント画面に入れるが、イベント管理者向けデータ取得は個別に制限する。
+  const isEventManager = role === ROLES.EVENT_MANAGER;
+  const isEventDashboardRole = isEventManager || role === ROLES.EVENT_STAFF ||
+    role === ROLES.EVENT_WRISTBAND_STAFF || role === ROLES.EVENT_STAMP_STAFF;
   const { data: spaces, isLoading: spacesLoading } = useMySpaces();
   const [searchParams, setSearchParams] = useSearchParams();
   const [activeTab, setActiveTab] = useState<string>(() => searchParams.get("tab") || "circles");
@@ -56,7 +60,7 @@ export default function EventDashboard() {
   };
 
   const circleSpaces = (spaces ?? []).filter((space: any) => Boolean(space.circleId));
-  const needsCircleSelection = !authLoading && isAuthenticated && role !== ROLES.EVENT_MANAGER && circleSpaces.length > 0;
+  const needsCircleSelection = !authLoading && isAuthenticated && !isEventDashboardRole && circleSpaces.length > 0;
 
   const openCircleDashboard = (space: any) => {
     const current = getAuthInfo();
@@ -79,7 +83,7 @@ export default function EventDashboard() {
   const { data: eventData } = useQuery({
     queryKey: ["event", eventId],
     queryFn: () => eventApi.get(eventId!),
-    enabled: !!eventId && role === ROLES.EVENT_MANAGER,
+    enabled: !!eventId && isEventDashboardRole,
   });
 
   useEffect(() => {
@@ -99,7 +103,7 @@ export default function EventDashboard() {
     queryKey: ["circles", eventId],
     queryFn: () => circleApi.list(eventId!),
     // 2026-10-03: 表示していない管理タブの問い合わせを実行しない。
-    enabled: !!eventId && role === ROLES.EVENT_MANAGER && (activeTab === "circles" || activeTab === "sales" || activeTab === "store-areas"),
+    enabled: !!eventId && isEventManager && (activeTab === "circles" || activeTab === "sales" || activeTab === "store-areas"),
     // 2026-10-07 (#9): 報告から30分を超えた混雑度を本部画面でも未報告へ切り替える。
     refetchInterval: activeTab === "circles" ? 60_000 : false,
   });
@@ -128,14 +132,14 @@ export default function EventDashboard() {
   } = useQuery({
     queryKey: ["eventStaff", eventId],
     queryFn: () => membershipApi.listByEvent(eventId!),
-    enabled: !!eventId && role === ROLES.EVENT_MANAGER && activeTab === "staff",
+    enabled: !!eventId && isEventManager && activeTab === "staff",
   });
 
   // 招待中一覧取得
   const { data: invites } = useQuery({
     queryKey: ["invites", eventId],
     queryFn: () => membershipApi.listInvites(undefined, eventId!),
-    enabled: !!eventId && role === ROLES.EVENT_MANAGER && activeTab === "staff",
+    enabled: !!eventId && isEventManager && activeTab === "staff",
   });
 
   if (needsCircleSelection) {
@@ -173,7 +177,7 @@ export default function EventDashboard() {
     );
   }
 
-  if (!authLoading && isAuthenticated && role !== ROLES.EVENT_MANAGER && spacesLoading) {
+  if (!authLoading && isAuthenticated && !isEventDashboardRole && spacesLoading) {
     return <div className="flex min-h-[200px] items-center justify-center"><Skeleton className="h-20 w-full max-w-xl" /></div>;
   }
 

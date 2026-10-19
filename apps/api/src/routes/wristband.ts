@@ -49,10 +49,15 @@ wristbandRoutes.get(
     const db = c.get("db");
     const { eventId, query, bandType, accountStatus, profileStatus, offset, limit, sortBy, sortDirection } = c.req.valid("query");
 
-    // 権限チェック (イベントスタッフ権限 member:read が必要)
-    const allowed = await hasPermission(c, null, "member:read", eventId);
-    if (!allowed) {
+    const canReadMembers = await hasPermission(c, null, "member:read", eventId);
+    const canReplaceWristbands = await hasPermission(c, null, "wristband:replace", eventId);
+    if (!canReadMembers && !canReplaceWristbands) {
       apiError("FORBIDDEN", "この操作にはスタッフ権限が必要です");
+    }
+    // 2026-10-20: 交換担当には紛失対応に必要な物理バンド検索だけを許可し、来場者一覧APIの詳細情報を返さない。
+    const replacementOnly = !canReadMembers && canReplaceWristbands;
+    if (replacementOnly && (bandType !== "physical" || limit > 50 || !query.trim())) {
+      apiError("FORBIDDEN", "紛失バンド交換では検索語を指定して物理バンドだけを検索してください");
     }
 
     const conditions = [eq(eventUser.eventId, eventId)];
@@ -146,12 +151,21 @@ wristbandRoutes.get(
     }
 
     return c.json({
-      items: rows.map((r) => ({
-        user: r.user,
-        wristband: r.wristband,
-        familyWristbands: familyWristbands.filter((band) => band.userId === r.user.id),
-        familyBandCount: familyWristbands.filter((band) => band.userId === r.user.id).length,
-      })),
+      items: rows.map((r) => {
+        const visitorBands = familyWristbands.filter((band) => band.userId === r.user.id);
+        return {
+          user: replacementOnly
+            ? { id: r.user.id, displayId: r.user.displayId, nickname: r.user.nickname, status: r.user.status }
+            : r.user,
+          wristband: replacementOnly && r.wristband
+            ? { id: r.wristband.id, userId: r.wristband.userId, status: r.wristband.status, nickname: r.wristband.nickname, assignedAt: r.wristband.assignedAt }
+            : r.wristband,
+          familyWristbands: replacementOnly
+            ? visitorBands.map(({ id, userId, status, nickname, assignedAt }) => ({ id, userId, status, nickname, assignedAt }))
+            : visitorBands,
+          familyBandCount: visitorBands.length,
+        };
+      }),
       total: totalRows[0]?.total ?? 0,
       offset,
       limit,
@@ -757,7 +771,31 @@ wristbandRoutes.post(
       if (!bandExists) {
         apiError("BAD_REQUEST", "先に発行済みの物理リストバンドIDを指定してください");
       }
-      if (!(await hasPermission(c, null, "member:write", targetEventId))) {
+      const replacementBand = bandNow[0]!;
+      const replacementBandOwner = bandOwner[0];
+      const replacementBandOwnerBands = replacementBandOwner
+        ? await db.select({ id: wristband.id }).from(wristband).where(and(
+            eq(wristband.userId, replacementBandOwner.id),
+            eq(wristband.status, "active"),
+          ))
+        : [];
+      // 2026-10-20: 交換担当が別来場者のバンドを奪えないよう、交換先は未使用の発行済みバンドに限定する。
+      if (
+        replacementBand.status !== "active" ||
+        !replacementBandOwner ||
+        replacementBandOwner.eventId !== targetEventId ||
+        replacementBandOwner.status !== "available" ||
+        replacementBandOwner.nickname ||
+        replacementBandOwner.favoriteDate ||
+        replacementBandOwner.onboardedAt ||
+        replacementBand.nickname ||
+        replacementBand.birthdayMonthDay ||
+        replacementBand.onboardedAt ||
+        replacementBandOwnerBands.length !== 1
+      ) {
+        apiError("BAD_REQUEST", "未使用の発行済み物理リストバンドIDを指定してください");
+      }
+      if (!(await hasPermission(c, null, "wristband:replace", targetEventId))) {
         apiError("FORBIDDEN", "物理リストバンドの交換にはスタッフ権限が必要です");
       }
       replacementSource = sourceBand;
@@ -775,7 +813,7 @@ wristbandRoutes.post(
       bandExists &&
       bandNow[0]!.userId !== userId;
     const creatingNewBand = !bandExists;
-    if (replacingUsersActiveBand || bandOwnedByOther || creatingNewBand) {
+    if (!replacementSource && (replacingUsersActiveBand || bandOwnedByOther || creatingNewBand)) {
       let evId: string | undefined = targetEventId ?? bandEventId;
       if (!evId && creatingNewBand) {
         // 2026-07-11: 新規バンド発行時は eventId 未解決のまま権限判定しない。

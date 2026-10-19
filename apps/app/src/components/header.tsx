@@ -166,7 +166,7 @@ export default function Header() {
     if (role === "super_admin") {
       return "システム管理";
     }
-    if (role === "event_manager") {
+    if (role === "event_manager" || role === "event_staff" || role === "event_wristband_staff" || role === "event_stamp_staff") {
       const space = (spaces ?? []).find((m: any) => m.eventId === eventId && !m.circleId);
       return space?.event?.eventName || localStorage.getItem("eventName") || "イベント管理";
     }
@@ -428,7 +428,7 @@ export default function Header() {
     links = [
       { to: "/sys/dashboard", label: "システム管理" },
     ];
-  } else if (isEventView && (role === "event_manager" || role === "super_admin")) {
+  } else if (isEventView && (role === "event_manager" || role === "event_staff" || role === "event_wristband_staff" || role === "event_stamp_staff" || role === "super_admin")) {
     links = [
       { to: "/event/dashboard", label: "イベント管理" },
     ];

@@ -14,6 +14,9 @@ import { isUnauthorizedSessionError } from "@/lib/session-error";
 export const ROLE_NAMES: Record<RoleType, string> = {
   [ROLES.SUPER_ADMIN]: ROLE_LABELS.super_admin,
   [ROLES.EVENT_MANAGER]: ROLE_LABELS.event_manager,
+  [ROLES.EVENT_STAFF]: ROLE_LABELS.event_staff,
+  [ROLES.EVENT_WRISTBAND_STAFF]: ROLE_LABELS.event_wristband_staff,
+  [ROLES.EVENT_STAMP_STAFF]: ROLE_LABELS.event_stamp_staff,
   [ROLES.CIRCLE_MANAGER]: ROLE_LABELS.circle_manager,
   [ROLES.CIRCLE_ADMIN]: ROLE_LABELS.circle_admin,
   [ROLES.CIRCLE_STAFF]: ROLE_LABELS.circle_staff,
@@ -259,7 +262,7 @@ export function useAuth() {
     navigate("/login");
   }, [navigate]);
 
-  // event_manager / super_admin はイベント管理者扱い
+  // 2026-10-20: イベント管理者とシステム管理者だけを管理者フラグにし、限定担当ロールを昇格させない。
   const isLocalImpersonation =
     authInfo?.role === ROLES.SUPER_ADMIN && authInfo.isEventAdmin === true && !!authInfo.eventId;
   // disabled query は直前の data を保持するため、現在の選択が system に戻ったら
@@ -556,7 +559,10 @@ export function EventAdminGuard({ children }: { children: React.ReactNode }) {
 
   if (membershipAuthorityError) return <AuthorizationUnavailable onRetry={retryAuthorization} />;
 
-  const isAllowed = role === ROLES.EVENT_MANAGER;
+  const isAllowed = role === ROLES.EVENT_MANAGER ||
+    role === ROLES.EVENT_STAFF ||
+    role === ROLES.EVENT_WRISTBAND_STAFF ||
+    role === ROLES.EVENT_STAMP_STAFF;
   if (!isAuthenticated || !isAllowed) {
     return (
       <div className="flex min-h-[400px] flex-col items-center justify-center gap-4 text-center p-4">
@@ -564,7 +570,7 @@ export function EventAdminGuard({ children }: { children: React.ReactNode }) {
           アクセス権限がありません
         </h2>
         <p className="font-body text-[14px] leading-[1.5]">
-          イベント管理機能を利用するには、イベント管理者（event_manager）アカウントでログインする必要があります。
+          イベント管理機能を利用するには、イベント管理者またはイベント当日スタッフのアカウントでログインする必要があります。
         </p>
       </div>
     );
@@ -625,7 +631,13 @@ export interface ResolvedActiveSpace {
 export async function resolveActiveSpaceAfterAuth(): Promise<ResolvedActiveSpace> {
   const memberships = await membershipApi.listMy();
   const systemMembership = memberships.find((m: any) => m.role === "super_admin");
-  const eventMembership = memberships.find((m: any) => m.role === "event_manager");
+  // 2026-10-20: 招待された当日スタッフも、認証後にイベント管理画面へ直接入れるようイベントロール全体を解決する。
+  const eventMembership = memberships.find((m: any) =>
+    m.role === ROLES.EVENT_MANAGER ||
+    m.role === ROLES.EVENT_STAFF ||
+    m.role === ROLES.EVENT_WRISTBAND_STAFF ||
+    m.role === ROLES.EVENT_STAMP_STAFF
+  );
   const circleMembership = memberships.find((m: any) => m.circleId);
 
   if (systemMembership) {

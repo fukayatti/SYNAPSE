@@ -1,7 +1,7 @@
 /**
  * ロール表示ラベルの集約 (docs/UX-IMPROVEMENTS.md C-1)
  *
- * 新ロール体系（super_admin/event_manager/circle_manager/circle_staff/visitor）の
+ * 新ロール体系（super_admin/event_manager/当日スタッフ/サークル各権限/visitor）の
  * 日本語ラベル・短縮バッジ表記を1箇所にまとめる。以前は components/header.tsx 内に
  * 同じ対応表が複数箇所に直書きされていたため、表示の追加・変更時に修正漏れが
  * 起きやすかった。表示専用のユーティリティであり、権限判定ロジックは持たない
@@ -16,6 +16,9 @@ export type Role = RoleType | "visitor";
 export const ROLE_LABELS: Record<Role, string> = {
   super_admin: "システム最高管理者",
   event_manager: "イベント管理者",
+  event_staff: "当日スタッフ（紛失交換・スタンプラリー）",
+  event_wristband_staff: "当日スタッフ（紛失バンド交換）",
+  event_stamp_staff: "当日スタッフ（スタンプラリー）",
   // 2026-10-05: オーナー(circle_manager) / 管理者(circle_admin) / 一般スタッフの3段階。
   circle_manager: "オーナー",
   circle_admin: "管理者",
@@ -27,6 +30,9 @@ export const ROLE_LABELS: Record<Role, string> = {
 export const ROLE_BADGES: Record<Role, string> = {
   super_admin: "SUPER ADMIN",
   event_manager: "EVENT MGR",
+  event_staff: "EVENT STAFF",
+  event_wristband_staff: "WRISTBAND STAFF",
+  event_stamp_staff: "STAMP STAFF",
   circle_manager: "OWNER",
   circle_admin: "ADMIN",
   circle_staff: "STAFF",

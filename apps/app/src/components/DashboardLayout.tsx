@@ -238,47 +238,47 @@ export default function DashboardLayout({
     {
       label: "運営",
       items: [
-        { title: "開催中の混雑・人員配置", tab: "behavior", icon: Activity },
-        { title: "混雑モニター", tab: "congestion", icon: Gauge },
-        { title: "注文モニタ", tab: "order-monitor", icon: MonitorCheck },
-        { title: "在庫・売り切れ", tab: "inventory", icon: Boxes },
-        { title: "一斉アナウンス", tab: "announce", icon: Megaphone },
-        { title: "リストバンド管理", tab: "wristbands", icon: IdCard },
-        { title: "紛失バンド交換", tab: "wristband-loss", icon: ShieldAlert },
-        { title: "景品交換受付", tab: "stamp-redemptions", icon: Ticket, permission: "event:write" },
-        { title: "スタンプラリー", tab: "stamp-rally", icon: Ticket },
+        { title: "開催中の混雑・人員配置", tab: "behavior", icon: Activity, permission: "event:write" },
+        { title: "混雑モニター", tab: "congestion", icon: Gauge, permission: "event:write" },
+        { title: "注文モニタ", tab: "order-monitor", icon: MonitorCheck, permission: "order:read" },
+        { title: "在庫・売り切れ", tab: "inventory", icon: Boxes, permission: "stock:read" },
+        { title: "一斉アナウンス", tab: "announce", icon: Megaphone, permission: "member:write" },
+        { title: "リストバンド管理", tab: "wristbands", icon: IdCard, permission: "member:write" },
+        { title: "紛失バンド交換", tab: "wristband-loss", icon: ShieldAlert, permission: "wristband:replace" },
+        { title: "景品交換受付", tab: "stamp-redemptions", icon: Ticket, permission: "stamp-rally:operate" },
+        { title: "スタンプラリー", tab: "stamp-rally", icon: Ticket, permission: "event:write" },
       ],
     },
     {
       label: "開催後の振り返り",
       items: [
-        { title: "イベント全体レポート", tab: "analytics", icon: BarChart3 },
+        { title: "イベント全体レポート", tab: "analytics", icon: BarChart3, permission: "sales:read" },
       ],
     },
     {
       label: "売上・分析",
       items: [
-        { title: "レビュー", tab: "reviews", icon: Star },
-        { title: "全体売上管理", tab: "sales", icon: TrendingUp },
-        { title: "精算", tab: "settlement", icon: Calculator },
-        { title: "日次締め", tab: "daily-close", icon: CalendarCheck },
-        { title: "データエクスポート", tab: "export", icon: Download },
+        { title: "レビュー", tab: "reviews", icon: Star, permission: "sales:read" },
+        { title: "全体売上管理", tab: "sales", icon: TrendingUp, permission: "sales:read" },
+        { title: "精算", tab: "settlement", icon: Calculator, permission: "sales:read" },
+        { title: "日次締め", tab: "daily-close", icon: CalendarCheck, permission: "sales:read" },
+        { title: "データエクスポート", tab: "export", icon: Download, permission: "sales:read" },
       ],
     },
     {
       label: "管理",
       items: [
-        { title: "サークル管理", tab: "circles", icon: Grid },
-        { title: "店舗エリア", tab: "store-areas", icon: MapPinned },
-        { title: "スタッフ管理", tab: "staff", icon: Users },
-        { title: "イベント設定", tab: "settings", icon: Settings },
-        { title: "契約状況", tab: "contract", icon: CreditCard },
+        { title: "サークル管理", tab: "circles", icon: Grid, permission: "circle:read" },
+        { title: "店舗エリア", tab: "store-areas", icon: MapPinned, permission: "event:write" },
+        { title: "スタッフ管理", tab: "staff", icon: Users, permission: "staff:read" },
+        { title: "イベント設定", tab: "settings", icon: Settings, permission: "event:write" },
+        { title: "契約状況", tab: "contract", icon: CreditCard, permission: "event:write" },
       ],
     },
     {
       label: "拡張",
       items: [
-        ...(lotteryEnabled ? [{ title: "抽選", tab: "lottery", icon: Ticket }] : []),
+        ...(lotteryEnabled ? [{ title: "抽選", tab: "lottery", icon: Ticket, permission: "event:write" }] : []),
       ],
     },
   ];
@@ -316,7 +316,7 @@ export default function DashboardLayout({
       : systemGroups;
 
   // 空グループ (抽選OFFなど拡張機能が全て無効な場合) は見出しごと出さない
-  // 権限のない項目は出さない (permission 指定のあるサークル項目のみ。権限の読み込み中は全項目を出して
+  // 権限のない項目は出さない (permission 指定項目。権限の読み込み中は全項目を出して
   // 一瞬メニューが空になるのを避ける)。可否の最終判定は各ページのガードと API が行う。
   const visibleMenuGroups = menuGroups
     .map((group) => ({
@@ -336,6 +336,13 @@ export default function DashboardLayout({
     }
     return activeTab === item.tab;
   });
+  const firstVisibleTab = menuItems.find((item) => item.tab)?.tab;
+
+  useEffect(() => {
+    if (type !== "event" || authLoading || activeItem || !firstVisibleTab || !onTabChange) return;
+    // 2026-10-20: URL直入力でも権限外のタブを描画せず、そのスタッフが使える最初の画面へ移す。
+    onTabChange(firstVisibleTab);
+  }, [type, authLoading, activeItem?.tab, firstVisibleTab, onTabChange]);
   const activeGroup = activeItem && visibleMenuGroups.find((group) => group.items.includes(activeItem));
 
   useEffect(() => {
@@ -512,7 +519,11 @@ export default function DashboardLayout({
         {/* min-w-0: flex 子要素の既定 min-width:auto により中身が広いと縮まず、
             ビューポートを超えて横スクロール(モバイルの横幅ズレ)が発生するのを防ぐ。 */}
         <main className="flex-1 w-full min-w-0 border-thick border-border p-4 md:p-6 bg-background rounded-none shadow-none min-h-[500px]">
-          {children}
+          {type === "event" && !authLoading && !activeItem ? (
+            <p className="border-thick border-warning bg-warning/10 p-4 text-sm" role="status">
+              この画面を利用する権限がありません。利用できる管理画面へ移動しています。
+            </p>
+          ) : children}
         </main>
       </div>
     </div>

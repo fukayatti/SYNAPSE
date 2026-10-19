@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { membershipApi, type RoleInfo } from "@/lib/api";
-import { PERMISSION_NAMES, ROLE_NAMES, type RoleType } from "@/hooks/useCircleAuth";
+import { ROLE_NAMES, type RoleType } from "@/hooks/useCircleAuth";
 import { roleLabel } from "@/lib/roles";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -47,6 +47,23 @@ export function StaffTab({
   const { data: rolesData } = useQuery({
     queryKey: ["membershipRoles"],
     queryFn: () => membershipApi.getRoles(),
+  });
+
+  const eventRoleOptions = (rolesData ?? []).filter((roleInfo) =>
+    roleInfo.role === "event_manager" || roleInfo.role.startsWith("event_")
+  );
+  const eventPermissionColumns = [
+    { permission: "event:write", label: "イベント設定・管理" },
+    { permission: "wristband:replace", label: "紛失バンド交換" },
+    { permission: "stamp-rally:operate", label: "スタンプラリー受付" },
+  ] as const;
+  const changeRoleMutation = useMutation({
+    mutationFn: ({ id, role }: { id: string; role: RoleInfo["role"] }) => membershipApi.updateRole(id, role),
+    onSuccess: async () => {
+      toast.success("スタッフ権限を更新しました");
+      await queryClient.invalidateQueries({ queryKey: ["eventStaff", eventId] });
+    },
+    onError: (err: any) => toast.error(err.message || "スタッフ権限を更新できませんでした"),
   });
 
   // 招待削除確認用ステート
@@ -151,26 +168,6 @@ export function StaffTab({
         </Button>
       </div>
 
-      {/* 2026-09-27: イベント管理ではイベント共同管理者の権限だけを説明し、サークル権限との混同を防ぐ。 */}
-      <Card className="rounded-none bg-background shadow-none">
-        <CardHeader className="p-4 pb-2 border-b-thick border-border bg-muted/20">
-          <CardTitle className="text-xs uppercase font-bold">イベント権限</CardTitle>
-          <p className="text-[10px] text-muted-foreground mt-1">このイベントと所属サークルの範囲で適用される権限です。システム全体の権限や、サークル単体のロールは含みません。</p>
-        </CardHeader>
-        <CardContent className="p-4">
-          {rolesData?.filter((roleInfo: RoleInfo) => roleInfo.role === "event_manager").map((roleInfo) => (
-            <div key={roleInfo.role} className="space-y-2">
-              <Badge variant="default" className="rounded-none text-[8px] font-mono border-thick border-border bg-transparent text-foreground uppercase">
-                {ROLE_NAMES[roleInfo.role as RoleType] || roleInfo.role}
-              </Badge>
-              <p className="text-xs text-muted-foreground leading-relaxed">
-                権限: {roleInfo.permissions.map((permission) => PERMISSION_NAMES[permission] || permission).join("、 ") || "なし"}
-              </p>
-            </div>
-          ))}
-        </CardContent>
-      </Card>
-
       {/* 招待リンク一覧 */}
       {invites && invites.length > 0 && (
         <Card className=" rounded-none bg-background shadow-none">
@@ -185,12 +182,11 @@ export function StaffTab({
                 inv.circleId ? "circle" : inv.role === "circle_manager" ? "host" : "event";
               const path = kind === "circle" ? "circle" : "event";
               const inviteUrl = `${window.location.origin}/${path}/invite/${inv.token}`;
-              const purposeLabel =
-                kind === "host"
-                  ? "サークル出店"
-                  : kind === "event"
-                    ? "イベント共同管理者"
-                    : "サークルスタッフ";
+              const purposeLabel = kind === "host"
+                ? "サークル出店"
+                : kind === "event"
+                  ? ROLE_NAMES[inv.role as RoleType] || roleLabel(inv.role)
+                  : "サークルスタッフ";
               // 有効期限の残り時間表示 (2026-07-14 P1-4)。24h未満は時間、以上は日で概算。
               const msLeft = new Date(inv.expiresAt).getTime() - Date.now();
               const hoursLeft = Math.max(0, Math.floor(msLeft / 3_600_000));
@@ -313,6 +309,68 @@ export function StaffTab({
         </CardContent>
       </Card>
 
+      {/* 2026-10-20: 権限の違いを一覧の直下に示し、管理者がスタッフごとに担当ロールを選べるようにする。 */}
+      <Card className="rounded-none bg-background shadow-none">
+        <CardHeader className="border-b-thick border-border bg-muted/20 p-4 pb-2">
+          <CardTitle className="text-xs font-bold uppercase">イベントスタッフ権限</CardTitle>
+          <p className="mt-1 text-[10px] text-muted-foreground">
+            イベント管理者は登録済みスタッフの一覧から権限を変更できます。各ロールの可否を確認してください。
+          </p>
+        </CardHeader>
+        <CardContent className="p-4">
+          {/* 2026-10-20: 狭い画面では横スクロールを避け、担当ロールごとの可否を縦に読める形にする。 */}
+          <div className="space-y-3 md:hidden">
+            {eventRoleOptions.map((roleInfo) => (
+              <section key={roleInfo.role} className="border-thin border-border p-3">
+                <h3 className="text-[11px] font-bold">
+                  {ROLE_NAMES[roleInfo.role as RoleType] || roleLabel(roleInfo.role)}
+                </h3>
+                <dl className="mt-2 space-y-1.5 text-[10px]">
+                  {eventPermissionColumns.map(({ permission, label }) => {
+                    const allowed = roleInfo.permissions.includes(permission);
+                    return (
+                      <div key={permission} className="flex items-start justify-between gap-3">
+                        <dt className="min-w-0">{label}</dt>
+                        <dd className={`shrink-0 font-bold ${allowed ? "text-success" : "text-muted-foreground"}`}>
+                          {allowed ? "利用可" : "利用不可"}
+                        </dd>
+                      </div>
+                    );
+                  })}
+                </dl>
+              </section>
+            ))}
+          </div>
+          <div className="hidden overflow-x-auto md:block">
+          <table className="w-full min-w-[620px] border-collapse text-left text-[10px]">
+            <thead>
+              <tr className="border-b-thick border-border">
+                <th scope="col" className="p-2">ロール</th>
+                {eventPermissionColumns.map(({ permission, label }) => (
+                  <th key={permission} scope="col" className="p-2">{label}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {eventRoleOptions.map((roleInfo) => (
+                <tr key={roleInfo.role} className="border-b-thin border-border">
+                  <th scope="row" className="p-2 font-bold">{ROLE_NAMES[roleInfo.role as RoleType] || roleLabel(roleInfo.role)}</th>
+                  {eventPermissionColumns.map(({ permission }) => {
+                    const allowed = roleInfo.permissions.includes(permission);
+                    return (
+                      <td key={permission} className={`p-2 font-bold ${allowed ? "text-success" : "text-muted-foreground"}`}>
+                        {allowed ? "利用可" : "利用不可"}
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          </div>
+        </CardContent>
+      </Card>
+
       {/* 2026-09-27: イベント所属者が増えてもタブを縦に伸ばさず、既存操作を表モーダル内に保つ。 */}
       <Modal isOpen={isStaffTableOpen} onClose={() => setIsStaffTableOpen(false)} title="登録済みスタッフ" subtitle={`${staffMembers?.length ?? 0}人`} maxWidth="xl">
         <div className="relative">
@@ -320,6 +378,35 @@ export function StaffTab({
           <Input aria-label="イベントスタッフを検索" value={staffSearch} onChange={(e) => setStaffSearch(e.target.value)} placeholder="名前・メールアドレスで検索" className="pl-9 rounded-none border-thick border-border" />
         </div>
         <div className="max-h-[55vh] overflow-auto border-thick border-border">
+          {/* 2026-10-20: モバイルで権限選択と解除操作を横にはみ出させないため、一覧をカードにする。 */}
+          <div className="divide-y divide-border md:hidden">
+            {filteredStaffMembers.map((member) => (
+              <section key={member.id} className="space-y-3 p-3">
+                <div className="min-w-0">
+                  <p className="break-words text-xs font-bold">{member.userName || "名前未設定"}</p>
+                  <p className="break-all text-[10px] text-muted-foreground">{member.userEmail}</p>
+                </div>
+                <label className="block space-y-1 text-[10px] font-bold">
+                  <span>権限</span>
+                  <select
+                    aria-label={`${member.userName || member.userEmail}の権限`}
+                    value={member.role}
+                    onChange={(event) => changeRoleMutation.mutate({ id: member.id, role: event.target.value as RoleInfo["role"] })}
+                    disabled={changeRoleMutation.isPending}
+                    className="min-h-11 w-full min-w-0 border-thick border-border bg-background px-2 text-[10px] font-mono"
+                  >
+                    {!eventRoleOptions.some((roleInfo) => roleInfo.role === member.role) && <option value={member.role}>{roleLabel(member.role)}</option>}
+                    {eventRoleOptions.map((roleInfo) => (
+                      <option key={roleInfo.role} value={roleInfo.role}>{ROLE_NAMES[roleInfo.role as RoleType] || roleLabel(roleInfo.role)}</option>
+                    ))}
+                  </select>
+                </label>
+                <Button variant="outline" size="sm" onClick={() => handleOpenDeactivate(member)} disabled={deactivateStaffMutation.isPending} className="min-h-10 w-full border-thick border-border hover:bg-destructive hover:text-destructive-foreground text-[10px] rounded-none shadow-none">解除</Button>
+              </section>
+            ))}
+            {filteredStaffMembers.length === 0 && <p className="p-6 text-center text-muted-foreground">該当するスタッフがいません</p>}
+          </div>
+          <div className="hidden md:block">
           <table className="w-full min-w-[520px] text-xs text-left font-mono">
             <thead className="sticky top-0 bg-background"><tr className="border-b-thick border-border"><th className="p-3">名前</th><th className="p-3">メール</th><th className="p-3">ロール</th><th className="p-3 text-right">操作</th></tr></thead>
             <tbody>
@@ -327,13 +414,27 @@ export function StaffTab({
                 <tr key={member.id} className="border-b-thin border-border">
                   <td className="p-3 font-bold">{member.userName || "名前未設定"}</td>
                   <td className="p-3">{member.userEmail}</td>
-                  <td className="p-3"><Badge variant="default" className="rounded-none text-[8px] font-mono border-thick border-border bg-transparent text-foreground uppercase">{roleLabel(member.role)}</Badge></td>
+                  <td className="p-3">
+                    <select
+                      aria-label={`${member.userName || member.userEmail}の権限`}
+                      value={member.role}
+                      onChange={(event) => changeRoleMutation.mutate({ id: member.id, role: event.target.value as RoleInfo["role"] })}
+                      disabled={changeRoleMutation.isPending}
+                      className="min-h-9 min-w-48 border-thick border-border bg-background px-2 text-[10px] font-mono"
+                    >
+                      {!eventRoleOptions.some((roleInfo) => roleInfo.role === member.role) && <option value={member.role}>{roleLabel(member.role)}</option>}
+                      {eventRoleOptions.map((roleInfo) => (
+                        <option key={roleInfo.role} value={roleInfo.role}>{ROLE_NAMES[roleInfo.role as RoleType] || roleLabel(roleInfo.role)}</option>
+                      ))}
+                    </select>
+                  </td>
                   <td className="p-3 text-right"><Button variant="outline" size="sm" onClick={() => handleOpenDeactivate(member)} disabled={deactivateStaffMutation.isPending} className="border-thick border-border hover:bg-destructive hover:text-destructive-foreground text-[10px] h-7 px-2 rounded-none shadow-none">解除</Button></td>
                 </tr>
               ))}
               {filteredStaffMembers.length === 0 && <tr><td colSpan={4} className="p-6 text-center text-muted-foreground">該当するスタッフがいません</td></tr>}
             </tbody>
           </table>
+          </div>
         </div>
       </Modal>
 

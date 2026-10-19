@@ -9,22 +9,26 @@ import {
 import { isUnauthorizedSessionError } from "../src/lib/session-error";
 
 describe("shared authorization domains", () => {
-  test("keeps the canonical role permission sets unchanged", () => {
-    // These arrays match the pre-extraction packages/db/src/schema/core.ts contract.
+  test("keeps the shared role permission sets explicit", () => {
+    // 2026-10-20: 新しい当日スタッフロールも含め、画面と API で共有する権限表を固定する。
     expect(ROLE_PERMISSIONS).toEqual({
       super_admin: [
         "system:read", "system:write", "event:read", "event:write", "event:delete",
         "circle:read", "circle:write", "circle:delete", "menu:read", "menu:write", "menu:delete",
         "order:read", "order:write", "order:delete", "staff:read", "staff:write", "staff:delete",
         "stock:read", "stock:write", "sales:read", "member:read", "member:write", "member:delete",
-        "coupon:read", "coupon:write", "discount:read", "discount:write",
+        "coupon:read", "coupon:write", "discount:read", "discount:write", "wristband:replace", "stamp-rally:operate",
       ],
       event_manager: [
         "event:read", "event:write", "circle:read", "circle:write", "circle:delete",
         "menu:read", "menu:write", "menu:delete", "order:read", "order:write", "order:delete",
         "staff:read", "staff:write", "staff:delete", "stock:read", "stock:write", "sales:read",
         "member:read", "member:write", "member:delete", "coupon:read", "coupon:write", "discount:read", "discount:write",
+        "wristband:replace", "stamp-rally:operate",
       ],
+      event_staff: ["event:read", "wristband:replace", "stamp-rally:operate"],
+      event_wristband_staff: ["event:read", "wristband:replace"],
+      event_stamp_staff: ["event:read", "stamp-rally:operate"],
       circle_manager: [
         "circle:read", "circle:write", "menu:read", "menu:write", "menu:delete",
         "order:read", "order:write", "staff:read", "staff:write", "staff:delete",
@@ -53,6 +57,17 @@ describe("shared authorization domains", () => {
     expect(hasRolePermission(ROLES.CIRCLE_MANAGER, "discount:write")).toBe(true);
   });
 
+  // 2026-10-20: 当日スタッフはイベント設定に触れず、割り当てられた運営機能だけを利用できる。
+  test("limits event-day staff to their assigned operations", () => {
+    expect(hasRolePermission(ROLES.EVENT_STAFF, "wristband:replace")).toBe(true);
+    expect(hasRolePermission(ROLES.EVENT_STAFF, "stamp-rally:operate")).toBe(true);
+    expect(hasRolePermission(ROLES.EVENT_STAFF, "event:write")).toBe(false);
+    expect(hasRolePermission(ROLES.EVENT_WRISTBAND_STAFF, "wristband:replace")).toBe(true);
+    expect(hasRolePermission(ROLES.EVENT_WRISTBAND_STAFF, "stamp-rally:operate")).toBe(false);
+    expect(hasRolePermission(ROLES.EVENT_STAMP_STAFF, "stamp-rally:operate")).toBe(true);
+    expect(hasRolePermission(ROLES.EVENT_STAMP_STAFF, "wristband:replace")).toBe(false);
+  });
+
   test("keeps event and system boundaries while preserving backend super-admin permissions", () => {
     expect(hasRolePermission(ROLES.EVENT_MANAGER, "event:delete")).toBe(false);
     expect(hasRolePermission(ROLES.EVENT_MANAGER, "system:write")).toBe(false);
@@ -66,7 +81,7 @@ describe("shared authorization domains", () => {
       null,
       undefined,
       "",
-      "event_staff",
+      "event_unrecognized",
       "system_staff",
       "system_manager",
       "unknown_role",
