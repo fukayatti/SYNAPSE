@@ -1,12 +1,13 @@
 import { useState, useEffect } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { eventApi, circleApi, orderApi, membershipApi } from "@/lib/api";
-import { EventAdminGuard, useAuth } from "@/hooks/useCircleAuth";
+import { EventAdminGuard, getAuthInfo, ROLES, saveAuthInfo, useAuth, useMySpaces } from "@/hooks/useCircleAuth";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Building2 } from "lucide-react";
+import { Building2, ChevronRight, Store } from "lucide-react";
 import { loadCircleSalesOrders } from "@/features/event-dashboard/sales";
 
 // 切り出したタブコンポーネント
@@ -32,7 +33,9 @@ import { ExportTab } from "@/components/event/ExportTab";
 import { EventReviewsTab } from "@/pages/dashboard/Reviews";
 
 export default function EventDashboard() {
-  const { eventId } = useAuth();
+  const navigate = useNavigate();
+  const { eventId, role, isLoading: authLoading, isAuthenticated } = useAuth();
+  const { data: spaces, isLoading: spacesLoading } = useMySpaces();
   const [searchParams, setSearchParams] = useSearchParams();
   const [activeTab, setActiveTab] = useState<string>(() => searchParams.get("tab") || "circles");
   const [eventName, setEventName] = useState<string>("イベントダッシュボード");
@@ -51,11 +54,31 @@ export default function EventDashboard() {
     });
   };
 
+  const circleSpaces = (spaces ?? []).filter((space: any) => Boolean(space.circleId));
+  const needsCircleSelection = !authLoading && isAuthenticated && role !== ROLES.EVENT_MANAGER && circleSpaces.length > 0;
+
+  const openCircleDashboard = (space: any) => {
+    const current = getAuthInfo();
+    if (!current) return;
+    // 2026-10-20: イベント管理権限がない利用者には、所属サークルの管理画面を選べる導線を示す。
+    // 遷移を先に行い、authChange による旧画面ガードの誤リダイレクトを防ぐ。
+    navigate("/circle/dashboard");
+    saveAuthInfo({
+      ...current,
+      circleId: space.circleId,
+      eventId: space.eventId ?? null,
+      role: space.effectiveRole ?? space.role,
+      membershipId: space.id,
+      circleName: space.circle?.name ?? space.circleName ?? space.name ?? null,
+      isEventAdmin: false,
+    });
+  };
+
   // イベント情報取得
   const { data: eventData } = useQuery({
     queryKey: ["event", eventId],
     queryFn: () => eventApi.get(eventId!),
-    enabled: !!eventId,
+    enabled: !!eventId && role === ROLES.EVENT_MANAGER,
   });
 
   useEffect(() => {
@@ -75,7 +98,7 @@ export default function EventDashboard() {
     queryKey: ["circles", eventId],
     queryFn: () => circleApi.list(eventId!),
     // 2026-10-03: 表示していない管理タブの問い合わせを実行しない。
-    enabled: !!eventId && (activeTab === "circles" || activeTab === "sales" || activeTab === "store-areas"),
+    enabled: !!eventId && role === ROLES.EVENT_MANAGER && (activeTab === "circles" || activeTab === "sales" || activeTab === "store-areas"),
     // 2026-10-07 (#9): 報告から30分を超えた混雑度を本部画面でも未報告へ切り替える。
     refetchInterval: activeTab === "circles" ? 60_000 : false,
   });
@@ -104,15 +127,54 @@ export default function EventDashboard() {
   } = useQuery({
     queryKey: ["eventStaff", eventId],
     queryFn: () => membershipApi.listByEvent(eventId!),
-    enabled: !!eventId && activeTab === "staff",
+    enabled: !!eventId && role === ROLES.EVENT_MANAGER && activeTab === "staff",
   });
 
   // 招待中一覧取得
   const { data: invites } = useQuery({
     queryKey: ["invites", eventId],
     queryFn: () => membershipApi.listInvites(undefined, eventId!),
-    enabled: !!eventId && activeTab === "staff",
+    enabled: !!eventId && role === ROLES.EVENT_MANAGER && activeTab === "staff",
   });
+
+  if (needsCircleSelection) {
+    return (
+      <div className="mx-auto max-w-3xl space-y-5 p-4 py-10 font-mono sm:p-8" role="main">
+        <header className="space-y-2 border-b-thick border-border pb-4">
+          <Building2 className="h-8 w-8 text-primary" aria-hidden="true" />
+          <h1 className="text-2xl font-black sm:text-3xl">管理するサークルを選択</h1>
+          <p className="text-sm leading-relaxed text-muted-foreground">
+            このアカウントはイベント全体の管理権限を持っていません。管理画面を利用できる所属サークルを選んでください。
+          </p>
+        </header>
+        <div className="grid gap-3 sm:grid-cols-2">
+          {circleSpaces.map((space: any) => {
+            const name = space.circle?.name ?? space.circleName ?? space.name ?? "サークル";
+            return (
+              <Card key={space.id} className="border-thick border-border">
+                <CardContent className="flex items-center justify-between gap-3 p-4">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <Store className="h-5 w-5 shrink-0 text-primary" aria-hidden="true" />
+                    <div className="min-w-0">
+                      <h2 className="truncate text-sm font-bold">{name}</h2>
+                      <p className="mt-1 text-xs text-muted-foreground">{space.eventName ?? space.event?.name ?? "所属サークル"}</p>
+                    </div>
+                  </div>
+                  <Button className="shrink-0" onClick={() => openCircleDashboard(space)}>
+                    管理画面へ <ChevronRight className="ml-1 h-4 w-4" aria-hidden="true" />
+                  </Button>
+                </CardContent>
+              </Card>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
+  if (!authLoading && isAuthenticated && role !== ROLES.EVENT_MANAGER && spacesLoading) {
+    return <div className="flex min-h-[200px] items-center justify-center"><Skeleton className="h-20 w-full max-w-xl" /></div>;
+  }
 
   if (!eventId) {
     return (
