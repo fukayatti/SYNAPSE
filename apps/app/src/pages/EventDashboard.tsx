@@ -236,6 +236,7 @@ export default function EventDashboard() {
             <WristbandsTab
               eventId={eventId}
               hasPhysicalWristband={eventData?.hasPhysicalWristband}
+              allowSelfIssue={eventData?.allowSelfIssue}
             />
           )}
 

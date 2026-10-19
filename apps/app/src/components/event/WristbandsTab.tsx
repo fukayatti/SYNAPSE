@@ -37,6 +37,7 @@ import { WristbandBatchHistory } from "@/components/event/WristbandBatchHistory"
 interface WristbandsTabProps {
   eventId: string;
   hasPhysicalWristband?: boolean;
+  allowSelfIssue?: boolean;
 }
 
 type VisitorFilters = {
@@ -60,7 +61,7 @@ const VISITOR_SORT_COLUMNS: { label: string; field: Exclude<VisitorSortField, "c
   { label: "バンド状態", field: "bandStatus" },
 ];
 
-export function WristbandsTab({ eventId, hasPhysicalWristband = true }: WristbandsTabProps) {
+export function WristbandsTab({ eventId, hasPhysicalWristband = true, allowSelfIssue = true }: WristbandsTabProps) {
   const queryClient = useQueryClient();
 
   // 検索・表示関連の状態
@@ -551,35 +552,43 @@ export function WristbandsTab({ eventId, hasPhysicalWristband = true }: Wristban
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4 p-4">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <p className="text-[10px] leading-relaxed text-muted-foreground">
-                  受付にQRを掲示するか、スタッフが個別に来場者アカウントを発行できます。
-                </p>
-                <Button
-                  onClick={() => {
-                    setIssuedUser(null);
-                    setIsIssueModalOpen(true);
-                  }}
-                  className="w-full shrink-0 border-thick border-primary bg-primary px-3 text-xs font-bold text-primary-foreground hover:bg-background hover:text-foreground sm:w-auto"
-                >
-                  <Plus className="mr-1 h-4 w-4" />
-                  個別に発行
-                </Button>
-              </div>
-              <div className="border-t-thin border-border pt-4">
-                <div className="flex flex-col items-center gap-4 md:flex-row">
-                  <div className="shrink-0 border-thick border-border bg-white p-3">
-                    <QRCodeSVG value={selfIssueUrl} size={128} level="M" />
-                  </div>
-                  <div className="min-w-0 space-y-2 text-xs">
-                    <p className="font-bold underline">受付用セルフ登録QR</p>
-                    <p className="break-all border border-border bg-muted p-2 select-all">{selfIssueUrl}</p>
+              {allowSelfIssue ? (
+                <>
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <p className="text-[10px] leading-relaxed text-muted-foreground">
-                      来場者が読み取るとスマホ用IDが発行され、プロフィール登録へ進みます。
+                      受付にQRを掲示するか、スタッフが個別に来場者アカウントを発行できます。
                     </p>
+                    <Button
+                      onClick={() => {
+                        setIssuedUser(null);
+                        setIsIssueModalOpen(true);
+                      }}
+                      className="w-full shrink-0 border-thick border-primary bg-primary px-3 text-xs font-bold text-primary-foreground hover:bg-background hover:text-foreground sm:w-auto"
+                    >
+                      <Plus className="mr-1 h-4 w-4" />
+                      個別に発行
+                    </Button>
                   </div>
-                </div>
-              </div>
+                  <div className="border-t-thin border-border pt-4">
+                    <div className="flex flex-col items-center gap-4 md:flex-row">
+                      <div className="shrink-0 border-thick border-border bg-white p-3">
+                        <QRCodeSVG value={selfIssueUrl} size={128} level="M" />
+                      </div>
+                      <div className="min-w-0 space-y-2 text-xs">
+                        <p className="font-bold underline">受付用セルフ登録QR</p>
+                        <p className="break-all border border-border bg-muted p-2 select-all">{selfIssueUrl}</p>
+                        <p className="text-[10px] leading-relaxed text-muted-foreground">
+                          来場者が読み取るとスマホ用IDが発行され、プロフィール登録へ進みます。
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <p role="status" className="border-thin border-border bg-muted/20 p-3 text-xs leading-relaxed text-muted-foreground">
+                  来場者によるスマートフォンQRのセルフ発行はイベント設定で無効です。物理バンドを使わない個別対応は、来場者の詳細からスタッフ権限で行ってください。
+                </p>
+              )}
             </CardContent>
           </Card>
 
