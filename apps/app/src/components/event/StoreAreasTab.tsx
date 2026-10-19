@@ -1,9 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { MapPinned, Plus, Save, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { ErrorState } from "@/components/ui/ErrorState";
 import { circleApi, eventApi, parseStoreAreas, type Circle, type Event, type EventStoreArea } from "@/lib/api";
@@ -35,6 +34,7 @@ export function StoreAreasTab({
   const initialAreas = useMemo(() => parseStoreAreas(event.storeAreas), [event.storeAreas]);
   const [areas, setAreas] = useState<StoreArea[]>(initialAreas);
   const [savedAreas, setSavedAreas] = useState<StoreArea[]>(initialAreas);
+  const [newAreaName, setNewAreaName] = useState("");
   const initialAssignments = useMemo(() => Object.fromEntries(
     (circles ?? []).map((circle) => [circle.id, parseCircleStoreAreaId(circle.settings) ?? ""]),
   ), [circles]);
@@ -142,7 +142,16 @@ export function StoreAreasTab({
     seenNames.add(key);
   }
   const hasInvalidAreas = areas.some((area) => duplicateNames.has(area.id));
-  const addArea = () => setAreas((current) => [...current, { id: crypto.randomUUID(), name: "" }]);
+  const normalizedNewAreaName = newAreaName.trim().toLocaleLowerCase("ja-JP");
+  const isNewAreaNameDuplicate = Boolean(normalizedNewAreaName && seenNames.has(normalizedNewAreaName));
+  // 2026-10-20: 名前を入れてから追加し、空欄の仮エリアが保存を塞ぐ状態を作らない。
+  const addArea = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const name = newAreaName.trim();
+    if (!name || isNewAreaNameDuplicate || areas.length >= 50) return;
+    setAreas((current) => [...current, { id: crypto.randomUUID(), name }]);
+    setNewAreaName("");
+  };
   const updateAreaName = (id: string, name: string) => {
     setAreas((current) => current.map((area) => area.id === id ? { ...area, name } : area));
   };
@@ -162,62 +171,77 @@ export function StoreAreasTab({
         </p>
       </header>
 
-      <Card className="rounded-none bg-background shadow-none">
-        <CardContent className="space-y-4 pt-5">
-          <div className="flex items-center justify-between gap-3 border-b-thin border-border pb-2">
-            <div>
-              <h3 className="text-xs font-bold">エリアの登録</h3>
-              <p className="mt-1 text-[10px] text-muted-foreground">例：本館1階、屋外広場。エリアとサークルの割り当てはまとめて保存できます。</p>
-            </div>
-            <Button type="button" variant="outline" disabled={areas.length >= 50} onClick={addArea}>
-              <Plus className="mr-1 h-4 w-4" /> エリアを追加
-            </Button>
+      <section className="space-y-3" aria-labelledby="store-area-heading">
+        <div className="flex flex-col gap-3 border-b-thin border-border pb-3 sm:flex-row sm:items-end sm:justify-between">
+          <div className="space-y-1">
+            <h3 id="store-area-heading" className="text-xs font-bold">エリアの登録 <span className="font-normal text-muted-foreground">{areas.length}/50</span></h3>
+            <p className="text-[10px] text-muted-foreground">場所の名前を追加します。エリアは登録した順に表示され、割り当てと一緒に保存されます。</p>
           </div>
+          <form onSubmit={addArea} className="flex w-full gap-2 sm:w-auto sm:min-w-72">
+            <label className="sr-only" htmlFor="new-store-area-name">追加するエリア名</label>
+            <Input
+              id="new-store-area-name"
+              className="min-w-0 flex-1"
+              value={newAreaName}
+              maxLength={60}
+              onChange={(eventChange) => setNewAreaName(eventChange.target.value)}
+              placeholder="例：本館1階"
+              aria-invalid={isNewAreaNameDuplicate}
+              aria-describedby={isNewAreaNameDuplicate ? "new-store-area-error" : undefined}
+            />
+            <Button type="submit" variant="outline" disabled={!newAreaName.trim() || isNewAreaNameDuplicate || areas.length >= 50}>
+              <Plus className="mr-1 h-4 w-4" /> 追加
+            </Button>
+          </form>
+        </div>
 
-          {areas.length === 0 ? (
-            <p className="border-thin border-dashed border-border p-4 text-xs text-muted-foreground">
-              エリアはまだありません。追加するとサークルを場所ごとに整理できます。
-            </p>
-          ) : (
-            <ol className="space-y-2">
-              {areas.map((area, index) => {
-                const count = assignedCounts.get(area.id) ?? 0;
-                const isStampTarget = activeStampAreaIds.includes(area.id);
-                return (
-                  <li key={area.id} className="flex items-end gap-2 border-thin border-border p-3">
-                    <label className="min-w-0 flex-1 space-y-1">
-                      <span className="text-[10px] font-bold text-muted-foreground">エリア {index + 1}</span>
-                      <Input
-                        value={area.name}
-                        maxLength={60}
-                        onChange={(eventChange) => updateAreaName(area.id, eventChange.target.value)}
-                        placeholder="エリア名"
-                        aria-invalid={duplicateNames.has(area.id)}
-                      />
-                    </label>
-                    <span className="shrink-0 pb-3 text-[10px] text-muted-foreground">{count}サークル</span>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      aria-label={`${area.name || `エリア${index + 1}`}を削除`}
-                      title={count > 0 ? "サークルの割り当てを外してから削除してください" : isStampTarget ? "スタンプラリーの対象から外してから削除してください" : "エリアを削除"}
-                      disabled={count > 0 || isStampTarget}
-                      onClick={() => removeArea(area.id)}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </li>
-                );
-              })}
-            </ol>
-          )}
+        {isNewAreaNameDuplicate && (
+          <p id="new-store-area-error" role="alert" className="text-xs text-destructive">同じ名前のエリアがあります。</p>
+        )}
 
-          {hasInvalidAreas && (
-            <p role="alert" className="text-xs text-destructive">エリア名を入力してください。重複した名前は使えません。</p>
-          )}
-          <p className="text-[10px] text-muted-foreground">{areas.length}/50件。エリア名は60文字まで登録できます。</p>
-        </CardContent>
-      </Card>
+        {areas.length === 0 ? (
+          <p className="py-2 text-xs text-muted-foreground">まだエリアはありません。上の欄から追加してください。</p>
+        ) : (
+          <ol className="divide-y divide-border">
+            {areas.map((area, index) => {
+              const count = assignedCounts.get(area.id) ?? 0;
+              const isStampTarget = activeStampAreaIds.includes(area.id);
+              return (
+                <li key={area.id} className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 py-2 sm:grid-cols-[auto_minmax(0,1fr)_auto_auto]">
+                  <span aria-hidden="true" className="w-7 text-xs font-bold text-muted-foreground">{String(index + 1).padStart(2, "0")}</span>
+                  <label className="min-w-0">
+                    <span className="sr-only">エリア {index + 1} の名前</span>
+                    <Input
+                      value={area.name}
+                      maxLength={60}
+                      onChange={(eventChange) => updateAreaName(area.id, eventChange.target.value)}
+                      placeholder="エリア名"
+                      aria-invalid={duplicateNames.has(area.id)}
+                    />
+                  </label>
+                  <span className="col-start-2 text-[10px] text-muted-foreground sm:col-start-auto">{count}サークル</span>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    aria-label={`${area.name || `エリア${index + 1}`}を削除`}
+                    title={count > 0 ? "サークルの割り当てを外してから削除してください" : isStampTarget ? "スタンプラリーの対象から外してから削除してください" : "エリアを削除"}
+                    disabled={count > 0 || isStampTarget}
+                    onClick={() => removeArea(area.id)}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </li>
+              );
+            })}
+          </ol>
+        )}
+
+        {hasInvalidAreas && (
+          <p role="alert" className="text-xs text-destructive">エリア名を入力してください。重複した名前は使えません。</p>
+        )}
+        <p className="text-[10px] text-muted-foreground">エリア名は60文字まで登録できます。</p>
+      </section>
 
       <section className="space-y-3" aria-labelledby="circle-area-heading">
         <div className="border-b-thin border-border pb-2">
