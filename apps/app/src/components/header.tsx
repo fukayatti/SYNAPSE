@@ -49,10 +49,10 @@ import { authClient } from "@/lib/auth-client";
 //     を使うと、以前のhover判定にも干渉したため廃止した)
 //
 // モバイルでは通知/組織切り替え/アカウントを1つのメニュートリガーへまとめる。
-// 2026-10-20: OSメニューのように親項目を左へ残し、選択中の内容を右側へ展開する。
-// 最上位の開閉は activeMenu、横へ展開する項目は mobileSection で管理する。
+// 2026-10-20: 各項目は情報量に合った個別ウィンドウで表示し、横並びの詳細ペインを避ける。
+// 最上位の開閉は activeMenu、表示中のウィンドウは mobileSection で管理する。
 type MenuKey = "notif" | "space" | "account" | "nav" | null;
-// 3本線メニューで横に展開する項目 (null = 詳細パネル未選択)
+// 3本線メニューで開いている個別ウィンドウ (null = メニュー項目一覧)
 type MobileSection = "notif" | "space" | "account" | null;
 
 export default function Header() {
@@ -90,7 +90,7 @@ export default function Header() {
     return () => window.removeEventListener("fesflow:dashboard-menu-state", syncDashboardMenu);
   }, []);
 
-  // 横の詳細パネルは1つだけ表示し、メニューを閉じたら初期状態へ戻す。
+  // 個別ウィンドウは1つだけ表示し、メニューを閉じたら項目一覧へ戻す。
   const [mobileSection, setMobileSection] = useState<MobileSection>(null);
   useEffect(() => {
     if (activeMenu !== "nav") setMobileSection(null);
@@ -851,13 +851,12 @@ export default function Header() {
                 )}
               </div>
 
-              {/* 3本線メニュー (1024px未満のみ)。親項目を残したまま詳細を横へ展開する。
-                  開閉はクリック/タップ、ポインター移動、キーボードフォーカスに対応し、
-                  詳細内容はデスクトップのクリックパネルと共有する。 */}
+              {/* 3本線メニュー (1024px未満のみ)。カテゴリごとに幅を変えた単独ウィンドウを開き、
+                  小さい画面でも一覧と詳細を横並びにせず、タップで切り替える (2026-10-20)。 */}
               <div ref={navRef} className="relative lg:hidden">
                 <button
                   onClick={() => toggleMenu("nav")}
-                  aria-haspopup="menu"
+                  aria-haspopup="dialog"
                   aria-expanded={mobileNavOpen}
                   aria-label={mobileNavOpen ? "メニューを閉じる" : "メニューを開く"}
                   className="flex items-center justify-center gap-1.5 h-8 px-2 border-thick border-border bg-background text-foreground hover:bg-primary hover:text-primary-foreground transition-all rounded-none"
@@ -876,13 +875,23 @@ export default function Header() {
                 </button>
 
                 {mobileNavOpen && (
-                  <div className="absolute right-0 top-full z-50 w-[min(42rem,calc(100vw-1rem))] pt-2">
-                    {/* 2026-10-20: OSメニューのように親項目を残したまま、選択した内容を横へ展開する。 */}
-                    <div className="grid max-h-[calc(100dvh-5rem)] grid-cols-[minmax(7.5rem,0.85fr)_minmax(0,1.15fr)] overflow-hidden border-thick border-border bg-background text-left shadow-none">
-                      <div className="min-w-0 overflow-y-auto border-r-thin border-border">
+                  <div
+                    className={`absolute right-0 top-full z-50 pt-2 ${
+                      mobileSection === "notif"
+                        ? "w-[min(26rem,calc(100vw-1rem))]"
+                        : mobileSection === "space"
+                          ? "w-[min(28rem,calc(100vw-1rem))]"
+                          : mobileSection === "account"
+                            ? "w-[min(21rem,calc(100vw-1rem))]"
+                            : "w-[min(18rem,calc(100vw-1rem))]"
+                    }`}
+                  >
+                    {mobileSection === null ? (
+                      <div role="dialog" aria-label="管理画面メニュー" className="max-h-[calc(100dvh-5rem)] overflow-y-auto border-thick border-border bg-background text-left shadow-none">
                         <div className="flex items-center justify-between gap-2 border-b-thin border-border px-3 py-2.5">
                           <span className="text-[11px] font-black uppercase tracking-wider">[メニュー]</span>
                           <button
+                            type="button"
                             onClick={() => setActiveMenu(null)}
                             className="shrink-0 text-[10px] underline hover:text-primary cursor-pointer"
                           >
@@ -892,12 +901,9 @@ export default function Header() {
                         <nav aria-label="メニュー項目" className="flex min-w-0 flex-col">
                           <button
                             type="button"
-                            aria-haspopup="true"
-                            aria-expanded={mobileSection === "notif"}
-                            onMouseEnter={() => setMobileSection("notif")}
-                            onFocus={() => setMobileSection("notif")}
+                            aria-haspopup="dialog"
                             onClick={() => setMobileSection("notif")}
-                            className={`flex min-h-12 min-w-0 items-center justify-between gap-1 border-b-thin border-border px-2 py-3 text-left font-headline text-[11px] uppercase tracking-wide transition-all sm:px-3 sm:text-[13px] ${mobileSection === "notif" ? "bg-primary text-primary-foreground" : "hover:bg-muted"}`}
+                            className="flex min-h-12 min-w-0 items-center justify-between gap-2 border-b-thin border-border px-3 py-3 text-left font-headline text-[11px] uppercase tracking-wide transition-all hover:bg-muted sm:text-[13px]"
                           >
                             <span className="flex min-w-0 items-center gap-2">
                               <span className="relative flex shrink-0 items-center justify-center">
@@ -915,12 +921,9 @@ export default function Header() {
 
                           <button
                             type="button"
-                            aria-haspopup="true"
-                            aria-expanded={mobileSection === "space"}
-                            onMouseEnter={() => setMobileSection("space")}
-                            onFocus={() => setMobileSection("space")}
+                            aria-haspopup="dialog"
                             onClick={() => setMobileSection("space")}
-                            className={`flex min-h-12 min-w-0 items-center justify-between gap-1 border-b-thin border-border px-2 py-3 text-left font-headline text-[11px] uppercase tracking-wide transition-all sm:px-3 sm:text-[13px] ${mobileSection === "space" ? "bg-primary text-primary-foreground" : "hover:bg-muted"}`}
+                            className="flex min-h-12 min-w-0 items-center justify-between gap-2 border-b-thin border-border px-3 py-3 text-left font-headline text-[11px] uppercase tracking-wide transition-all hover:bg-muted sm:text-[13px]"
                           >
                             <span className="flex min-w-0 items-center gap-2">
                               {pathname.startsWith("/sys") ? <Shield className="h-3.5 w-3.5 shrink-0" /> :
@@ -933,12 +936,9 @@ export default function Header() {
 
                           <button
                             type="button"
-                            aria-haspopup="true"
-                            aria-expanded={mobileSection === "account"}
-                            onMouseEnter={() => setMobileSection("account")}
-                            onFocus={() => setMobileSection("account")}
+                            aria-haspopup="dialog"
                             onClick={() => setMobileSection("account")}
-                            className={`flex min-h-12 min-w-0 items-center justify-between gap-1 border-b-thin border-border px-2 py-3 text-left font-headline text-[11px] uppercase tracking-wide transition-all sm:px-3 sm:text-[13px] ${mobileSection === "account" ? "bg-primary text-primary-foreground" : "hover:bg-muted"}`}
+                            className="flex min-h-12 min-w-0 items-center justify-between gap-2 border-b-thin border-border px-3 py-3 text-left font-headline text-[11px] uppercase tracking-wide transition-all hover:bg-muted sm:text-[13px]"
                           >
                             <span className="flex min-w-0 items-center gap-2">
                               {me?.image ? (
@@ -956,7 +956,7 @@ export default function Header() {
                               key={to}
                               to={to}
                               onClick={() => setActiveMenu(null)}
-                              className={`flex min-h-12 min-w-0 items-center gap-2 border-b-thin border-border px-2 py-3 font-headline text-[11px] uppercase tracking-wide transition-all sm:px-3 sm:text-[13px] ${
+                              className={`flex min-h-12 min-w-0 items-center gap-2 border-b-thin border-border px-3 py-3 font-headline text-[11px] uppercase tracking-wide transition-all sm:text-[13px] ${
                                 isActive(to)
                                   ? "bg-primary text-primary-foreground font-bold"
                                   : "bg-background text-foreground hover:bg-muted"
@@ -968,26 +968,43 @@ export default function Header() {
                           ))}
                         </nav>
                       </div>
-
-                      <div className="min-w-0 overflow-y-auto">
-                        {mobileSection ? (
-                          <>
-                            <div className="sticky top-0 border-b-thin border-border bg-background px-2 py-2.5 text-[10px] font-black uppercase tracking-wider sm:px-3 sm:text-[11px]">
-                              {mobileSection === "notif" && "[お知らせ・通知]"}
-                              {mobileSection === "space" && "[組織切り替え]"}
-                              {mobileSection === "account" && "[アカウント]"}
-                            </div>
-                            <div className="min-w-0 max-w-full overflow-x-hidden p-2 sm:p-3">
-                              {mobileSection === "notif" && notifPanelBody}
-                              {mobileSection === "space" && spacePanelBody}
-                              {mobileSection === "account" && accountPanelBody}
-                            </div>
-                          </>
-                        ) : (
-                          <p className="p-3 text-[10px] text-muted-foreground">項目を選ぶと、詳細がここに表示されます。</p>
-                        )}
-                      </div>
-                    </div>
+                    ) : (
+                      <section
+                        role="dialog"
+                        aria-modal="false"
+                        aria-label={mobileSection === "notif" ? "お知らせ・通知" : mobileSection === "space" ? "組織切り替え" : "アカウント"}
+                        className="max-h-[calc(100dvh-5rem)] overflow-y-auto border-thick border-border bg-background text-left shadow-none"
+                      >
+                        <div className="sticky top-0 z-10 flex items-center justify-between gap-2 border-b-thin border-border bg-background px-2 py-2.5 sm:px-3">
+                          <button
+                            type="button"
+                            onClick={() => setMobileSection(null)}
+                            aria-label="メニュー一覧に戻る"
+                            className="shrink-0 px-1 text-[10px] font-bold underline hover:text-primary"
+                          >
+                            ‹ メニュー
+                          </button>
+                          <span className="min-w-0 truncate text-center text-[10px] font-black uppercase tracking-wider sm:text-[11px]">
+                            {mobileSection === "notif" && "[お知らせ・通知]"}
+                            {mobileSection === "space" && "[組織切り替え]"}
+                            {mobileSection === "account" && "[アカウント]"}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setActiveMenu(null)}
+                            aria-label="メニューを閉じる"
+                            className="shrink-0 px-1 text-[10px] underline hover:text-primary"
+                          >
+                            閉じる
+                          </button>
+                        </div>
+                        <div className="min-w-0 max-w-full overflow-x-hidden p-2 sm:p-3">
+                          {mobileSection === "notif" && notifPanelBody}
+                          {mobileSection === "space" && spacePanelBody}
+                          {mobileSection === "account" && accountPanelBody}
+                        </div>
+                      </section>
+                    )}
                   </div>
                 )}
               </div>
