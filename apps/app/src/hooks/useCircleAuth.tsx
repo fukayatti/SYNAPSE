@@ -615,7 +615,7 @@ export function useMySpaces() {
     queryKey: ["mySpaces", email],
     queryFn: async () => {
       if (!email) return [];
-      return await membershipApi.listMy(email);
+      return await membershipApi.listMy();
     },
     enabled: !!email,
     refetchOnWindowFocus: true,
@@ -640,10 +640,8 @@ export interface ResolvedActiveSpace {
   membership: any | null;
 }
 
-export async function resolveActiveSpaceAfterAuth(
-  email: string
-): Promise<ResolvedActiveSpace> {
-  const memberships = await membershipApi.listMy(email);
+export async function resolveActiveSpaceAfterAuth(): Promise<ResolvedActiveSpace> {
+  const memberships = await membershipApi.listMy();
   const systemMembership = memberships.find((m: any) => m.role === "super_admin");
   const eventMembership = memberships.find((m: any) => m.role === "event_manager");
   const circleMembership = memberships.find((m: any) => m.circleId);

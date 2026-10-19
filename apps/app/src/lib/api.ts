@@ -371,8 +371,8 @@ export const reviewApi = {
 // Membership API
 export const membershipApi = {
   getRoles: () => fetchApi<RoleInfo[]>("/api/memberships/roles"),
-  myMemberships: (userId: string) =>
-    fetchApi<MembershipWithRelations[]>(`/api/memberships/my?userId=${userId}`),
+  // 2026-10-19: /my はセッションから本人を特定するため、識別子をクエリへ含めない。
+  myMemberships: () => fetchApi<MembershipWithRelations[]>("/api/memberships/my"),
   listByCircle: (circleId: string) =>
     fetchApi<MembershipWithUser[]>(`/api/memberships/circle/${circleId}`),
   listByEvent: (eventId: string) =>
@@ -445,8 +445,8 @@ export const membershipApi = {
     fetchApi<{ success: boolean }>(`/api/memberships/invite/${id}`, {
       method: "DELETE",
     }),
-  listMy: (userEmail: string) =>
-    fetchApi<any[]>(`/api/memberships/my?userEmail=${encodeURIComponent(userEmail)}`),
+  // 2026-10-19: /my はセッション本人の所属だけを返すため、メールをURLへ重複送信しない。
+  listMy: () => fetchApi<any[]>("/api/memberships/my"),
 };
 
 // アカウント管理 (2026-07-04 セルフサービス: 名前/アイコン/メール変更・退出・削除)
@@ -1338,7 +1338,6 @@ export interface UpdateStaffInput {
 }
 
 export interface CheckPermissionInput {
-  userId: string;
   circleId?: string;
   eventId?: string;
   permission: string;
@@ -1374,7 +1373,6 @@ export interface CreateInviteInput {
 export interface AcceptInviteInput {
   token?: string;
   code?: string;
-  userName: string;
 }
 
 // 招待種別 (2026-07-12 SaaS)
