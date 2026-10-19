@@ -39,6 +39,7 @@ import {
   X,
   MapPinned,
   Gauge,
+  ShieldAlert,
 } from "lucide-react";
 
 interface MenuItem {
@@ -198,6 +199,7 @@ export default function DashboardLayout({
         { title: "在庫・売り切れ", tab: "inventory", icon: Boxes },
         { title: "一斉アナウンス", tab: "announce", icon: Megaphone },
         { title: "リストバンド管理", tab: "wristbands", icon: IdCard },
+        { title: "紛失バンド交換", tab: "wristband-loss", icon: ShieldAlert },
         { title: "景品交換受付", tab: "stamp-redemptions", icon: Ticket, permission: "event:write" },
         { title: "スタンプラリー", tab: "stamp-rally", icon: Ticket },
       ],

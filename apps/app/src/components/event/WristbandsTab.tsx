@@ -28,13 +28,13 @@ import { digitalQrIssueUrl } from "@/lib/digital-qr-url";
 import { visitorUrl } from "@/lib/visitor-url";
 import { generateWristbandIds } from "@/lib/wristband-id-generator";
 import { WristbandBatchHistory } from "@/components/event/WristbandBatchHistory";
-import { LostWristbandsTab } from "@/components/event/LostWristbandsTab";
 import { VisitorRecordEditor } from "@/components/event/VisitorRecordEditor";
 
 interface WristbandsTabProps {
   eventId: string;
   hasPhysicalWristband?: boolean;
   allowSelfIssue?: boolean;
+  onOpenLossHandling: () => void;
 }
 
 type VisitorFilters = {
@@ -58,9 +58,8 @@ const VISITOR_SORT_COLUMNS: { label: string; field: Exclude<VisitorSortField, "c
   { label: "バンド状態", field: "bandStatus" },
 ];
 
-export function WristbandsTab({ eventId, hasPhysicalWristband = true, allowSelfIssue = true }: WristbandsTabProps) {
+export function WristbandsTab({ eventId, hasPhysicalWristband = true, allowSelfIssue = true, onOpenLossHandling }: WristbandsTabProps) {
   const queryClient = useQueryClient();
-  const [activeView, setActiveView] = useState<"management" | "lost">("management");
 
   // 検索・表示関連の状態
   const [searchInput, setSearchInput] = useState("");
@@ -185,23 +184,6 @@ export function WristbandsTab({ eventId, hasPhysicalWristband = true, allowSelfI
     },
   });
 
-  // リストバンド状態更新 API
-  const updateWristbandMutation = useMutation({
-    mutationFn: (input: { id: string; status: any; userId?: string }) =>
-      wristbandApi.update(input.id, { status: input.status, userId: input.userId }),
-    onSuccess: () => {
-      toast.success("リストバンド情報を更新しました");
-      queryClient.invalidateQueries({ queryKey: ["eventVisitors"] });
-      queryClient.invalidateQueries({ queryKey: ["lostWristbands", eventId] });
-      if (selectedUser?.user?.id) {
-        lookupMutation.mutate(selectedUser.user.id);
-      }
-    },
-    onError: (err: any) => {
-      toast.error(err.message || "リストバンド状態の更新に失敗しました");
-    },
-  });
-
   // スマホ用デジタルQR新規発行 API
   const issueUserMutation = useMutation({
     mutationFn: () => wristbandApi.issue(eventId),
@@ -311,12 +293,6 @@ export function WristbandsTab({ eventId, hasPhysicalWristband = true, allowSelfI
     }
   };
 
-  // 紛失ロックの簡易実行
-  const handleReportLost = (wbId: string) => {
-    if (!window.confirm("このリストバンドを紛失としてロックしますか？")) return;
-    updateWristbandMutation.mutate({ id: wbId, status: "lost" });
-  };
-
   const handleScannerScan = (userId: string, wristbandId: string | null) => {
     const code = wristbandId || userId;
     if (scannerTarget === "lookup") {
@@ -372,10 +348,6 @@ export function WristbandsTab({ eventId, hasPhysicalWristband = true, allowSelfI
     }));
   };
 
-  if (activeView === "lost") {
-    return <LostWristbandsTab eventId={eventId} onBack={() => setActiveView("management")} />;
-  }
-
   return (
     <div className="space-y-6 font-mono text-foreground">
       {/* 画面ヘッダー部 */}
@@ -386,17 +358,17 @@ export function WristbandsTab({ eventId, hasPhysicalWristband = true, allowSelfI
             来場者・リストバンド管理
           </h2>
           <p className="text-[10px] text-muted-foreground mt-1">
-            来場者アカウント情報の変更、紛失リストバンドのロック・再発行、スマホデジタルIDの発行などを一括管理します。
+            来場者アカウント情報とバンド登録を管理します。紛失したバンドのID交換は専用画面で行います。
           </p>
         </div>
         <div className="flex w-full max-w-full flex-col gap-2 sm:w-auto sm:flex-row">
           <Button
-            onClick={() => setActiveView("lost")}
+            onClick={onOpenLossHandling}
             variant="outline"
             className="w-full sm:w-auto border-thick border-error h-9 text-xs font-bold rounded-none shadow-none px-3"
           >
             <ShieldAlert className="h-4 w-4 mr-1.5" />
-            紛失対応
+            紛失バンド交換
           </Button>
           <Button
             onClick={() => {
@@ -897,7 +869,6 @@ export function WristbandsTab({ eventId, hasPhysicalWristband = true, allowSelfI
                         </button>
                       </th>
                     ))}
-                    <th className="p-3 text-right">バンド操作</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -972,22 +943,6 @@ export function WristbandsTab({ eventId, hasPhysicalWristband = true, allowSelfI
                           </Badge>
                         ) : (
                           <span className="text-muted-foreground text-[10px]">未紐付け</span>
-                        )}
-                      </td>
-                      <td className="p-3 text-right flex justify-end gap-1.5">
-                        {res.wristband && (res.wristband.status === "active" || res.wristband.status === "smartphone") && (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => {
-                              // 2026-09-27: 確認操作の前に一覧モーダルを閉じ、Escape の対象を一つに保つ。
-                              setIsVisitorTableOpen(false);
-                              handleReportLost(res.wristband.id);
-                            }}
-                            className="h-7 text-[10px] rounded-none border-thick border-border bg-background hover:bg-destructive hover:text-white"
-                          >
-                            ロック
-                          </Button>
                         )}
                       </td>
                     </tr>

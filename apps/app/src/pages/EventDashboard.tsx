@@ -26,6 +26,7 @@ import { StaffTab } from "@/components/event/StaffTab";
 import { SettingsTab } from "@/components/event/SettingsTab";
 import { ContractTab } from "@/components/event/ContractTab";
 import { WristbandsTab } from "@/components/event/WristbandsTab";
+import { LostWristbandsTab } from "@/components/event/LostWristbandsTab";
 import { StampRedemptionsTab } from "@/components/event/StampRedemptionsTab";
 import { StoreAreasTab } from "@/components/event/StoreAreasTab";
 import { StampRallyTab } from "@/components/event/StampRallyTab";
@@ -293,12 +294,18 @@ export default function EventDashboard() {
             />
           )}
 
-          {/* TAB 5: リストバンド紛失処理 */}
+          {/* 2026-10-20: 紛失対応は通常管理のサブビューにせず、専用タブとして独立させる。 */}
+          {activeTab === "wristband-loss" && (
+            <LostWristbandsTab eventId={eventId} onBack={() => changeTab("wristbands")} />
+          )}
+
+          {/* TAB 5: リストバンド管理 */}
           {activeTab === "wristbands" && (
             <WristbandsTab
               eventId={eventId}
               hasPhysicalWristband={eventData?.hasPhysicalWristband}
               allowSelfIssue={eventData?.allowSelfIssue}
+              onOpenLossHandling={() => changeTab("wristband-loss")}
             />
           )}
 
