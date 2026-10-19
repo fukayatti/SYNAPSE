@@ -823,7 +823,8 @@ export function WristbandsTab({ eventId, hasPhysicalWristband = true, allowSelfI
           </Badge>
         </CardHeader>
         <CardContent className="p-0">
-          <div ref={visitorScrollContainerRef} className="max-h-[55vh] overflow-auto">
+          {/* 2026-10-20: 縦の短い画面でも一覧の操作領域を確保し、表示件数に応じて表だけをスクロールさせる。 */}
+          <div ref={visitorScrollContainerRef} className="max-h-[65vh] min-h-72 overflow-auto">
             {isLoading ? (
               <div className="p-8 text-center text-xs text-muted-foreground flex items-center justify-center gap-2">
                 <Loader2 className="h-4 w-4 animate-spin" />
