@@ -338,6 +338,8 @@ export function VisitorRecordEditor({
         onClose={requestClose}
         maxWidth="full"
       >
+        {/* 2026-10-20: 全幅モーダルでも入力欄が横に伸びすぎないよう、編集内容の最大幅を抑える。 */}
+        <div className="mx-auto w-full max-w-4xl">
         <div className="mb-4 flex flex-col gap-2 border-b-thin border-border pb-3 text-xs sm:flex-row sm:items-center sm:justify-between">
           <p className="break-all"><span className="font-bold">来場者ID:</span> {user.id}</p>
           <p className="text-[10px] text-muted-foreground">作成日時 {new Date(user.createdAt).toLocaleString("ja-JP")} · 更新日時 {new Date(user.updatedAt).toLocaleString("ja-JP")}</p>
@@ -351,7 +353,7 @@ export function VisitorRecordEditor({
         {saveError && <p role="alert" className="mb-3 border-l-heavy border-error bg-error/5 p-3 text-xs text-error">{saveError}</p>}
 
         <Tabs defaultValue="account" className="w-full">
-          <TabsList className="grid h-auto grid-cols-3">
+          <TabsList className="grid h-auto grid-cols-1 gap-1 sm:grid-cols-3">
             <TabsTrigger value="account" className="min-h-12 px-2">アカウント</TabsTrigger>
             <TabsTrigger value="wristbands" className="min-h-12 px-2">リストバンド・家族</TabsTrigger>
             <TabsTrigger value="visits" className="min-h-12 px-2">サークル利用実績</TabsTrigger>
@@ -363,7 +365,7 @@ export function VisitorRecordEditor({
               <p className="text-[11px] leading-relaxed text-muted-foreground">ここで変更する状態は、このイベント内で来場者アカウントを利用できるかどうかです。受付登録の完了状態とは別です。</p>
             </section>
 
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <FormField
                 id="visitor-display-id"
                 label="呼出ID（イベント内で一意）"
@@ -409,7 +411,7 @@ export function VisitorRecordEditor({
               </Button>
             </div>
 
-            <div className="grid grid-cols-1 gap-2 border-thin border-border bg-muted/10 p-3 text-[10px] sm:grid-cols-2 xl:grid-cols-3">
+            <div className="grid grid-cols-1 gap-2 border-thin border-border bg-muted/10 p-3 text-[10px] sm:grid-cols-2">
               {(Object.keys(WRISTBAND_STATUS_HELP) as WristbandStatus[]).map((status) => (
                 <p key={status}><span className="font-bold">{WRISTBAND_STATUS_LABEL[status]}:</span> {WRISTBAND_STATUS_HELP[status]}</p>
               ))}
@@ -429,7 +431,7 @@ export function VisitorRecordEditor({
                     </Button>
                   </div>
 
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                     <FormField id={`band-id-${band.draftKey}`} label="リストバンドID" value={band.id} disabled={!band.isNew} onChange={(event) => editBand(index, { id: event.target.value })} />
                     <FormSelect id={`band-status-${band.draftKey}`} label="リストバンド・QRの利用状態" value={band.status} onChange={(event) => {
                       const nextStatus = event.target.value as WristbandStatus;
@@ -501,7 +503,7 @@ export function VisitorRecordEditor({
                     {visit.isDeleted && <Button type="button" variant="outline" onClick={() => editVisit(index, { isDeleted: false })} className="h-9 border-thick border-border text-xs">取り消す</Button>}
                   </div>
                   {!visit.isDeleted && (
-                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                       <FormSelect id={`visit-circle-${visit.draftKey}`} label="利用サークル" value={visit.circleId} onChange={(event) => editVisit(index, { circleId: event.target.value })}>
                         {circles.map((circle) => <option key={circle.id} value={circle.id}>{circle.name}</option>)}
                       </FormSelect>
@@ -523,6 +525,7 @@ export function VisitorRecordEditor({
           <Button onClick={() => void saveDraft().catch((error) => setSaveError(error instanceof Error ? error.message : "保存に失敗しました。"))} disabled={!isDirty || !validToSave || saveMutation.isPending} className="h-10 border-thick border-primary bg-primary px-5 text-xs font-bold text-primary-foreground hover:bg-background hover:text-foreground">
             {saveMutation.isPending ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Save className="mr-1 h-4 w-4" />}変更を保存
           </Button>
+        </div>
         </div>
       </Modal>
 
