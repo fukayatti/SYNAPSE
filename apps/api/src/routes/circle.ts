@@ -24,9 +24,8 @@ const circleRoutes = new Hono<AppEnv>();
 
 // サークル一覧取得
 // 2026-07-06 (H2): 公開ブラウズ(来場者アプリ)にも使われるため認証必須化はしない。
-// ただし代表者のメールアドレス(PII)を managerEmail として無認可で返すのは漏洩なので、
-// managerEmail は「対象イベントの member:read を持つ認可済み呼び出し元」にのみ付与し、
-// 匿名/権限のない呼び出し元には含めない (managerName は表示用途で常に返す)。
+// 2026-10-19: 一般向け一覧には代表者の個人情報を返さず、イベント管理者の member:read
+// 権限が確認できたイベント単位の一覧だけに managerName / managerEmail を含める。
 circleRoutes.get("/", async (c) => {
   const db = c.get("db");
   const eventId = c.req.query("eventId");
@@ -64,22 +63,20 @@ circleRoutes.get("/", async (c) => {
   );
 
   const circles = await query.where(where);
-
-  // eventId スコープで member:read を持つ場合のみ managerEmail を残す。
-  // それ以外(匿名来場者・eventId 未指定)では PII を落として返す。
-  const includeEmail = eventId
-    ? await hasPermission(c, null, "member:read", eventId)
-    : false;
-  if (includeEmail) {
+  const includeManagerDetails = Boolean(
+    eventId && (await hasPermission(c, null, "member:read", eventId))
+  );
+  if (includeManagerDetails) {
     return c.json(circles);
   }
-  return c.json(circles.map(({ managerEmail: _managerEmail, ...rest }) => rest));
+  return c.json(
+    circles.map(({ managerName: _managerName, managerEmail: _managerEmail, ...rest }) => rest)
+  );
 });
 
 // サークル取得
 // 2026-07-06 (H2): 公開ブラウズにも使われるため認証必須化はしないが、
-// 代表者のメールアドレス(PII)は当該サークルの member:read を持つ認可済み呼び出し元にのみ
-// 付与し、匿名/権限のない呼び出し元には含めない (managerName は表示用途で常に返す)。
+// 2026-10-19: 代表者名・メールは当該サークルの member:read を持つ認可済み呼び出し元にだけ返す。
 circleRoutes.get("/:id", async (c) => {
   const db = c.get("db");
   const id = c.req.param("id");
@@ -114,11 +111,11 @@ circleRoutes.get("/:id", async (c) => {
   }
 
   const found = circles[0]!;
-  const includeEmail = await hasPermission(c, id, "member:read");
-  if (includeEmail) {
+  const includeManagerDetails = await hasPermission(c, id, "member:read");
+  if (includeManagerDetails) {
     return c.json(found);
   }
-  const { managerEmail: _managerEmail, ...rest } = found;
+  const { managerName: _managerName, managerEmail: _managerEmail, ...rest } = found;
   return c.json(rest);
 });
 

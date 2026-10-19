@@ -199,10 +199,8 @@ export function CirclesTab({
                 {cir.description && (
                   <p className="mb-3 break-words text-[10px] text-muted-foreground">{cir.description}</p>
                 )}
-                <div className="text-[10px] text-muted-foreground space-y-1 font-mono mb-4">
-                  {/* 2026-07-07 (Phase 3b): サークル作成がセルフサービス化されたため
-                      「代表者」= 作成時に circle_manager になったユーザーを表示する
-                      (PIN/管理者代理作成の概念は廃止)。 */}
+                {/* 2026-10-19: 管理者名・メールはイベント管理権限のある一覧 API だけが返す。 */}
+                <div className="mb-4 space-y-1 font-mono text-[10px] text-muted-foreground">
                   <p>管理者: {cir.managerName || "未設定"}</p>
                   {cir.managerEmail && <p className="break-all">メール: {cir.managerEmail}</p>}
                 </div>

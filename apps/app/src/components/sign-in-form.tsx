@@ -52,7 +52,7 @@ export default function SignInForm() {
 											const s = await authClient.getSession();
 											const email = s?.data?.user?.email;
 											if (email) {
-												const resolved = await resolveActiveSpaceAfterAuth(email);
+										const resolved = await resolveActiveSpaceAfterAuth();
 												navigate((callbackUrl as any) || resolved.path);
 												return;
 											}
