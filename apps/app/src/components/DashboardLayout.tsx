@@ -96,6 +96,7 @@ export default function DashboardLayout({
   // CLAUDE.md の「入力フォームはモーダルで開く」と同じ思想で、画面左からスライドインする
   // ドロワー(オーバーレイ)に変更し、開閉でページ本体の長さが変わらないようにする。
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [expandedMenuGroups, setExpandedMenuGroups] = useState<string[]>([]);
 
   // 背景スクロールロック (Modal.tsx と同じパターン)。アンマウント/クローズ時に必ず元へ戻す。
   useEffect(() => {
@@ -291,6 +292,76 @@ export default function DashboardLayout({
     }
     return activeTab === item.tab;
   });
+  const activeGroup = visibleMenuGroups.find((group) => group.items.includes(activeItem!));
+
+  useEffect(() => {
+    if (!activeGroup) return;
+    setExpandedMenuGroups((current) => current.includes(activeGroup.label) ? current : [...current, activeGroup.label]);
+  }, [activeGroup?.label]);
+
+  const renderMenuGroups = (isMobile: boolean) => visibleMenuGroups.map((group, groupIndex) => {
+    const groupId = `${isMobile ? "mobile" : "desktop"}-dashboard-group-${groupIndex}`;
+    const isExpanded = expandedMenuGroups.includes(group.label);
+
+    return (
+      <div key={group.label} className={isMobile ? "" : "md:w-full"}>
+        <button
+          type="button"
+          aria-expanded={isExpanded}
+          aria-controls={groupId}
+          onClick={() => setExpandedMenuGroups((current) =>
+            isExpanded ? current.filter((label) => label !== group.label) : [...current, group.label]
+          )}
+          className={cn(
+            "flex w-full items-center gap-2 px-3 py-2 text-left text-[10px] font-bold uppercase tracking-wider text-muted-foreground hover:bg-muted hover:text-foreground",
+            isMobile ? "min-h-11" : "min-h-10",
+          )}
+        >
+          <ChevronDown className={cn("h-3.5 w-3.5 shrink-0 transition-transform", isExpanded ? "" : "-rotate-90")} aria-hidden="true" />
+          <span>{group.label}</span>
+        </button>
+        <div id={groupId} hidden={!isExpanded} className="ml-2 space-y-0.5 border-l border-border pl-2">
+          {group.items.map((item, itemIndex) => {
+            const Icon = item.icon;
+            const isCircleActive = type === "circle" && location.pathname === item.href;
+            const isTabActive = type !== "circle" && activeTab === item.tab;
+            const isActive = isCircleActive || isTabActive;
+            const itemClass = cn(
+              "flex min-h-11 w-full items-center gap-2 px-3 py-2 text-left text-[12px] font-bold uppercase transition-all border border-transparent select-none cursor-pointer",
+              isActive
+                ? "bg-primary text-primary-foreground border-primary"
+                : "text-muted-foreground hover:bg-muted hover:text-foreground",
+              !isMobile && "md:min-h-10",
+            );
+            const handleItemClick = () => {
+              if (isMobile) setIsMobileMenuOpen(false);
+              if (type !== "circle" && item.tab && onTabChange) {
+                // 2026-10-16: システム/イベントのタブ切り替えも未保存確認を通す。
+                requestGuardedNavigation(() => onTabChange(item.tab!));
+              }
+            };
+
+            return type === "circle" && item.href ? (
+              <Link
+                key={item.href}
+                to={item.href}
+                onClick={() => isMobile && setIsMobileMenuOpen(false)}
+                className={itemClass}
+              >
+                <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
+                <span className="truncate">{item.title}</span>
+              </Link>
+            ) : (
+              <button key={item.tab ?? itemIndex} type="button" onClick={handleItemClick} className={itemClass}>
+                <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
+                <span className="truncate">{item.title}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    );
+  });
 
   return (
     <div className="max-w-7xl mx-auto p-4 md:p-6 font-mono bg-background text-foreground">
@@ -391,61 +462,9 @@ export default function DashboardLayout({
             </button>
           </div>
 
-          {/* カテゴリ見出し付きで描画。ドロワー内で完結してスクロールできるようにする。 */}
+          {/* 2026-10-20: OSのファイル一覧のようにカテゴリを展開して配下の画面を選べるツリーにする。 */}
           <nav className="p-1.5 space-y-0.5 overflow-y-auto flex-1">
-            {visibleMenuGroups.map((group, gIdx) => (
-              <div key={group.label} className={gIdx === 0 ? "" : "pt-2"}>
-                <p className="px-3 pb-1 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-                  {group.label}
-                </p>
-                <div className="space-y-0.5">
-                  {group.items.map((item, idx) => {
-                    const Icon = item.icon;
-                    const isCircleActive = type === "circle" && location.pathname === item.href;
-                    const isTabActive = type !== "circle" && activeTab === item.tab;
-                    const isActive = isCircleActive || isTabActive;
-
-                    const baseClass = cn(
-                      "flex items-center gap-2 px-3 py-2 text-[12px] font-bold uppercase rounded-none transition-all border border-transparent w-full select-none cursor-pointer text-left",
-                      isActive
-                        ? "bg-primary text-primary-foreground border-primary"
-                        : "hover:bg-muted text-muted-foreground hover:text-foreground"
-                    );
-
-                    const handleItemClick = () => {
-                      setIsMobileMenuOpen(false);
-                      if (type !== "circle" && item.tab && onTabChange) {
-                        // 2026-10-16: システム/イベントのタブ切り替えも未保存確認を通す。
-                        requestGuardedNavigation(() => onTabChange(item.tab!));
-                      }
-                    };
-
-                    if (type === "circle" && item.href) {
-                      return (
-                        <Link
-                          key={idx}
-                          to={item.href}
-                          className="block w-full"
-                          onClick={() => setIsMobileMenuOpen(false)}
-                        >
-                          <span className={baseClass}>
-                            <Icon className="h-4 w-4 shrink-0" />
-                            {item.title}
-                          </span>
-                        </Link>
-                      );
-                    } else {
-                      return (
-                        <button key={idx} onClick={handleItemClick} className={baseClass}>
-                          <Icon className="h-4 w-4 shrink-0" />
-                          {item.title}
-                        </button>
-                      );
-                    }
-                  })}
-                </div>
-              </div>
-            ))}
+            {renderMenuGroups(true)}
           </nav>
         </div>
       </div>
@@ -455,50 +474,7 @@ export default function DashboardLayout({
         {/* 左サイドバー: PCでは縦並び、モバイルでは非表示 (アコーディオンがカバーするため) */}
         <aside className="hidden md:block w-full md:w-64 shrink-0 border-thick border-border bg-background p-2 rounded-none shadow-none md:sticky md:top-4">
           <nav className="flex md:flex-col gap-1">
-            {visibleMenuGroups.map((group, gIdx) => (
-              <div key={group.label} className={cn("md:w-full", gIdx === 0 ? "" : "md:mt-2")}>
-                {/* カテゴリ見出し: RawBlockの太字uppercaseなメイン項目と区別するため、
-                    小さく控えめな muted テキストにする */}
-                <p className="px-3 pb-1 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-                  {group.label}
-                </p>
-                {group.items.map((item, idx) => {
-                  const Icon = item.icon;
-                  const isCircleActive = type === "circle" && location.pathname === item.href;
-                  const isTabActive = type !== "circle" && activeTab === item.tab;
-                  const isActive = isCircleActive || isTabActive;
-
-                  const baseClass = cn(
-                    "flex items-center gap-2 px-3 py-2 text-[12px] font-bold uppercase rounded-none transition-all border border-transparent whitespace-nowrap md:w-full select-none cursor-pointer",
-                    isActive
-                      ? "bg-primary text-primary-foreground border-primary"
-                      : "hover:bg-muted text-muted-foreground hover:text-foreground hover:border-border"
-                  );
-
-                  if (type === "circle" && item.href) {
-                    return (
-                      <Link key={idx} to={item.href} className="block md:w-full">
-                        <span className={baseClass}>
-                          <Icon className="h-4 w-4 shrink-0" />
-                          {item.title}
-                        </span>
-                      </Link>
-                    );
-                  } else {
-                    return (
-                      <button
-                        key={idx}
-                        onClick={() => item.tab && onTabChange && requestGuardedNavigation(() => onTabChange(item.tab!))}
-                        className={baseClass}
-                      >
-                        <Icon className="h-4 w-4 shrink-0" />
-                        {item.title}
-                      </button>
-                    );
-                  }
-                })}
-              </div>
-            ))}
+            {renderMenuGroups(false)}
           </nav>
         </aside>
 
