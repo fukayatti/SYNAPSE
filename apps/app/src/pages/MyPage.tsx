@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { ErrorState } from "@/components/ui/ErrorState";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useVisitor, saveVisitor } from "@/hooks/useVisitor";
-import { wristbandApi } from "@/lib/api";
+import { eventApi, wristbandApi } from "@/lib/api";
 
 // 2026-10-16: QRの提示とアカウント情報の編集を別画面に分け、来場時に必要な操作を先に見せる。
 export default function MyPage() {
@@ -19,6 +19,12 @@ export default function MyPage() {
   const { session, userId, isLoaded } = useVisitor();
   const [origin, setOrigin] = useState("");
   const [isIssuing, setIsIssuing] = useState(false);
+  const settingsEventId = eventId || session?.eventId || null;
+  const eventSettingsQuery = useQuery({
+    queryKey: ["visitor-event-settings", settingsEventId],
+    queryFn: () => eventApi.get(settingsEventId!),
+    enabled: !!settingsEventId,
+  });
 
   useEffect(() => {
     setOrigin(window.location.origin);
@@ -28,6 +34,12 @@ export default function MyPage() {
     if (action !== "issue" || !eventId || !isLoaded) return;
     if (session?.eventId === eventId && session.userId) {
       navigate("/visitor/mypage", { replace: true });
+      return;
+    }
+    if (eventSettingsQuery.isPending) return;
+    // 2026-10-19: 物理バンド運用中にセルフ発行を止めている場合、直リンクでも発行を試さず案内へ戻す。
+    if (eventSettingsQuery.data?.hasPhysicalWristband && !eventSettingsQuery.data.allowSelfIssue) {
+      navigate(`/visitor/mypage?eventId=${encodeURIComponent(eventId)}`, { replace: true });
       return;
     }
 
@@ -54,7 +66,7 @@ export default function MyPage() {
     };
 
     void issueDigitalBand();
-  }, [action, eventId, isLoaded, navigate, session]);
+  }, [action, eventId, eventSettingsQuery.data, eventSettingsQuery.isPending, isLoaded, navigate, session]);
 
   const query = useQuery({
     queryKey: ["userWristbandStatus", userId],
@@ -62,7 +74,7 @@ export default function MyPage() {
     enabled: !!userId && !isIssuing,
   });
 
-  if (!isLoaded || query.isLoading || isIssuing) {
+  if (!isLoaded || query.isLoading || isIssuing || (!!settingsEventId && eventSettingsQuery.isPending)) {
     return (
       <div className="mx-auto max-w-2xl space-y-4 p-4 font-mono" aria-label="マイQRを読み込み中">
         <Skeleton className="h-12 w-48" />
@@ -79,20 +91,41 @@ export default function MyPage() {
     );
   }
 
+  if (settingsEventId && eventSettingsQuery.isError) {
+    return (
+      <div className="mx-auto max-w-2xl p-4 font-mono">
+        <ErrorState error={eventSettingsQuery.error} title="イベント設定を読み込めませんでした" onRetry={() => eventSettingsQuery.refetch()} />
+      </div>
+    );
+  }
+
   const status = query.data;
   const activeWristband = status?.familyWristbands.find((band) => band.id === session?.wristbandId) ?? status?.wristband;
   const qrBandId = activeWristband?.id;
   const checkinUrl = qrBandId && origin ? `${origin}/w/${qrBandId}` : null;
+  const mustPresentPhysicalWristband = Boolean(
+    eventSettingsQuery.data?.hasPhysicalWristband && !eventSettingsQuery.data.allowSelfIssue
+  );
 
   return (
     <div className="mx-auto max-w-2xl space-y-5 px-4 py-6 pb-10 font-mono sm:py-8">
       <header className="space-y-1 border-b-thick border-border pb-4">
         <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">来場者メニュー</p>
-        <h1 className="text-2xl font-black tracking-tight sm:text-3xl">マイQR</h1>
-        <p className="text-xs leading-relaxed text-muted-foreground">注文の受け取りや受付で、このQRを提示してください。</p>
+        <h1 className="text-2xl font-black tracking-tight sm:text-3xl">{mustPresentPhysicalWristband ? "来場案内" : "マイQR"}</h1>
+        <p className="text-xs leading-relaxed text-muted-foreground">
+          {mustPresentPhysicalWristband ? "このイベントではスマートフォンQRを発行していません。" : "注文の受け取りや受付で、このQRを提示してください。"}
+        </p>
       </header>
 
-      {checkinUrl ? (
+      {mustPresentPhysicalWristband ? (
+        <section className="flex items-start gap-3 border-heavy border-border bg-primary/5 p-4 sm:p-5" aria-labelledby="physical-wristband-required-title">
+          <QrCode className="mt-0.5 h-5 w-5 shrink-0" aria-hidden="true" />
+          <div className="space-y-1">
+            <h2 id="physical-wristband-required-title" className="text-sm font-bold">物理リストバンドを提示してください</h2>
+            <p className="text-xs leading-relaxed text-muted-foreground">受付や注文の受け取りでは、登録済みの物理リストバンドをスタッフに提示してください。</p>
+          </div>
+        </section>
+      ) : checkinUrl ? (
         <section aria-label="来場用QR" className="border-heavy border-border bg-primary p-4 text-center text-primary-foreground sm:p-6">
           <div className="mx-auto inline-block border-thick border-background bg-background p-3 sm:p-4">
             <QRCodeSVG value={checkinUrl} size={220} level="M" title="来場用QRコード" className="mx-auto block" />
@@ -111,7 +144,7 @@ export default function MyPage() {
         </section>
       )}
 
-      <section className="border-t-thin border-border pt-4" aria-labelledby="account-summary-title">
+      {status?.user && <section className="border-t-thin border-border pt-4" aria-labelledby="account-summary-title">
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
             <h2 id="account-summary-title" className="flex items-center gap-2 text-sm font-black">
@@ -125,7 +158,7 @@ export default function MyPage() {
             管理する <ArrowRight className="ml-1 h-4 w-4" aria-hidden="true" />
           </Button>
         </div>
-      </section>
+      </section>}
     </div>
   );
 }
