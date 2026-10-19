@@ -296,7 +296,7 @@ export default function EventDashboard() {
 
           {/* 2026-10-20: 紛失対応は通常管理のサブビューにせず、専用タブとして独立させる。 */}
           {activeTab === "wristband-loss" && (
-            <LostWristbandsTab eventId={eventId} onBack={() => changeTab("wristbands")} />
+            <LostWristbandsTab eventId={eventId} />
           )}
 
           {/* TAB 5: リストバンド管理 */}

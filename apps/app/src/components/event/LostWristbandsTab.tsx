@@ -22,7 +22,7 @@ function formatAssignedAt(value: string) {
   return new Intl.DateTimeFormat("ja-JP", { dateStyle: "medium" }).format(date);
 }
 
-export function LostWristbandsTab({ eventId, onBack }: { eventId: string; onBack: () => void }) {
+export function LostWristbandsTab({ eventId }: { eventId: string }) {
   const queryClient = useQueryClient();
   const [step, setStep] = useState<LossHandlingStep>("account");
   const [searchInput, setSearchInput] = useState("");
@@ -92,6 +92,19 @@ export function LostWristbandsTab({ eventId, onBack }: { eventId: string; onBack
     setStep("replacement");
   };
 
+  // 2026-10-20: 完了済みの工程から戻って対象を選び直せるようにし、誤選択の修正を簡単にする。
+  const returnToStep = (nextStep: LossHandlingStep) => {
+    if (nextStep === "account") {
+      setSelectedAccount(null);
+      setSelectedBand(null);
+      setReplacementCode("");
+    } else if (nextStep === "band") {
+      setSelectedBand(null);
+      setReplacementCode("");
+    }
+    setStep(nextStep);
+  };
+
   const visitors = accountSearch.data?.items ?? [];
   const total = accountSearch.data?.total ?? 0;
   const canGoBack = offset > 0;
@@ -109,9 +122,6 @@ export function LostWristbandsTab({ eventId, onBack }: { eventId: string; onBack
   return (
     <section className="mx-auto max-w-5xl space-y-6 font-mono text-foreground" aria-labelledby="lost-wristbands-title">
       <header className="space-y-3 border-b-thick border-border pb-5">
-        <Button type="button" variant="ghost" className="-ml-3 h-9 px-3 text-xs" onClick={onBack}>
-          <ArrowLeft className="mr-1.5 h-4 w-4" aria-hidden="true" />リストバンド管理へ戻る
-        </Button>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="space-y-1">
             <h1 id="lost-wristbands-title" className="flex items-center gap-2 text-base font-bold uppercase tracking-wider">
@@ -139,8 +149,22 @@ export function LostWristbandsTab({ eventId, onBack }: { eventId: string; onBack
                 isCurrent ? "border-primary bg-primary text-primary-foreground" : isComplete ? "border-success bg-success/10" : "border-border bg-background text-muted-foreground"
               }`}
             >
-              <span className="text-sm font-bold">{isComplete ? <Check className="h-4 w-4" aria-hidden="true" /> : item.number}</span>
-              <span className="font-bold">{item.title}</span>
+              {isComplete ? (
+                <button
+                  type="button"
+                  onClick={() => returnToStep(item.key)}
+                  aria-label={`${item.title}の画面に戻る`}
+                  className="flex min-h-10 w-full items-center gap-3 text-left focus-visible:outline-2 focus-visible:outline-offset-2"
+                >
+                  <span className="text-sm font-bold"><Check className="h-4 w-4" aria-hidden="true" /></span>
+                  <span className="font-bold">{item.number} {item.title}</span>
+                </button>
+              ) : (
+                <>
+                  <span className="text-sm font-bold">{item.number}</span>
+                  <span className="font-bold">{item.title}</span>
+                </>
+              )}
             </li>
           );
         })}
@@ -150,7 +174,6 @@ export function LostWristbandsTab({ eventId, onBack }: { eventId: string; onBack
         <section className="space-y-4" aria-labelledby="account-search-title">
           <div className="space-y-1">
             <h2 id="account-search-title" className="text-sm font-bold">1. 来場者アカウントを検索</h2>
-            <p className="text-[10px] text-muted-foreground">呼出ID、名前、または現在紐づいている物理バンドIDで検索できます。</p>
           </div>
           <form onSubmit={submitSearch} className="flex flex-col gap-2 sm:flex-row">
             <Input
@@ -230,7 +253,6 @@ export function LostWristbandsTab({ eventId, onBack }: { eventId: string; onBack
             </Button>
           </div>
           <div className="space-y-2">
-            <p className="text-[10px] text-muted-foreground">紐づくバンドのIDを来場者に確認してください。物理バンドを選ぶと、そのIDだけを交換できます。</p>
             <ul className="space-y-2">
               {selectedAccount.familyWristbands.map((band) => {
                 const isPhysical = band.status === "active";
