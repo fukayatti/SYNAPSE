@@ -8,22 +8,15 @@ import { ErrorState } from "@/components/ui/ErrorState";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Skeleton } from "@/components/ui/skeleton";
 import { QrScannerModal } from "@/components/pos/qr-scanner-modal";
-import { type LostWristbandItem, wristbandApi } from "@/lib/api";
+import { type WristbandLookupResult, wristbandApi } from "@/lib/api";
 import { extractIdFromCode } from "@/lib/utils";
 
 const PAGE_SIZE = 50;
 
-// 2026-10-19: 紛失状態は現行の有効バンド一覧から外れるため、履歴1件ごとに
-// 来場者と再発行操作を並べて、家族アカウント内の複数バンドも混同せず扱う。
-
-function formatDate(value: string | null) {
-  if (!value) return "日時不明";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "日時不明";
-  return new Intl.DateTimeFormat("ja-JP", {
-    year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit",
-  }).format(date);
-}
+type PhysicalReplacementTarget = {
+  user: WristbandLookupResult["user"];
+  wristband: WristbandLookupResult["familyWristbands"][number];
+};
 
 export function LostWristbandsTab({ eventId, onBack }: { eventId: string; onBack: () => void }) {
   const queryClient = useQueryClient();
@@ -31,22 +24,27 @@ export function LostWristbandsTab({ eventId, onBack }: { eventId: string; onBack
   const [searchQuery, setSearchQuery] = useState("");
   const [offset, setOffset] = useState(0);
   const [replacementCodes, setReplacementCodes] = useState<Record<string, string>>({});
-  const [scannerTarget, setScannerTarget] = useState<LostWristbandItem | null>(null);
+  const [scannerTarget, setScannerTarget] = useState<PhysicalReplacementTarget | null>(null);
   const [isScannerOpen, setIsScannerOpen] = useState(false);
 
-  const lostQuery = useQuery({
-    queryKey: ["lostWristbands", eventId, searchQuery, offset],
-    queryFn: () => wristbandApi.listLost(eventId, searchQuery, offset, PAGE_SIZE),
+  const wristbandQuery = useQuery({
+    queryKey: ["wristbandReplacementSearch", eventId, searchQuery, offset],
+    // 2026-10-20: 紛失フラグは交換対象の特定に使わず、通常一覧の有効な物理バンドを検索する。
+    queryFn: () => wristbandApi.search(eventId, searchQuery, {
+      bandType: "physical",
+      accountStatus: "all",
+      profileStatus: "all",
+    }, { offset, limit: PAGE_SIZE }, { sortBy: "displayId", sortDirection: "asc" }),
   });
 
   const replaceMutation = useMutation({
-    mutationFn: ({ item, code }: { item: LostWristbandItem; code: string }) =>
+    mutationFn: ({ item, code }: { item: PhysicalReplacementTarget; code: string }) =>
       wristbandApi.register(item.user.id, extractIdFromCode(code), item.wristband.id),
     onSuccess: async (_, { item }) => {
       toast.success(`来場者 #${item.user.displayId} に新しいリストバンドを紐付けました`);
       setReplacementCodes((current) => ({ ...current, [item.wristband.id]: "" }));
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["lostWristbands", eventId] }),
+        queryClient.invalidateQueries({ queryKey: ["wristbandReplacementSearch", eventId] }),
         queryClient.invalidateQueries({ queryKey: ["eventVisitors", eventId] }),
       ]);
     },
@@ -59,8 +57,13 @@ export function LostWristbandsTab({ eventId, onBack }: { eventId: string; onBack
     setSearchQuery(searchInput.trim());
   };
 
-  const items = lostQuery.data?.items ?? [];
-  const total = lostQuery.data?.total ?? 0;
+  const visitors = wristbandQuery.data?.items ?? [];
+  const items: PhysicalReplacementTarget[] = visitors.flatMap((visitor) =>
+    visitor.familyWristbands
+      .filter((band) => band.status === "active")
+      .map((wristband) => ({ user: visitor.user, wristband }))
+  );
+  const total = wristbandQuery.data?.total ?? 0;
   const canGoBack = offset > 0;
   const canGoForward = offset + PAGE_SIZE < total;
 
@@ -72,19 +75,19 @@ export function LostWristbandsTab({ eventId, onBack }: { eventId: string; onBack
             <ArrowLeft className="mr-1.5 h-4 w-4" aria-hidden="true" />リストバンド管理に戻る
           </Button>
           <h2 id="lost-wristbands-title" className="flex items-center gap-2 text-sm font-bold uppercase tracking-wider">
-            <ShieldAlert className="h-4 w-4 text-error" aria-hidden="true" />紛失リストバンド対応
+            <ShieldAlert className="h-4 w-4 text-error" aria-hidden="true" />物理リストバンドID交換
           </h2>
-          <p className="text-[10px] text-muted-foreground">紛失したバンドのIDだけを新しい物理バンドへ交換します。来場者アカウントや家族情報、他のバンドはそのままです。</p>
+          <p className="text-[10px] text-muted-foreground">通常のリストバンド一覧から交換対象を検索します。選んだ物理バンドIDだけを新しいIDに交換し、来場者情報や他のバンドはそのままです。</p>
         </div>
-        <span className="w-fit border-thick border-border px-3 py-2 text-xs font-bold">該当 {total.toLocaleString("ja-JP")} 件</span>
+        <span className="w-fit border-thick border-border px-3 py-2 text-xs font-bold">該当来場者 {total.toLocaleString("ja-JP")} 人</span>
       </header>
 
       <form onSubmit={submitSearch} className="flex flex-col gap-2 sm:flex-row">
         <Input
           value={searchInput}
           onChange={(event) => setSearchInput(event.target.value)}
-          placeholder="呼出ID・名前・紛失バンドIDで検索"
-          aria-label="紛失バンドを検索"
+          placeholder="呼出ID・名前・物理バンドIDで検索"
+          aria-label="来場者・物理リストバンドを検索"
           className="h-10 rounded-none border-thick border-border"
         />
         <Button type="submit" variant="outline" className="h-10 rounded-none border-thick border-border">
@@ -92,14 +95,14 @@ export function LostWristbandsTab({ eventId, onBack }: { eventId: string; onBack
         </Button>
       </form>
 
-      {lostQuery.isPending ? (
-        <div className="space-y-3" aria-label="紛失バンドを読み込み中">
+      {wristbandQuery.isPending ? (
+        <div className="space-y-3" aria-label="物理リストバンドを読み込み中">
           <Skeleton className="h-28 w-full" /><Skeleton className="h-28 w-full" />
         </div>
-      ) : lostQuery.isError ? (
-        <ErrorState error={lostQuery.error} onRetry={() => void lostQuery.refetch()} />
+      ) : wristbandQuery.isError ? (
+        <ErrorState error={wristbandQuery.error} onRetry={() => void wristbandQuery.refetch()} />
       ) : items.length === 0 ? (
-        <EmptyState icon={ShieldAlert} message={searchQuery ? "条件に一致する紛失バンドはありません" : "紛失報告されたリストバンドはありません"} />
+        <EmptyState icon={ShieldAlert} message={searchQuery ? "条件に一致する物理リストバンドはありません" : "交換できる物理リストバンドはありません"} />
       ) : (
         <ul className="space-y-3">
           {items.map((item) => {
@@ -110,11 +113,11 @@ export function LostWristbandsTab({ eventId, onBack }: { eventId: string; onBack
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                   <div className="min-w-0 space-y-1">
                     <p className="text-sm font-bold">来場者 #{item.user.displayId} · {item.wristband.nickname || item.user.nickname || "名前未設定"}</p>
-                    <p className="break-all text-xs">紛失バンド: <span className="font-bold">{item.wristband.id}</span></p>
-                    <p className="text-[10px] text-muted-foreground">紛失報告: {formatDate(item.wristband.deactivatedAt)} · 発行: {formatDate(item.wristband.assignedAt)}</p>
+                    <p className="break-all text-xs">交換対象の物理バンド: <span className="font-bold">{item.wristband.id}</span></p>
+                    <p className="text-[10px] text-muted-foreground">発行: {item.wristband.assignedAt ? new Intl.DateTimeFormat("ja-JP", { dateStyle: "medium" }).format(new Date(item.wristband.assignedAt)) : "日時不明"}</p>
                     {item.user.status === "banned" && <p className="text-[10px] font-bold text-error">来場者アカウントは利用停止中です</p>}
                   </div>
-                  <span className="w-fit border-thick border-error bg-error/10 px-2 py-1 text-[10px] font-bold text-error">ロック中</span>
+                  <span className="w-fit border-thick border-border px-2 py-1 text-[10px] font-bold">物理バンド</span>
                 </div>
                 <div className="grid gap-2 border-t-thin border-border pt-3 sm:grid-cols-[1fr_auto_auto]">
                   <Input
@@ -155,10 +158,10 @@ export function LostWristbandsTab({ eventId, onBack }: { eventId: string; onBack
       )}
 
       <div className="flex flex-col gap-2 border-t-thin border-border pt-3 sm:flex-row sm:items-center sm:justify-between">
-        <p className="text-[10px] text-muted-foreground">再発行には先に登録済みの物理バンドIDが必要です。紛失したバンドはロックされたままです。</p>
+        <p className="text-[10px] text-muted-foreground">交換先には、先に発行済みの未使用な物理バンドIDを指定してください。</p>
         <div className="flex gap-2">
-          <Button type="button" variant="outline" disabled={!canGoBack || lostQuery.isFetching} onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}>前へ</Button>
-          <Button type="button" variant="outline" disabled={!canGoForward || lostQuery.isFetching} onClick={() => setOffset(offset + PAGE_SIZE)}>次へ</Button>
+          <Button type="button" variant="outline" disabled={!canGoBack || wristbandQuery.isFetching} onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}>前へ</Button>
+          <Button type="button" variant="outline" disabled={!canGoForward || wristbandQuery.isFetching} onClick={() => setOffset(offset + PAGE_SIZE)}>次へ</Button>
         </div>
       </div>
 

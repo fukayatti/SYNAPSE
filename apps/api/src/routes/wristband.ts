@@ -744,23 +744,23 @@ wristbandRoutes.post(
 
     if (replacesWristbandId) {
       if (replacesWristbandId === wristbandId) {
-        apiError("BAD_REQUEST", "紛失したバンドと別のIDを指定してください");
+        apiError("BAD_REQUEST", "交換対象とは別のIDを指定してください");
       }
-      const [lostBand] = await db.select().from(wristband).where(and(
+      const [sourceBand] = await db.select().from(wristband).where(and(
         eq(wristband.id, replacesWristbandId),
         eq(wristband.userId, userId),
-        eq(wristband.status, "lost"),
+        eq(wristband.status, "active"),
       ));
-      if (!lostBand || !targetEventId) {
-        apiError("NOT_FOUND", "置き換える紛失リストバンドが見つかりません");
+      if (!sourceBand || !targetEventId) {
+        apiError("NOT_FOUND", "交換対象の有効な物理リストバンドが見つかりません");
       }
       if (!bandExists) {
         apiError("BAD_REQUEST", "先に発行済みの物理リストバンドIDを指定してください");
       }
       if (!(await hasPermission(c, null, "member:write", targetEventId))) {
-        apiError("FORBIDDEN", "紛失リストバンドの再発行にはスタッフ権限が必要です");
+        apiError("FORBIDDEN", "物理リストバンドの交換にはスタッフ権限が必要です");
       }
-      replacementSource = lostBand;
+      replacementSource = sourceBand;
     }
 
     // 2026-07-11: 権限ゲート。以下はいずれも本部(スタッフ member:write)権限を要求する:
@@ -809,7 +809,7 @@ wristbandRoutes.post(
       });
     }
 
-    // 2026-10-20: 紛失バンド交換は指定されたIDだけを差し替え、家族など別の有効バンドを停止しない。
+    // 2026-10-20: 物理バンド交換は通常一覧から選んだ有効IDだけを差し替え、家族の別バンドは停止しない。
     if (!replacementSource) {
       await db
         .update(wristband)
@@ -850,11 +850,11 @@ wristbandRoutes.post(
       });
     }
 
-    // 2026-10-19: 紛失画面から対象バンドを指定した再発行では、古いIDを対応済みに移す。
+    // 2026-10-20: 交換元に選ばれた有効バンドを履歴に残し、新IDに紐づけを移す。
     if (replacesWristbandId) {
       await db.update(wristband)
-        .set({ status: "replaced" })
-        .where(and(eq(wristband.id, replacesWristbandId), eq(wristband.status, "lost")));
+        .set({ status: "replaced", deactivatedAt: new Date() })
+        .where(and(eq(wristband.id, replacesWristbandId), eq(wristband.status, "active")));
     }
 
     return c.json({ success: true, wristbandId });
