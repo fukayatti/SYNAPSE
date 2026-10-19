@@ -1443,6 +1443,23 @@ export interface WristbandLookupResult {
   familyBandCount: number;
 }
 
+export interface LostWristbandItem {
+  user: {
+    id: string;
+    displayId: number;
+    nickname: string | null;
+    status: string;
+  };
+  wristband: {
+    id: string;
+    userId: string;
+    status: "lost";
+    nickname: string | null;
+    assignedAt: string;
+    deactivatedAt: string | null;
+  };
+}
+
 export type WristbandBatchSource = "generated" | "csv";
 export type WristbandBatchStatus = "pending" | "processing" | "completed" | "conflict";
 export interface WristbandBatch {
@@ -1493,10 +1510,15 @@ export const wristbandApi = {
         `&offset=${pagination.offset}&limit=${pagination.limit}` +
         `&sortBy=${sorting.sortBy}&sortDirection=${sorting.sortDirection}`
     ),
-  register: (userId: string, wristbandId: string) =>
+  listLost: (eventId: string, query = "", offset = 0, limit = 50) =>
+    fetchApi<{ items: LostWristbandItem[]; total: number; offset: number; limit: number }>(
+      `/api/wristbands/lost?eventId=${encodeURIComponent(eventId)}&query=${encodeURIComponent(query)}` +
+        `&offset=${offset}&limit=${limit}`
+    ),
+  register: (userId: string, wristbandId: string, replacesWristbandId?: string) =>
     fetchApi<{ success: boolean; wristbandId: string }>("/api/wristbands/register", {
       method: "POST",
-      body: { userId, wristbandId },
+      body: { userId, wristbandId, replacesWristbandId },
     }),
   addFamilyMember: (data: {
     userId: string;

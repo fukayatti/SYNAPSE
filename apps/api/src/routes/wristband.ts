@@ -159,6 +159,72 @@ wristbandRoutes.get(
   }
 );
 
+// 2026-10-19: 現行の来場者検索は有効なバンドだけを結合するため、紛失履歴を
+// 専用一覧で取得し、再発行時に対象バンドと来場者を取り違えないようにする。
+wristbandRoutes.get(
+  "/lost",
+  zQuery(z.object({
+    eventId: z.string().min(1),
+    query: z.string().optional().default(""),
+    offset: z.coerce.number().int().min(0).optional().default(0),
+    limit: z.coerce.number().int().min(1).max(100).optional().default(50),
+  })),
+  async (c) => {
+    const db = c.get("db");
+    const { eventId, query, offset, limit } = c.req.valid("query");
+    if (!(await hasPermission(c, null, "member:read", eventId))) {
+      apiError("FORBIDDEN", "紛失リストバンドを表示する権限がありません");
+    }
+
+    const conditions = [eq(eventUser.eventId, eventId), eq(wristband.status, "lost")];
+    const normalizedQuery = query.trim();
+    if (normalizedQuery) {
+      const matches = [
+        like(eventUser.nickname, `%${normalizedQuery}%`),
+        like(wristband.nickname, `%${normalizedQuery}%`),
+        like(wristband.id, `%${normalizedQuery}%`),
+      ];
+      if (/^\d+$/.test(normalizedQuery)) {
+        matches.push(eq(eventUser.displayId, Number(normalizedQuery)));
+      }
+      const match = or(...matches);
+      if (match) conditions.push(match);
+    }
+
+    const where = and(...conditions);
+    const [totalRow] = await db
+      .select({ total: count() })
+      .from(wristband)
+      .innerJoin(eventUser, eq(eventUser.id, wristband.userId))
+      .where(where);
+    const items = await db
+      .select({
+        user: {
+          id: eventUser.id,
+          displayId: eventUser.displayId,
+          nickname: eventUser.nickname,
+          status: eventUser.status,
+        },
+        wristband: {
+          id: wristband.id,
+          userId: wristband.userId,
+          status: wristband.status,
+          nickname: wristband.nickname,
+          assignedAt: wristband.assignedAt,
+          deactivatedAt: wristband.deactivatedAt,
+        },
+      })
+      .from(wristband)
+      .innerJoin(eventUser, eq(eventUser.id, wristband.userId))
+      .where(where)
+      .orderBy(desc(wristband.deactivatedAt), desc(wristband.assignedAt), asc(wristband.id))
+      .limit(limit)
+      .offset(offset);
+
+    return c.json({ items, total: totalRow?.total ?? 0, offset, limit });
+  }
+);
+
 /** イベント内の呼出ID範囲をDBの単一書き込みで確保する。 */
 async function allocateDisplayIds(db: DB, eventId: string, count: number): Promise<number> {
   // 2026-10-17: MAX(display_id)+1 は並行発行で衝突するため、D1のatomic upsertで範囲を予約する。
@@ -440,11 +506,12 @@ wristbandRoutes.post(
     z.object({
       userId: z.string(),
       wristbandId: z.string(), // 新しいリストバンドのQR/コード値
+      replacesWristbandId: z.string().optional(),
     })
   ),
   async (c) => {
     const db = c.get("db");
-    const { userId, wristbandId } = c.req.valid("json");
+    const { userId, wristbandId, replacesWristbandId } = c.req.valid("json");
 
     // 対象ユーザーと対象バンドの現状を先に読む (権限判定を書き込みより前に行うため)。
     const users = await db
@@ -470,6 +537,23 @@ wristbandRoutes.post(
     const bandEventId = bandOwner[0]?.eventId;
     if (targetEventId && bandEventId && targetEventId !== bandEventId) {
       apiError("FORBIDDEN", "別のイベントで登録されたリストバンドは使用できません");
+    }
+
+    if (replacesWristbandId) {
+      if (replacesWristbandId === wristbandId) {
+        apiError("BAD_REQUEST", "紛失したバンドと別のIDを指定してください");
+      }
+      const [lostBand] = await db.select().from(wristband).where(and(
+        eq(wristband.id, replacesWristbandId),
+        eq(wristband.userId, userId),
+        eq(wristband.status, "lost"),
+      ));
+      if (!lostBand || !targetEventId) {
+        apiError("NOT_FOUND", "置き換える紛失リストバンドが見つかりません");
+      }
+      if (!(await hasPermission(c, null, "member:write", targetEventId))) {
+        apiError("FORBIDDEN", "紛失リストバンドの再発行にはスタッフ権限が必要です");
+      }
     }
 
     // 2026-07-11: 権限ゲート。以下はいずれも本部(スタッフ member:write)権限を要求する:
@@ -543,6 +627,13 @@ wristbandRoutes.post(
         status: "active",
         assignedAt: new Date(),
       });
+    }
+
+    // 2026-10-19: 紛失画面から対象バンドを指定した再発行では、古いIDを対応済みに移す。
+    if (replacesWristbandId) {
+      await db.update(wristband)
+        .set({ status: "replaced" })
+        .where(and(eq(wristband.id, replacesWristbandId), eq(wristband.status, "lost")));
     }
 
     return c.json({ success: true, wristbandId });

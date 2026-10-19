@@ -23,6 +23,7 @@ import {
   ChevronRight,
   Edit,
   FileUp,
+  ShieldAlert,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useUnsavedChanges } from "@/components/UnsavedNavigationGuard";
@@ -33,6 +34,7 @@ import { digitalQrIssueUrl } from "@/lib/digital-qr-url";
 import { visitorUrl } from "@/lib/visitor-url";
 import { generateWristbandIds } from "@/lib/wristband-id-generator";
 import { WristbandBatchHistory } from "@/components/event/WristbandBatchHistory";
+import { LostWristbandsTab } from "@/components/event/LostWristbandsTab";
 
 interface WristbandsTabProps {
   eventId: string;
@@ -63,6 +65,7 @@ const VISITOR_SORT_COLUMNS: { label: string; field: Exclude<VisitorSortField, "c
 
 export function WristbandsTab({ eventId, hasPhysicalWristband = true, allowSelfIssue = true }: WristbandsTabProps) {
   const queryClient = useQueryClient();
+  const [activeView, setActiveView] = useState<"management" | "lost">("management");
 
   // 検索・表示関連の状態
   const [searchInput, setSearchInput] = useState("");
@@ -236,6 +239,7 @@ export function WristbandsTab({ eventId, hasPhysicalWristband = true, allowSelfI
     onSuccess: () => {
       toast.success("リストバンド情報を更新しました");
       queryClient.invalidateQueries({ queryKey: ["eventVisitors"] });
+      queryClient.invalidateQueries({ queryKey: ["lostWristbands", eventId] });
       if (selectedUser?.user?.id) {
         lookupMutation.mutate(selectedUser.user.id);
       }
@@ -253,6 +257,7 @@ export function WristbandsTab({ eventId, hasPhysicalWristband = true, allowSelfI
       toast.success("新しいリストバンドをアカウントに紐付けました");
       setReissueWristbandId("");
       queryClient.invalidateQueries({ queryKey: ["eventVisitors"] });
+      queryClient.invalidateQueries({ queryKey: ["lostWristbands", eventId] });
       if (selectedUser?.user?.id) {
         lookupMutation.mutate(selectedUser.user.id);
       }
@@ -495,6 +500,10 @@ export function WristbandsTab({ eventId, hasPhysicalWristband = true, allowSelfI
     }));
   };
 
+  if (activeView === "lost") {
+    return <LostWristbandsTab eventId={eventId} onBack={() => setActiveView("management")} />;
+  }
+
   return (
     <div className="space-y-6 font-mono text-foreground">
       {/* 画面ヘッダー部 */}
@@ -509,6 +518,14 @@ export function WristbandsTab({ eventId, hasPhysicalWristband = true, allowSelfI
           </p>
         </div>
         <div className="flex w-full max-w-full flex-col gap-2 sm:w-auto sm:flex-row">
+          <Button
+            onClick={() => setActiveView("lost")}
+            variant="outline"
+            className="w-full sm:w-auto border-thick border-error h-9 text-xs font-bold rounded-none shadow-none px-3"
+          >
+            <ShieldAlert className="h-4 w-4 mr-1.5" />
+            紛失対応
+          </Button>
           <Button
             onClick={() => {
               setLookupCode("");
