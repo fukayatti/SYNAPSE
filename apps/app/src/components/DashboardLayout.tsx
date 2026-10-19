@@ -98,6 +98,50 @@ export default function DashboardLayout({
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [expandedMenuGroups, setExpandedMenuGroups] = useState<string[]>([]);
 
+  const publishMobileMenuState = (open: boolean) => {
+    window.dispatchEvent(new CustomEvent("fesflow:dashboard-menu-state", { detail: open }));
+  };
+  const closeMobileMenu = () => {
+    setIsMobileMenuOpen(false);
+    publishMobileMenuState(false);
+  };
+
+  // 2026-10-20: ロゴ横のトリガーから開き、ドロワー内の操作から閉じた時も同じ状態へ同期する。
+  useEffect(() => {
+    const open = () => {
+      setIsMobileMenuOpen(true);
+      window.dispatchEvent(new CustomEvent("fesflow:dashboard-menu-state", { detail: true }));
+    };
+    const close = () => {
+      setIsMobileMenuOpen(false);
+      window.dispatchEvent(new CustomEvent("fesflow:dashboard-menu-state", { detail: false }));
+    };
+    window.addEventListener("fesflow:dashboard-menu-open", open);
+    window.addEventListener("fesflow:dashboard-menu-close", close);
+    window.dispatchEvent(new CustomEvent("fesflow:dashboard-menu-state", { detail: false }));
+    return () => {
+      window.removeEventListener("fesflow:dashboard-menu-open", open);
+      window.removeEventListener("fesflow:dashboard-menu-close", close);
+    };
+  }, []);
+
+  // 2026-10-20: サイドバーの上下を固定ヘッダーの実寸に追従させ、画面の高さに合わせて内側だけスクロールする。
+  useEffect(() => {
+    const header = document.querySelector<HTMLElement>("[data-app-header]");
+    if (!header || typeof ResizeObserver === "undefined") return;
+    const root = document.documentElement;
+    const previousHeight = root.style.getPropertyValue("--app-header-height");
+    const updateHeight = () => root.style.setProperty("--app-header-height", `${header.getBoundingClientRect().height}px`);
+    const observer = new ResizeObserver(updateHeight);
+    observer.observe(header);
+    updateHeight();
+    return () => {
+      observer.disconnect();
+      if (previousHeight) root.style.setProperty("--app-header-height", previousHeight);
+      else root.style.removeProperty("--app-header-height");
+    };
+  }, []);
+
   // 背景スクロールロック (Modal.tsx と同じパターン)。アンマウント/クローズ時に必ず元へ戻す。
   useEffect(() => {
     if (!isMobileMenuOpen) return;
@@ -110,7 +154,7 @@ export default function DashboardLayout({
 
   // Escape 閉じ・フォーカストラップは Modal.tsx と同じ共通フックを再利用する。
   const drawerFocusTrapRef = useFocusTrap<HTMLDivElement>(isMobileMenuOpen, {
-    onEscape: () => setIsMobileMenuOpen(false),
+    onEscape: closeMobileMenu,
   });
   // 2026-07-16: 従来は useState + useEffect(依存配列 []) で mount 時に一度だけ
   // localStorage の circleId を読んでいたため、同一パス上でヘッダーからスペースを
@@ -292,7 +336,7 @@ export default function DashboardLayout({
     }
     return activeTab === item.tab;
   });
-  const activeGroup = visibleMenuGroups.find((group) => group.items.includes(activeItem!));
+  const activeGroup = activeItem && visibleMenuGroups.find((group) => group.items.includes(activeItem));
 
   useEffect(() => {
     if (!activeGroup) return;
@@ -334,7 +378,7 @@ export default function DashboardLayout({
               !isMobile && "md:min-h-10",
             );
             const handleItemClick = () => {
-              if (isMobile) setIsMobileMenuOpen(false);
+              if (isMobile) closeMobileMenu();
               if (type !== "circle" && item.tab && onTabChange) {
                 // 2026-10-16: システム/イベントのタブ切り替えも未保存確認を通す。
                 requestGuardedNavigation(() => onTabChange(item.tab!));
@@ -345,7 +389,7 @@ export default function DashboardLayout({
               <Link
                 key={item.href}
                 to={item.href}
-                onClick={() => isMobile && setIsMobileMenuOpen(false)}
+                onClick={() => isMobile && closeMobileMenu()}
                 className={itemClass}
               >
                 <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
@@ -403,24 +447,6 @@ export default function DashboardLayout({
         </div>
       )}
 
-      {/* モバイルメニュー トリガー (md未満)。押すと下のドロワーが画面左からスライドインする。
-          トリガー自体はページ内に留まる (差し込み型ではない) のでページの高さは変わらない。 */}
-      <div className="md:hidden w-full border-thick border-border bg-background mb-4">
-        <button
-          onClick={() => setIsMobileMenuOpen(true)}
-          aria-expanded={isMobileMenuOpen}
-          aria-haspopup="dialog"
-          aria-label="メニューを開く"
-          className="flex items-center justify-between w-full px-4 py-3 text-xs font-bold uppercase cursor-pointer"
-        >
-          <span className="flex items-center gap-2">
-            {activeItem ? <activeItem.icon className="h-4 w-4 shrink-0 text-muted-foreground" /> : null}
-            {activeItem ? activeItem.title : "メニューを選択"}
-          </span>
-          <ChevronDown className="h-4 w-4" />
-        </button>
-      </div>
-
       {/* モバイルメニュー ドロワー (md未満)。トリガーとは別要素として常にマウントしておき、
           開閉は translate-x の CSS transition のみで行う (アンマウント方式だと閉じるアニメーションが
           出せないため)。閉じている間は `inert` で背景要素としてフォーカス/操作を無効化し、
@@ -436,11 +462,12 @@ export default function DashboardLayout({
         {/* オーバーレイ: タップで閉じる。背景はスクロールロック済み (useEffect 参照)。 */}
         <div
           className="absolute inset-0 bg-foreground/80 backdrop-blur-sm"
-          onClick={() => setIsMobileMenuOpen(false)}
+          onClick={closeMobileMenu}
         />
 
         <div
           ref={drawerFocusTrapRef}
+          id="dashboard-mobile-menu"
           inert={!isMobileMenuOpen}
           tabIndex={-1}
           role="dialog"
@@ -454,7 +481,7 @@ export default function DashboardLayout({
           <div className="flex items-center justify-between px-4 py-3 border-b-thick border-border shrink-0">
             <span className="text-xs font-bold uppercase">メニュー</span>
             <button
-              onClick={() => setIsMobileMenuOpen(false)}
+              onClick={closeMobileMenu}
               aria-label="閉じる"
               className="p-1 hover:bg-muted border-thick border-transparent hover:border-border transition-all shrink-0"
             >
@@ -472,7 +499,10 @@ export default function DashboardLayout({
       {/* 2カラムレイアウト */}
       <div className="flex flex-col md:flex-row gap-6 items-start">
         {/* 左サイドバー: PCでは縦並び、モバイルでは非表示 (アコーディオンがカバーするため) */}
-        <aside className="hidden md:block w-full md:w-64 shrink-0 border-thick border-border bg-background p-2 rounded-none shadow-none md:sticky md:top-4">
+        <aside
+          className="hidden w-full shrink-0 overscroll-contain border-thick border-border bg-background p-2 shadow-none md:sticky md:block md:w-64 md:overflow-y-auto"
+          style={{ top: "var(--app-header-height, 56px)", height: "calc(100dvh - var(--app-header-height, 56px))" }}
+        >
           <nav className="flex md:flex-col gap-1">
             {renderMenuGroups(false)}
           </nav>

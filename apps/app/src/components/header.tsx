@@ -79,12 +79,22 @@ export default function Header() {
   );
 
   const [profileModalOpen, setProfileModalOpen] = useState(false);
+  const [dashboardMenuOpen, setDashboardMenuOpen] = useState(false);
   // 通知/スペース切替/アカウント/モバイルナビの4つのメニューは常に1つしか開かない (2026-07-16)
   const [activeMenu, setActiveMenu] = useState<MenuKey>(null);
   const notifOpen = activeMenu === "notif";
   const spaceOpen = activeMenu === "space";
   const accountOpen = activeMenu === "account";
   const mobileNavOpen = activeMenu === "nav";
+
+  // 2026-10-20: モバイルの管理画面切替をFesFlowロゴ横に置くため、ヘッダーと管理メニューの開閉状態を同期する。
+  useEffect(() => {
+    const syncDashboardMenu = (event: Event) => {
+      setDashboardMenuOpen((event as CustomEvent<boolean>).detail);
+    };
+    window.addEventListener("fesflow:dashboard-menu-state", syncDashboardMenu);
+    return () => window.removeEventListener("fesflow:dashboard-menu-state", syncDashboardMenu);
+  }, []);
 
   // モバイル3本線メニューの2段目 (通知/組織切り替え/アカウントのどれを掘り下げているか)。
   // 一度に開く2段目は1つだけにするため単一 state にし、3本線自体が閉じたら
@@ -640,22 +650,39 @@ export default function Header() {
   );
 
   return (
-    <header className="sticky top-0 z-50 bg-background border-b-thick border-border text-foreground font-mono">
+    <header data-app-header className="sticky top-0 z-50 bg-background border-b-thick border-border text-foreground font-mono">
       <div className="flex items-center justify-between px-2 sm:px-4 py-2 max-w-7xl mx-auto gap-2 sm:gap-4">
-        {/* ロゴ / ブランド */}
-        <Link
-          to="/"
-          className="font-headline text-base sm:text-lg lg:text-xl uppercase tracking-[2px] leading-none select-none hover:opacity-80 flex items-center gap-2 shrink-0"
-        >
-          <span className="font-black border-thin border-border px-2 py-1 bg-primary text-primary-foreground text-sm sm:text-base">
-            {PRODUCT_NAME.toUpperCase()}
-            <span className="hidden lg:inline">
-              {isCircleView && " // BOOTH"}
-              {isEventView && " // EVENT"}
-              {isAdminView && " // SYSTEM"}
+        <div className="flex min-w-0 shrink-0 items-center gap-1.5">
+          {/* ロゴ / ブランド */}
+          <Link
+            to="/"
+            className="font-headline text-base sm:text-lg lg:text-xl uppercase tracking-[2px] leading-none select-none hover:opacity-80 flex items-center gap-2 shrink-0"
+          >
+            <span className="font-black border-thin border-border px-2 py-1 bg-primary text-primary-foreground text-sm sm:text-base">
+              {PRODUCT_NAME.toUpperCase()}
+              <span className="hidden lg:inline">
+                {isCircleView && " // BOOTH"}
+                {isEventView && " // EVENT"}
+                {isAdminView && " // SYSTEM"}
+              </span>
             </span>
-          </span>
-        </Link>
+          </Link>
+          {pathname.startsWith("/event/dashboard") && (
+            <button
+              type="button"
+              aria-label={dashboardMenuOpen ? "管理画面メニューを閉じる" : "管理画面メニューを開く"}
+              aria-expanded={dashboardMenuOpen}
+              aria-controls="dashboard-mobile-menu"
+              onClick={() => {
+                const eventName = dashboardMenuOpen ? "fesflow:dashboard-menu-close" : "fesflow:dashboard-menu-open";
+                window.dispatchEvent(new Event(eventName));
+              }}
+              className="inline-flex h-9 w-9 shrink-0 items-center justify-center border-thick border-border bg-background text-foreground transition-colors hover:bg-primary hover:text-primary-foreground md:hidden"
+            >
+              {dashboardMenuOpen ? <X className="h-4 w-4" aria-hidden="true" /> : <Menu className="h-4 w-4" aria-hidden="true" />}
+            </button>
+          )}
+        </div>
 
         {/* デスクトップナビゲーション (常時ラベル表示のためページリンクなのでそのまま維持) */}
         <nav className="hidden lg:flex items-center gap-1 font-headline text-[13px] uppercase tracking-[1px]">
