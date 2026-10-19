@@ -41,7 +41,7 @@ export default function StaffOnboarding() {
 	useEffect(() => {
 		if (wantsInvite) return;
 		if (spaces && spaces.length > 0 && session?.user?.email) {
-			resolveActiveSpaceAfterAuth(session.user.email)
+			resolveActiveSpaceAfterAuth()
 				.then((r) => {
 					if (r.kind !== "none") navigate(r.path, { replace: true });
 				})
@@ -114,7 +114,6 @@ export default function StaffOnboarding() {
 		mutationFn: () =>
 			membershipApi.acceptInvite({
 				token: lookup!.token,
-				userName: session?.user?.name || session?.user?.email || "メンバー",
 			}),
 		onSuccess: async () => {
 			toast.success("参加しました");
@@ -130,7 +129,7 @@ export default function StaffOnboarding() {
 			return;
 		}
 		try {
-			const memberships = await membershipApi.listMy(email);
+			const memberships = await membershipApi.listMy();
 			const createdMembership = memberships.find((item: any) => item.circleId === circleId);
 			if (!createdMembership) throw new Error("作成したサークルの所属情報を取得できませんでした");
 			saveAuthInfo({
@@ -153,7 +152,7 @@ export default function StaffOnboarding() {
 		try {
 			const email = session?.user?.email;
 			if (email) {
-				const resolved = await resolveActiveSpaceAfterAuth(email);
+				const resolved = await resolveActiveSpaceAfterAuth();
 				navigate(resolved.path, { replace: true });
 				return;
 			}
@@ -227,7 +226,7 @@ export default function StaffOnboarding() {
 								try {
 									const email = session.user.email;
 									const newEventMembership = email
-										? (await membershipApi.listMy(email)).find((item: any) => item.eventId === createdEventId && item.role === "event_manager")
+										? (await membershipApi.listMy()).find((item: any) => item.eventId === createdEventId && item.role === "event_manager")
 										: null;
 									if (newEventMembership) {
 										saveAuthInfo({
@@ -241,7 +240,7 @@ export default function StaffOnboarding() {
 											isEventAdmin: true,
 										});
 									}
-									const resolved = newEventMembership ? null : email ? await resolveActiveSpaceAfterAuth(email) : null;
+									const resolved = newEventMembership ? null : email ? await resolveActiveSpaceAfterAuth() : null;
 									const path = newEventMembership ? "/event/dashboard" : resolved?.path || "/event/dashboard";
 									navigate(hasPhysicalWristband && path === "/event/dashboard" ? `${path}?tab=wristbands` : path, { replace: true });
 								} catch {

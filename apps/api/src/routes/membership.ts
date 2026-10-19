@@ -446,7 +446,6 @@ membershipRoutes.post(
   "/check-permission",
   zBody(
     z.object({
-      userEmail: z.string(),
       circleId: z.string().optional(),
       eventId: z.string().optional(),
       permission: z.string(),
@@ -456,10 +455,8 @@ membershipRoutes.post(
     const db = c.get("db");
     const input = c.req.valid("json");
 
-    const session = c.get("session")!;
-    if (session.user.email.toLowerCase() !== input.userEmail.toLowerCase()) {
-      apiError("FORBIDDEN", "他のユーザーの権限は照会できません");
-    }
+    // 2026-10-19: 権限対象は認証済みセッション本人に固定し、メールアドレスを本文から受け取らない。
+    const userEmail = c.get("session")!.user.email.toLowerCase();
 
     // メンバーシップを検索
     let membershipQuery;
@@ -469,7 +466,7 @@ membershipRoutes.post(
         .from(membership)
         .where(
           and(
-            eq(membership.userEmail, input.userEmail),
+            eq(membership.userEmail, userEmail),
             eq(membership.circleId, input.circleId),
             eq(membership.isActive, true)
           )
@@ -480,7 +477,7 @@ membershipRoutes.post(
         .from(membership)
         .where(
           and(
-            eq(membership.userEmail, input.userEmail),
+            eq(membership.userEmail, userEmail),
             eq(membership.eventId, input.eventId),
             eq(membership.isActive, true)
           )
@@ -788,7 +785,6 @@ membershipRoutes.post(
       // token(リンク) か code(手入力) のどちらかで受諾できる (2026-07-12)。
       token: z.string().optional(),
       code: z.string().optional(),
-      userName: z.string(),
     })
   ),
   async (c) => {
@@ -875,8 +871,9 @@ membershipRoutes.post(
           userEmail, foundToken.circleId, foundToken.circleId, foundToken.eventId, foundToken.eventId),
         c.env.DB.prepare("UPDATE invite_token SET used_count=used_count+1 WHERE id=? AND (max_uses IS NULL OR used_count<max_uses)")
           .bind(foundToken.id),
+        // 2026-10-19: 招待受諾者の表示名は認証済みセッションから取得し、クライアントから重複送信させない。
         c.env.DB.prepare(`INSERT INTO membership (id,user_email,user_name,circle_id,event_id,role,is_active)
-          VALUES (?,?,?,?,?,?,1)`).bind(membershipId, userEmail, input.userName, foundToken.circleId,
+          VALUES (?,?,?,?,?,?,1)`).bind(membershipId, userEmail, session.user.name || "メンバー", foundToken.circleId,
             foundToken.eventId, foundToken.role),
         c.env.DB.prepare("DELETE FROM order_write_guard WHERE id=?").bind(inviteUseGuardId),
       ]);

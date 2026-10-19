@@ -38,7 +38,7 @@ export default function Login() {
 		if (autoResolvedRef.current) return;
 		if (!session?.user?.email || hasActiveSpace) return;
 		autoResolvedRef.current = true;
-		resolveActiveSpaceAfterAuth(session.user.email)
+		resolveActiveSpaceAfterAuth()
 			.then((resolved) => {
 				if (resolved.kind !== "none") {
 					navigate(resolved.path);
@@ -180,7 +180,7 @@ function LocalPasswordAuth() {
 				setPassword("");
 				return;
 			}
-			const resolved = await resolveActiveSpaceAfterAuth(current.data.user.email);
+			const resolved = await resolveActiveSpaceAfterAuth();
 			navigate(callbackUrl || (resolved.kind === "none" ? "/onboarding" : resolved.path), { replace: true });
 		} catch (cause) {
 			setError(cause instanceof Error ? cause.message : "認証に失敗しました。入力内容を確認して再試行してください。");
