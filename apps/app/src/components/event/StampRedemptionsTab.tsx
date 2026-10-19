@@ -168,7 +168,11 @@ export function StampRedemptionsTab({ eventId }: { eventId: string }) {
                 {lookup.progress.remainingCount === 0 ? "交換枠を利用済み" : lookup.progress.eligible ? "交換条件達成" : "条件未達成"}
               </p>
             </div>
-            <p className="text-xs">利用店舗 {lookup.progress.stampedCount} / {lookup.progress.requiredCount}</p>
+            <p className="text-xs">
+              {lookup.progress.qualification.minQualifiedAreaCount !== null
+                ? `達成エリア ${lookup.progress.qualification.qualifiedAreaCount} / ${lookup.progress.qualification.minQualifiedAreaCount} エリア`
+                : `利用店舗 ${lookup.progress.stampedCount} / ${lookup.progress.qualification.minTotalDistinctCircles ?? 0} 店舗`}
+            </p>
 
             {lookup.progress.remainingCount > 0 && lookup.progress.eligible ? (
               <>

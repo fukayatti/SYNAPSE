@@ -643,8 +643,8 @@ membershipRoutes.post(
       role: z.enum(ROLES),
       expiresInHours: z.number().min(1).max(168).default(24), // 1時間〜7日
       maxUses: z.number().int().min(1).max(100).nullable().optional(),
-      createdBy: z.string().optional(), // 作成者のメールアドレス (互換性のためオプショナル化)
-      targetEmail: z.string().optional(), // 招待相手 of メールアドレス
+      // 2026-10-20: 作成者は認証セッションから取得するため、リクエストでは受け取らない。
+      targetEmail: z.string().optional(), // 招待相手のメールアドレス
     })
   ),
   async (c) => {

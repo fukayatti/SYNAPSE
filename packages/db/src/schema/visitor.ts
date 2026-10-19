@@ -233,22 +233,6 @@ export const userStamp = sqliteTable(
   ]
 );
 
-// 景品交換テーブル
-export const rewardRedemption = sqliteTable(
-  "reward_redemption",
-  {
-    id: text("id").primaryKey().$defaultFn(() => ulid()),
-    userId: text("user_id").notNull().unique(), // 1人1回まで
-    staffId: text("staff_id").notNull(), // 交換を対応したスタッフのIDまたはメール
-    createdAt: integer("created_at", { mode: "timestamp_ms" })
-      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
-      .notNull(),
-  },
-  (table) => [
-    index("reward_redemption_userId_idx").on(table.userId),
-  ]
-);
-
 // 2026-10-16: 1アカウントが家族人数分の景品を受け取れるよう、交換ごとの数量と
 // 景品名スナップショットを記録する。重複制約を外し、来場者・景品単位で複数回記録できる。
 export const stampRallyRedemption = sqliteTable(

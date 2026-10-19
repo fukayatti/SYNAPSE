@@ -181,7 +181,6 @@ function MembersContent() {
       role: Role;
       expiresInHours?: number;
       maxUses?: number | null;
-      createdBy: string;
       targetEmail?: string;
     }) => membershipApi.createInvite(input),
     onSuccess: (data, variables) => {
@@ -300,7 +299,6 @@ function MembersContent() {
       // 2026-10-15 Issue #122: 0回は無制限を表すため、APIへ null を明示して保存する。
       maxUses: inviteSettings.maxUses === 0 ? null : Math.min(100, Math.max(1, inviteSettings.maxUses)),
       expiresInHours: Math.max(1, inviteSettings.expiresInHours || 24),
-      createdBy: userEmail || "",
       targetEmail: inviteSettings.targetEmail || undefined,
     });
   };
@@ -339,7 +337,6 @@ function MembersContent() {
         role: inviteSettings.role,
         maxUses: inviteSettings.maxUses === 0 ? null : Math.min(100, Math.max(1, inviteSettings.maxUses)),
         expiresInHours: Math.max(1, inviteSettings.expiresInHours || 24),
-        createdBy: userEmail || "",
         targetEmail: inviteSettings.targetEmail || undefined,
       });
     },

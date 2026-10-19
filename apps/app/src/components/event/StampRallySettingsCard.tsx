@@ -12,7 +12,7 @@ import { useUnsavedChanges } from "@/components/UnsavedNavigationGuard";
 
 type StoreArea = { id: string; name: string };
 type EventWithStoreAreas = Event & { storeAreas?: string | null };
-type ParsedSettings = StampRallySettings & { legacy: boolean; rewards: StampRallyReward[]; qualification: StampRallyQualificationRule };
+type ParsedSettings = StampRallySettings & { rewards: StampRallyReward[]; qualification: StampRallyQualificationRule };
 
 function parseStoreAreas(raw?: string | null): StoreArea[] {
   try {
@@ -31,8 +31,6 @@ function parseSettings(raw?: string | null): ParsedSettings {
   const empty: ParsedSettings = {
     enabled: false,
     targetAreaIds: [],
-    requiredCount: 3,
-    requiredCountByArea: {},
     qualification: {
       minQualifiedAreaCount: null,
       minDistinctCirclesPerArea: { default: 1, byArea: {} },
@@ -43,16 +41,12 @@ function parseSettings(raw?: string | null): ParsedSettings {
     rewards: [{ id: "default", name: "景品交換", stockQuantity: null }],
     redemptionLocation: "",
     rulesUrl: "",
-    legacy: false,
   };
   try {
     const parsed = JSON.parse(raw || "{}") as Record<string, unknown>;
-    const legacyAreas = Array.isArray(parsed.areas) ? parsed.areas : [];
-    const legacy = legacyAreas.length > 0 && !Array.isArray(parsed.targetAreaIds);
-    const firstLegacy = legacyAreas[0] as Record<string, unknown> | undefined;
     const rewardTitle = typeof parsed.rewardTitle === "string"
       ? parsed.rewardTitle
-      : (typeof firstLegacy?.rewardTitle === "string" ? firstLegacy.rewardTitle : empty.rewardTitle);
+      : empty.rewardTitle;
     const rewards = Array.isArray(parsed.rewards)
       ? parsed.rewards.flatMap((reward): StampRallyReward[] => {
           if (!reward || typeof reward !== "object") return [];
@@ -69,16 +63,9 @@ function parseSettings(raw?: string | null): ParsedSettings {
           }];
         })
       : [{ id: "default", name: rewardTitle, stockQuantity: null }];
-    const requiredCountByArea = parsed.requiredCountByArea && typeof parsed.requiredCountByArea === "object" && !Array.isArray(parsed.requiredCountByArea)
-      ? Object.fromEntries(Object.entries(parsed.requiredCountByArea)
-          .filter((entry): entry is [string, number] => typeof entry[0] === "string" && Number.isInteger(entry[1]) && Number(entry[1]) >= 1 && Number(entry[1]) <= 100))
-      : {};
     const targetAreaIds = Array.isArray(parsed.targetAreaIds)
       ? parsed.targetAreaIds.filter((id): id is string => typeof id === "string")
       : [];
-    const requiredCount = Number.isInteger(parsed.requiredCount) && Number(parsed.requiredCount) > 0
-      ? Number(parsed.requiredCount)
-      : (Number.isInteger(firstLegacy?.requiredCount) ? Number(firstLegacy?.requiredCount) : empty.requiredCount);
     const rawQualification = parsed.qualification && typeof parsed.qualification === "object" && !Array.isArray(parsed.qualification)
       ? parsed.qualification as Record<string, unknown>
       : null;
@@ -94,7 +81,6 @@ function parseSettings(raw?: string | null): ParsedSettings {
       (rawQualification.minTotalDistinctCircles === null || (Number.isInteger(rawQualification.minTotalDistinctCircles) && Number(rawQualification.minTotalDistinctCircles) >= 1 && Number(rawQualification.minTotalDistinctCircles) <= 100)) &&
       Number.isInteger(rawPerArea.default) && Number(rawPerArea.default) >= 1 && Number(rawPerArea.default) <= 100 &&
       Array.isArray(rawQualification.requiredAreaIds) && rawQualification.requiredAreaIds.every((id) => typeof id === "string");
-    const legacyAreaRequirementsConfigured = targetAreaIds.length > 0 && targetAreaIds.every((areaId) => requiredCountByArea[areaId] != null);
     const qualification: StampRallyQualificationRule = hasValidQualification
       ? {
           minQualifiedAreaCount: rawQualification.minQualifiedAreaCount as number | null,
@@ -102,26 +88,17 @@ function parseSettings(raw?: string | null): ParsedSettings {
           requiredAreaIds: rawQualification.requiredAreaIds as string[],
           minTotalDistinctCircles: rawQualification.minTotalDistinctCircles as number | null,
         }
-      : {
-          // 2026-10-19: 保存済みの旧条件は、全エリア必須または合計店舗数として同じ意味で編集できるよう復元する。
-          minQualifiedAreaCount: legacyAreaRequirementsConfigured ? targetAreaIds.length : null,
-          minDistinctCirclesPerArea: { default: 1, byArea: legacyAreaRequirementsConfigured ? requiredCountByArea : {} },
-          requiredAreaIds: [],
-          minTotalDistinctCircles: legacyAreaRequirementsConfigured ? null : requiredCount,
-        };
+      : empty.qualification;
     return {
       enabled: parsed.enabled === true,
       targetAreaIds,
-      requiredCount,
-      requiredCountByArea,
       qualification,
       rewardTitle,
       rewards: rewards.length ? rewards : [{ id: "default", name: rewardTitle, stockQuantity: null }],
       redemptionLocation: typeof parsed.redemptionLocation === "string"
         ? parsed.redemptionLocation
-        : (typeof firstLegacy?.rewardDescription === "string" ? firstLegacy.rewardDescription : ""),
+        : "",
       rulesUrl: typeof parsed.rulesUrl === "string" ? parsed.rulesUrl : "",
-      legacy,
     };
   } catch {
     return empty;
@@ -157,7 +134,6 @@ export function StampRallySettingsCard({ eventId, event, onOpenStoreAreas }: { e
   const qualification = draftSettings.qualification;
   const areaConditionEnabled = qualification.minQualifiedAreaCount !== null;
   const areaRequirement = (areaId: string) => qualification.minDistinctCirclesPerArea.byArea[areaId] ?? qualification.minDistinctCirclesPerArea.default;
-  const requiredCountTotal = draftSettings.targetAreaIds.reduce((sum, areaId) => sum + areaRequirement(areaId), 0);
   const invalidAreaRequirements = draftSettings.targetAreaIds.some((areaId) => {
     const required = areaRequirement(areaId);
     return !Number.isInteger(required) || required < 1 || required > 100;
@@ -211,8 +187,6 @@ export function StampRallySettingsCard({ eventId, event, onOpenStoreAreas }: { e
       const payload: StampRallySettings = {
         enabled: draftSettings.enabled,
         targetAreaIds: draftSettings.targetAreaIds,
-        requiredCount: qualification.minTotalDistinctCircles ?? Math.min(100, requiredCountTotal || draftSettings.requiredCount),
-        requiredCountByArea: Object.fromEntries(draftSettings.targetAreaIds.map((areaId) => [areaId, areaRequirement(areaId)])),
         qualification,
         rewardTitle: draftSettings.rewards[0]?.name.trim() || draftSettings.rewardTitle.trim() || "景品交換",
         rewards: draftSettings.rewards.map((reward) => ({ ...reward, name: reward.name.trim() })),
@@ -225,8 +199,6 @@ export function StampRallySettingsCard({ eventId, event, onOpenStoreAreas }: { e
       toast.success("スタンプラリーの設定を保存しました");
       const saved = {
         ...draftSettings,
-        requiredCount: qualification.minTotalDistinctCircles ?? Math.min(100, requiredCountTotal || draftSettings.requiredCount),
-        requiredCountByArea: Object.fromEntries(draftSettings.targetAreaIds.map((areaId) => [areaId, areaRequirement(areaId)])),
       };
       setSettings(saved);
       setDraftSettings(saved);
@@ -318,7 +290,7 @@ export function StampRallySettingsCard({ eventId, event, onOpenStoreAreas }: { e
     qualification: {
       ...current.qualification,
       minTotalDistinctCircles: enabled
-        ? current.qualification.minTotalDistinctCircles ?? Math.min(100, Math.max(1, current.requiredCount))
+        ? current.qualification.minTotalDistinctCircles ?? 3
         : null,
     },
   }));
@@ -372,11 +344,6 @@ export function StampRallySettingsCard({ eventId, event, onOpenStoreAreas }: { e
               <Settings2 className="h-4 w-4" />条件を設定
             </Button>
           </div>
-          {settings.legacy && (
-            <p className="text-[10px] leading-relaxed text-warning border-thin border-border p-2" role="status">
-              旧スタンプラリー設定を読み込みました。会場エリアとサークルの場所を設定したあと、新しい条件を保存してください。
-            </p>
-          )}
           {settings.enabled && settings.redemptionLocation.trim().length === 0 && <p className="text-[10px] text-error" role="alert">景品交換場所を入力してください。</p>}
           {settings.enabled && (settings.targetAreaIds.length === 0 || savedConditionImpossible) && <p className="text-[10px] text-error" role="alert">現在の店舗数では設定条件を満たせません。サークルの場所と必要数を確認してください。</p>}
           {storeAreas.length === 0 && (

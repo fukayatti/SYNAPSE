@@ -624,9 +624,8 @@ wristbandRoutes.post(
       AND NOT EXISTS (SELECT 1 FROM stamp_rally_redemption WHERE event_user_id = ?)
       AND NOT EXISTS (SELECT 1 FROM orders WHERE user_id = ?)
       AND NOT EXISTS (SELECT 1 FROM user_stamp WHERE user_id = ?)
-      AND NOT EXISTS (SELECT 1 FROM reward_redemption WHERE user_id = ?)
     `;
-    const historyBindings = Array.from({ length: 11 }, () => source.id);
+    const historyBindings = Array.from({ length: 10 }, () => source.id);
     const update = c.env.DB.prepare(`
       UPDATE wristband
       SET user_id = ?, nickname = ?, birthday_month_day = ?, age = ?, onboarded_at = ?
@@ -923,67 +922,7 @@ wristbandRoutes.patch(
   }
 );
 
-// 来場者ユーザー情報更新 (ニックネーム、お好きな日付、呼出ID、ステータス) - 2026-07-13 追加
-wristbandRoutes.patch(
-  "/user/:userId",
-  zBody(
-    z.object({
-      nickname: z.string().trim().min(1).max(30).nullable().optional(),
-      favoriteDate: z.string().nullable().optional(),
-      displayId: z.number().int().positive().optional(),
-      status: z.enum(["available", "banned"]).optional(),
-    })
-  ),
-  async (c) => {
-    const db = c.get("db");
-    const userId = c.req.param("userId");
-    const body = c.req.valid("json");
-
-    const users = await db.select().from(eventUser).where(eq(eventUser.id, userId));
-    if (users.length === 0) {
-      apiError("NOT_FOUND", "ユーザーが見つかりません");
-    }
-    // 2026-10-08: 来場者行から対象イベントを解決してから権限を確認し、
-    // 別イベントのスタッフがIDを知っていてもプロフィールを変更できないようにする。
-    const allowed = await hasPermission(c, null, "member:write", users[0]!.eventId);
-    if (!allowed) {
-      apiError("FORBIDDEN", "この操作には対象イベントのスタッフ権限が必要です");
-    }
-
-    const patch: Record<string, any> = {};
-    if (body.nickname !== undefined) patch.nickname = body.nickname;
-    if (body.favoriteDate !== undefined) {
-      if (body.favoriteDate && !/^\d{4}-\d{2}-\d{2}$/.test(body.favoriteDate)) {
-        apiError("BAD_REQUEST", "日付は YYYY-MM-DD 形式で入力してください");
-      }
-      patch.favoriteDate = body.favoriteDate || null;
-    }
-    if (body.displayId !== undefined) {
-      // 重複チェック
-      const existing = await db
-        .select()
-        .from(eventUser)
-        .where(
-          and(
-            eq(eventUser.eventId, users[0]!.eventId),
-            eq(eventUser.displayId, body.displayId)
-          )
-        );
-      if (existing.length > 0 && existing[0]!.id !== userId) {
-        apiError("CONFLICT", "この呼出IDは既に使用されています");
-      }
-      patch.displayId = body.displayId;
-    }
-    if (body.status !== undefined) patch.status = body.status;
-
-    await db.update(eventUser).set(patch).where(eq(eventUser.id, userId));
-
-    // 2026-10-16: 監査記録は認証済み変更を共通ミドルウェアで一元化する。
-
-    return c.json({ success: true });
-  }
-);
-
+// 2026-10-20: 来場者編集はイベント単位の統合APIに一本化し、部分更新APIを廃止した。
 // 来場者オンボーディング / プロフィール自己編集 (2026-07-04, 2026-07-15 セルフ編集対応)
 // 認証は不要。userId(eventUser.id) を持っている人=リストバンド保持者本人とみなす
 // (ベアラーモデル)。初回のみ onboardedAt を刻む。
