@@ -438,7 +438,8 @@ export function WristbandsTab({ eventId, hasPhysicalWristband = true, allowSelfI
                 </>
               ) : (
                 <p role="status" className="border-thin border-border bg-muted/20 p-3 text-xs leading-relaxed text-muted-foreground">
-                  来場者によるスマートフォンQRのセルフ発行はイベント設定で無効です。物理バンドを使わない個別対応は、来場者の詳細からスタッフ権限で行ってください。
+                  {/* 2026-10-20: OFFの理由に加え、利用再開に必要な設定場所と操作をその場で案内する。 */}
+                  来場者のQRセルフ発行はOFFです。利用する場合はイベント設定で「来場者のQRセルフ発行を許可する」をONにしてください。
                 </p>
               )}
             </CardContent>
