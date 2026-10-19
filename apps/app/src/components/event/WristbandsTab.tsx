@@ -702,10 +702,10 @@ export function WristbandsTab({ eventId, hasPhysicalWristband = true, allowSelfI
         title="登録済み来場者"
         subtitle={`全${visitorTotal}件`}
         maxWidth="full"
-        contentClassName="min-h-0 flex flex-col"
+        contentClassName="min-h-0 flex flex-col overflow-y-auto"
       >
-      {/* 2026-10-20: 全画面モーダルの余った高さを一覧へ渡し、行数が少なくても操作領域を画面下まで確保する。 */}
-      <div className="flex min-h-0 flex-1 flex-col gap-4">
+      {/* 2026-10-20: 検索・絞り込みの下に画面高の一覧を置く。先に条件を指定し、その後一覧領域へ移動して行を探せるようにする。 */}
+      <div className="flex shrink-0 flex-col gap-4">
       {/* 検索バー */}
       <Card className="shrink-0 gap-0 rounded-none bg-background shadow-none border-thick border-border p-0">
         <CardContent className="p-2 sm:p-4">
@@ -816,7 +816,7 @@ export function WristbandsTab({ eventId, hasPhysicalWristband = true, allowSelfI
       </Card>
 
       {/* 来場者一覧テーブル */}
-      <Card className="flex min-h-0 flex-1 flex-col gap-0 rounded-none bg-background shadow-none border-thick border-border p-0">
+      <Card className="flex h-[calc(100dvh-7rem)] min-h-[calc(100dvh-7rem)] shrink-0 flex-col gap-0 rounded-none bg-background shadow-none border-thick border-border p-0">
         <CardHeader className="p-2 pb-1 border-b-thin border-border bg-muted/20 flex flex-col items-start gap-2 sm:p-4 sm:pb-2 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <CardTitle className="text-xs uppercase font-bold">登録済み来場者</CardTitle>
@@ -832,7 +832,7 @@ export function WristbandsTab({ eventId, hasPhysicalWristband = true, allowSelfI
           </Badge>
         </CardHeader>
         <CardContent className="flex min-h-0 flex-1 flex-col p-0">
-          {/* 2026-10-20: 表のスクロール枠がカードの残り高を使い、表示件数に応じて内側だけをスクロールさせる。 */}
+          {/* 2026-10-20: 一覧カードを画面高に近い固定領域にし、多数の来場者を一覧内で探せるようにする。 */}
           <div ref={visitorScrollContainerRef} className="min-h-0 flex-1 overflow-auto">
             {isLoading ? (
               <div className="p-8 text-center text-xs text-muted-foreground flex items-center justify-center gap-2">
