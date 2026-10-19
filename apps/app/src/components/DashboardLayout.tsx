@@ -30,7 +30,6 @@ import {
   CalendarCheck,
   Ticket,
   Tag,
-  ChevronDown,
   Download,
   IdCard,
   Activity,
@@ -96,7 +95,6 @@ export default function DashboardLayout({
   // CLAUDE.md の「入力フォームはモーダルで開く」と同じ思想で、画面左からスライドインする
   // ドロワー(オーバーレイ)に変更し、開閉でページ本体の長さが変わらないようにする。
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const [expandedMenuGroups, setExpandedMenuGroups] = useState<string[]>([]);
 
   const publishMobileMenuState = (open: boolean) => {
     window.dispatchEvent(new CustomEvent("fesflow:dashboard-menu-state", { detail: open }));
@@ -343,35 +341,14 @@ export default function DashboardLayout({
     // 2026-10-20: URL直入力でも権限外のタブを描画せず、そのスタッフが使える最初の画面へ移す。
     onTabChange(firstVisibleTab);
   }, [type, authLoading, activeItem?.tab, firstVisibleTab, onTabChange]);
-  const activeGroup = activeItem && visibleMenuGroups.find((group) => group.items.includes(activeItem));
-
-  useEffect(() => {
-    if (!activeGroup) return;
-    setExpandedMenuGroups((current) => current.includes(activeGroup.label) ? current : [...current, activeGroup.label]);
-  }, [activeGroup?.label]);
-
-  const renderMenuGroups = (isMobile: boolean) => visibleMenuGroups.map((group, groupIndex) => {
-    const groupId = `${isMobile ? "mobile" : "desktop"}-dashboard-group-${groupIndex}`;
-    const isExpanded = expandedMenuGroups.includes(group.label);
-
+  // 2026-10-20: 管理メニューのカテゴリは常時表示し、画面高を超える分だけサイドバー内でスクロールする。
+  const renderMenuGroups = (isMobile: boolean) => visibleMenuGroups.map((group) => {
     return (
-      <div key={group.label} className={isMobile ? "" : "md:w-full"}>
-        <button
-          type="button"
-          aria-expanded={isExpanded}
-          aria-controls={groupId}
-          onClick={() => setExpandedMenuGroups((current) =>
-            isExpanded ? current.filter((label) => label !== group.label) : [...current, group.label]
-          )}
-          className={cn(
-            "flex w-full items-center gap-2 px-3 py-2 text-left text-[10px] font-bold uppercase tracking-wider text-muted-foreground hover:bg-muted hover:text-foreground",
-            isMobile ? "min-h-11" : "min-h-10",
-          )}
-        >
-          <ChevronDown className={cn("h-3.5 w-3.5 shrink-0 transition-transform", isExpanded ? "" : "-rotate-90")} aria-hidden="true" />
-          <span>{group.label}</span>
-        </button>
-        <div id={groupId} hidden={!isExpanded} className="ml-2 space-y-0.5 border-l border-border pl-2">
+      <div key={group.label} className={cn("pt-3 first:pt-0", !isMobile && "md:w-full")}>
+        <p className="px-3 pb-1 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+          {group.label}
+        </p>
+        <div className="ml-2 space-y-0.5 border-l border-border pl-2">
           {group.items.map((item, itemIndex) => {
             const Icon = item.icon;
             const isCircleActive = type === "circle" && location.pathname === item.href;
@@ -485,18 +462,18 @@ export default function DashboardLayout({
             isMobileMenuOpen ? "translate-x-0" : "-translate-x-full",
           )}
         >
-          <div className="flex items-center justify-between px-4 py-3 border-b-thick border-border shrink-0">
-            <span className="text-xs font-bold uppercase">メニュー</span>
+          <div className="relative flex items-center px-4 py-3 border-b-thick border-border shrink-0">
+            <span className="pl-12 text-xs font-bold uppercase">メニュー</span>
             <button
               onClick={closeMobileMenu}
               aria-label="閉じる"
-              className="p-1 hover:bg-muted border-thick border-transparent hover:border-border transition-all shrink-0"
+              className="absolute left-2 top-2 z-[70] inline-flex h-9 w-9 items-center justify-center border-thick border-border bg-background p-1 transition-all hover:bg-muted"
             >
               <X className="h-4 w-4" />
             </button>
           </div>
 
-          {/* 2026-10-20: OSのファイル一覧のようにカテゴリを展開して配下の画面を選べるツリーにする。 */}
+          {/* 2026-10-20: モバイルのドロワーでも全カテゴリを見せ、項目探しのための開閉操作をなくす。 */}
           <nav className="p-1.5 space-y-0.5 overflow-y-auto flex-1">
             {renderMenuGroups(true)}
           </nav>
@@ -505,10 +482,10 @@ export default function DashboardLayout({
 
       {/* 2カラムレイアウト */}
       <div className="flex flex-col md:flex-row gap-6 items-start">
-        {/* 左サイドバー: PCでは縦並び、モバイルでは非表示 (アコーディオンがカバーするため) */}
+        {/* 左サイドバー: 全カテゴリを表示し、画面高に収まらない項目は内側でスクロールする。 */}
         <aside
-          className="hidden w-full shrink-0 overscroll-contain border-thick border-border bg-background p-2 shadow-none md:sticky md:block md:w-64 md:overflow-y-auto"
-          style={{ top: "var(--app-header-height, 56px)", height: "calc(100dvh - var(--app-header-height, 56px))" }}
+          className="hidden w-full shrink-0 overscroll-contain border-thick border-border bg-background p-2 shadow-none md:sticky md:block md:w-64 md:self-start md:overflow-y-auto"
+          style={{ top: "calc(var(--app-header-height, 0px) + 1rem)", height: "calc(100dvh - var(--app-header-height, 0px) - 2rem)" }}
         >
           <nav className="flex md:flex-col gap-1">
             {renderMenuGroups(false)}

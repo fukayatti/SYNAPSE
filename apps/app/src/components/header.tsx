@@ -7,7 +7,6 @@ import {
   X,
   ChevronDown,
   ChevronRight,
-  ChevronLeft,
   User,
   Bell,
   Shield,
@@ -49,16 +48,11 @@ import { authClient } from "@/lib/auth-client";
 //   - 外側クリックは document 全体の mousedown 監視で判定する (フルスクリーンの透明backdrop
 //     を使うと、以前のhover判定にも干渉したため廃止した)
 //
-// 2026-07-16 (追記) モバイルは「3本線 → 通知/組織切り替え/アカウント → 中身」の2段階層に変更。
-// スマホでは通知/スペース切替/アカウントの3トリガーが横並びだと窮屈な上、それぞれ独立して
-// 開閉する作りは「今どれが開いているか」を見失いやすい。トップレベルのトリガーを3本線1つに
-// 集約し、その中を「通知/組織切り替え/アカウント」を並べた1段目 → タップした項目の中身を
-// 表示する2段目、という構造にする。デスクトップは今までどおり個別トリガーを維持する
-// (lg:hidden / hidden lg:block で出し分け)。メニュー展開はクリック/タップに統一する (#70, 2026-10-07)。
-// 開閉の最上位は引き続き activeMenu (nav = 3本線) で1つだけ開く制御を継続し、3本線の中の
-// 「今どの項目を掘り下げているか」だけを別 state (mobileSection) で管理する。
+// モバイルでは通知/組織切り替え/アカウントを1つのメニュートリガーへまとめる。
+// 2026-10-20: OSメニューのように親項目を左へ残し、選択中の内容を右側へ展開する。
+// 最上位の開閉は activeMenu、横へ展開する項目は mobileSection で管理する。
 type MenuKey = "notif" | "space" | "account" | "nav" | null;
-// 3本線メニュー内の2段目 (null = 1段目の一覧表示)
+// 3本線メニューで横に展開する項目 (null = 詳細パネル未選択)
 type MobileSection = "notif" | "space" | "account" | null;
 
 export default function Header() {
@@ -96,9 +90,7 @@ export default function Header() {
     return () => window.removeEventListener("fesflow:dashboard-menu-state", syncDashboardMenu);
   }, []);
 
-  // モバイル3本線メニューの2段目 (通知/組織切り替え/アカウントのどれを掘り下げているか)。
-  // 一度に開く2段目は1つだけにするため単一 state にし、3本線自体が閉じたら
-  // 下の useEffect で自動的にリセットして「開くたびに1段目から」を保証する (2026-07-16)
+  // 横の詳細パネルは1つだけ表示し、メニューを閉じたら初期状態へ戻す。
   const [mobileSection, setMobileSection] = useState<MobileSection>(null);
   useEffect(() => {
     if (activeMenu !== "nav") setMobileSection(null);
@@ -458,7 +450,7 @@ export default function Header() {
         : notifications.length
       : "!";
 
-  // 通知パネルの中身 (デスクトップのクリックパネル / モバイル3本線の2段目で共用) (2026-10-07 #70)
+  // 通知パネルの中身 (デスクトップのクリックパネル / モバイル階層メニューで共用) (2026-10-07 #70)
   const notifPanelBody = (
     <div className="max-h-72 overflow-y-auto space-y-3">
       {/* システムお知らせ (公開分) */}
@@ -610,7 +602,7 @@ export default function Header() {
     </>
   );
 
-  // アカウントパネルの中身 (デスクトップのクリックパネル / モバイル3本線の2段目で共用) (2026-10-07 #70)
+  // アカウントパネルの中身 (デスクトップのクリックパネル / モバイル階層メニューで共用) (2026-10-07 #70)
   const accountPanelBody = (
     <>
       <div className="flex items-center gap-2 mb-3 pb-3 border-b border-border/20">
@@ -653,20 +645,6 @@ export default function Header() {
     <header data-app-header className="sticky top-0 z-50 bg-background border-b-thick border-border text-foreground font-mono">
       <div className="flex items-center justify-between px-2 sm:px-4 py-2 max-w-7xl mx-auto gap-2 sm:gap-4">
         <div className="flex min-w-0 shrink-0 items-center gap-1.5">
-          {/* ロゴ / ブランド */}
-          <Link
-            to="/"
-            className="font-headline text-base sm:text-lg lg:text-xl uppercase tracking-[2px] leading-none select-none hover:opacity-80 flex items-center gap-2 shrink-0"
-          >
-            <span className="font-black border-thin border-border px-2 py-1 bg-primary text-primary-foreground text-sm sm:text-base">
-              {PRODUCT_NAME.toUpperCase()}
-              <span className="hidden lg:inline">
-                {isCircleView && " // BOOTH"}
-                {isEventView && " // EVENT"}
-                {isAdminView && " // SYSTEM"}
-              </span>
-            </span>
-          </Link>
           {pathname.startsWith("/event/dashboard") && (
             <button
               type="button"
@@ -682,6 +660,20 @@ export default function Header() {
               {dashboardMenuOpen ? <X className="h-4 w-4" aria-hidden="true" /> : <Menu className="h-4 w-4" aria-hidden="true" />}
             </button>
           )}
+          {/* ロゴ / ブランド */}
+          <Link
+            to="/"
+            className="font-headline text-base sm:text-lg lg:text-xl uppercase tracking-[2px] leading-none select-none hover:opacity-80 flex items-center gap-2 shrink-0"
+          >
+            <span className="font-black border-thin border-border px-2 py-1 bg-primary text-primary-foreground text-sm sm:text-base">
+              {PRODUCT_NAME.toUpperCase()}
+              <span className="hidden lg:inline">
+                {isCircleView && " // BOOTH"}
+                {isEventView && " // EVENT"}
+                {isAdminView && " // SYSTEM"}
+              </span>
+            </span>
+          </Link>
         </div>
 
         {/* デスクトップナビゲーション (常時ラベル表示のためページリンクなのでそのまま維持) */}
@@ -859,18 +851,9 @@ export default function Header() {
                 )}
               </div>
 
-              {/* 3本線メニュー (1024px未満のみ)。「3本線 → 通知/組織切り替え/アカウント →
-                  中身」の2段階層に集約する (2026-07-16 要望対応)。
-                  デスクトップの各トリガー横並びはスマホだと窮屈な上、それぞれ独立して開閉する
-                  作りは今どれが開いているか見失いやすいため、トップレベルを3本線1つにし、
-                  1段目に「通知/組織切り替え/アカウント/ナビゲーションリンク」を縦に並べ、
-                  1段目の項目をタップすると2段目 (中身) を表示する構成にした。
-                  2段目の中身は notifPanelBody/spacePanelBody/accountPanelBody を再利用し、
-                  デスクトップのクリックパネルと実装・挙動 (既読化・招待応答・スペース切替・
-                  ログアウト等) を完全に共有する。開閉の最上位は既存の activeMenu ("nav") を
-                  そのまま使うため、外側クリック/Esc/1つしか開かない制御はそのまま効く。
-                  「一度に開く2段目は1つだけ」は mobileSection (単一 state) で保証し、
-                  3本線が閉じるたびに useEffect (mobileSection のリセット) で1段目に戻す。 */}
+              {/* 3本線メニュー (1024px未満のみ)。親項目を残したまま詳細を横へ展開する。
+                  開閉はクリック/タップ、ポインター移動、キーボードフォーカスに対応し、
+                  詳細内容はデスクトップのクリックパネルと共有する。 */}
               <div ref={navRef} className="relative lg:hidden">
                 <button
                   onClick={() => toggleMenu("nav")}
@@ -893,116 +876,117 @@ export default function Header() {
                 </button>
 
                 {mobileNavOpen && (
-                  <div className="absolute right-0 top-full pt-2 z-50 w-72 max-w-[90vw]">
-                    <div className="border-thick border-border bg-background shadow-none rounded-none text-left max-h-[calc(100vh-5rem)] overflow-y-auto">
-                      {mobileSection === null ? (
-                        <>
-                          {/* 1段目: 通知/組織切り替え/アカウント + ナビゲーションリンク */}
-                          <div className="flex items-center justify-between border-b-thin border-border px-4 py-2.5">
-                            <span className="text-[11px] font-black uppercase tracking-wider">[メニュー]</span>
-                            <button
-                              onClick={() => setActiveMenu(null)}
-                              className="text-[10px] underline hover:text-primary cursor-pointer"
-                            >
-                              閉じる
-                            </button>
-                          </div>
-                          <nav className="flex flex-col">
-                            <button
-                              onClick={() => setMobileSection("notif")}
-                              className="flex items-center justify-between gap-2 px-4 py-3 border-b-thin border-border font-headline text-[13px] uppercase tracking-[1px] hover:bg-muted transition-all"
-                            >
-                              <span className="flex items-center gap-2">
-                                <span className="relative flex items-center justify-center shrink-0">
-                                  <Bell className="h-3.5 w-3.5" />
-                                  {hasUnreadNotif && (
-                                    <span className="absolute -top-1.5 -right-1.5 min-w-[14px] h-3.5 px-1 flex items-center justify-center bg-destructive text-destructive-foreground text-[8px] font-black leading-none rounded-none border border-background">
-                                      {notifBadgeLabel}
-                                    </span>
-                                  )}
-                                </span>
-                                通知
-                              </span>
-                              <ChevronRight className="h-3.5 w-3.5 shrink-0" />
-                            </button>
-
-                            <button
-                              onClick={() => setMobileSection("space")}
-                              className="flex items-center justify-between gap-2 px-4 py-3 border-b-thin border-border font-headline text-[13px] uppercase tracking-[1px] hover:bg-muted transition-all"
-                            >
-                              <span className="flex items-center gap-2">
-                                {pathname.startsWith("/sys") ? <Shield className="h-3.5 w-3.5 shrink-0" /> :
-                                 pathname.startsWith("/event") ? <Calendar className="h-3.5 w-3.5 shrink-0" /> :
-                                 <Building2 className="h-3.5 w-3.5 shrink-0" />}
-                                組織切り替え
-                              </span>
-                              <ChevronRight className="h-3.5 w-3.5 shrink-0" />
-                            </button>
-
-                            <button
-                              onClick={() => setMobileSection("account")}
-                              className="flex items-center justify-between gap-2 px-4 py-3 border-b-thin border-border font-headline text-[13px] uppercase tracking-[1px] hover:bg-muted transition-all"
-                            >
-                              <span className="flex items-center gap-2">
-                                {me?.image ? (
-                                  <img src={resolveAssetUrl(me.image)} alt="Avatar" className="w-4 h-4 rounded-none border border-border object-cover shrink-0" />
-                                ) : (
-                                  <User className="h-3.5 w-3.5 shrink-0" />
+                  <div className="absolute right-0 top-full z-50 w-[min(42rem,calc(100vw-1rem))] pt-2">
+                    {/* 2026-10-20: OSメニューのように親項目を残したまま、選択した内容を横へ展開する。 */}
+                    <div className="grid max-h-[calc(100dvh-5rem)] grid-cols-[minmax(7.5rem,0.85fr)_minmax(0,1.15fr)] overflow-hidden border-thick border-border bg-background text-left shadow-none">
+                      <div className="min-w-0 overflow-y-auto border-r-thin border-border">
+                        <div className="flex items-center justify-between gap-2 border-b-thin border-border px-3 py-2.5">
+                          <span className="text-[11px] font-black uppercase tracking-wider">[メニュー]</span>
+                          <button
+                            onClick={() => setActiveMenu(null)}
+                            className="shrink-0 text-[10px] underline hover:text-primary cursor-pointer"
+                          >
+                            閉じる
+                          </button>
+                        </div>
+                        <nav aria-label="メニュー項目" className="flex min-w-0 flex-col">
+                          <button
+                            type="button"
+                            aria-haspopup="true"
+                            aria-expanded={mobileSection === "notif"}
+                            onMouseEnter={() => setMobileSection("notif")}
+                            onFocus={() => setMobileSection("notif")}
+                            onClick={() => setMobileSection("notif")}
+                            className={`flex min-h-12 min-w-0 items-center justify-between gap-1 border-b-thin border-border px-2 py-3 text-left font-headline text-[11px] uppercase tracking-wide transition-all sm:px-3 sm:text-[13px] ${mobileSection === "notif" ? "bg-primary text-primary-foreground" : "hover:bg-muted"}`}
+                          >
+                            <span className="flex min-w-0 items-center gap-2">
+                              <span className="relative flex shrink-0 items-center justify-center">
+                                <Bell className="h-3.5 w-3.5" />
+                                {hasUnreadNotif && (
+                                  <span className="absolute -top-1.5 -right-1.5 flex h-3.5 min-w-[14px] items-center justify-center rounded-none border border-background bg-destructive px-1 text-[8px] font-black leading-none text-destructive-foreground">
+                                    {notifBadgeLabel}
+                                  </span>
                                 )}
-                                アカウント
                               </span>
-                              <ChevronRight className="h-3.5 w-3.5 shrink-0" />
-                            </button>
+                              <span className="min-w-0 break-words">通知</span>
+                            </span>
+                            <ChevronRight className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                          </button>
 
-                            {/* ナビゲーションリンクはその場で画面遷移するだけなので2段目を持たない */}
-                            {links.map(({ to, label }) => (
-                              <Link
-                                key={to}
-                                to={to}
-                                onClick={() => setActiveMenu(null)}
-                                className={`flex items-center gap-2 px-4 py-3 border-b-thin border-border last:border-b-0 font-headline text-[13px] uppercase tracking-[1px] transition-all ${
-                                  isActive(to)
-                                    ? "bg-primary text-primary-foreground font-bold"
-                                    : "bg-background text-foreground hover:bg-muted"
-                                }`}
-                              >
-                                <Compass className="h-3.5 w-3.5 shrink-0" />
-                                {label}
-                              </Link>
-                            ))}
-                          </nav>
-                        </>
-                      ) : (
-                        <>
-                          {/* 2段目: 1段目でタップした項目の中身。「戻る」で1段目へ、「閉じる」で
-                              3本線メニュー全体を閉じる、の2導線を常設する (2026-07-16) */}
-                          <div className="flex items-center justify-between border-b-thin border-border px-3 py-2.5 gap-2">
-                            <button
-                              onClick={() => setMobileSection(null)}
-                              className="flex items-center gap-0.5 text-[10px] underline hover:text-primary cursor-pointer shrink-0"
+                          <button
+                            type="button"
+                            aria-haspopup="true"
+                            aria-expanded={mobileSection === "space"}
+                            onMouseEnter={() => setMobileSection("space")}
+                            onFocus={() => setMobileSection("space")}
+                            onClick={() => setMobileSection("space")}
+                            className={`flex min-h-12 min-w-0 items-center justify-between gap-1 border-b-thin border-border px-2 py-3 text-left font-headline text-[11px] uppercase tracking-wide transition-all sm:px-3 sm:text-[13px] ${mobileSection === "space" ? "bg-primary text-primary-foreground" : "hover:bg-muted"}`}
+                          >
+                            <span className="flex min-w-0 items-center gap-2">
+                              {pathname.startsWith("/sys") ? <Shield className="h-3.5 w-3.5 shrink-0" /> :
+                               pathname.startsWith("/event") ? <Calendar className="h-3.5 w-3.5 shrink-0" /> :
+                               <Building2 className="h-3.5 w-3.5 shrink-0" />}
+                              <span className="min-w-0 break-words">組織切り替え</span>
+                            </span>
+                            <ChevronRight className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                          </button>
+
+                          <button
+                            type="button"
+                            aria-haspopup="true"
+                            aria-expanded={mobileSection === "account"}
+                            onMouseEnter={() => setMobileSection("account")}
+                            onFocus={() => setMobileSection("account")}
+                            onClick={() => setMobileSection("account")}
+                            className={`flex min-h-12 min-w-0 items-center justify-between gap-1 border-b-thin border-border px-2 py-3 text-left font-headline text-[11px] uppercase tracking-wide transition-all sm:px-3 sm:text-[13px] ${mobileSection === "account" ? "bg-primary text-primary-foreground" : "hover:bg-muted"}`}
+                          >
+                            <span className="flex min-w-0 items-center gap-2">
+                              {me?.image ? (
+                                <img src={resolveAssetUrl(me.image)} alt="" className="h-4 w-4 shrink-0 border border-border object-cover" />
+                              ) : (
+                                <User className="h-3.5 w-3.5 shrink-0" />
+                              )}
+                              <span className="min-w-0 break-words">アカウント</span>
+                            </span>
+                            <ChevronRight className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                          </button>
+
+                          {links.map(({ to, label }) => (
+                            <Link
+                              key={to}
+                              to={to}
+                              onClick={() => setActiveMenu(null)}
+                              className={`flex min-h-12 min-w-0 items-center gap-2 border-b-thin border-border px-2 py-3 font-headline text-[11px] uppercase tracking-wide transition-all sm:px-3 sm:text-[13px] ${
+                                isActive(to)
+                                  ? "bg-primary text-primary-foreground font-bold"
+                                  : "bg-background text-foreground hover:bg-muted"
+                              }`}
                             >
-                              <ChevronLeft className="h-3 w-3" />
-                              戻る
-                            </button>
-                            <span className="text-[11px] font-black uppercase tracking-wider truncate">
+                              <Compass className="h-3.5 w-3.5 shrink-0" />
+                              <span className="min-w-0 break-words">{label}</span>
+                            </Link>
+                          ))}
+                        </nav>
+                      </div>
+
+                      <div className="min-w-0 overflow-y-auto">
+                        {mobileSection ? (
+                          <>
+                            <div className="sticky top-0 border-b-thin border-border bg-background px-2 py-2.5 text-[10px] font-black uppercase tracking-wider sm:px-3 sm:text-[11px]">
                               {mobileSection === "notif" && "[お知らせ・通知]"}
                               {mobileSection === "space" && "[組織切り替え]"}
                               {mobileSection === "account" && "[アカウント]"}
-                            </span>
-                            <button
-                              onClick={() => setActiveMenu(null)}
-                              className="text-[10px] underline hover:text-primary cursor-pointer shrink-0"
-                            >
-                              閉じる
-                            </button>
-                          </div>
-                          <div className="p-4">
-                            {mobileSection === "notif" && notifPanelBody}
-                            {mobileSection === "space" && spacePanelBody}
-                            {mobileSection === "account" && accountPanelBody}
-                          </div>
-                        </>
-                      )}
+                            </div>
+                            <div className="min-w-0 max-w-full overflow-x-hidden p-2 sm:p-3">
+                              {mobileSection === "notif" && notifPanelBody}
+                              {mobileSection === "space" && spacePanelBody}
+                              {mobileSection === "account" && accountPanelBody}
+                            </div>
+                          </>
+                        ) : (
+                          <p className="p-3 text-[10px] text-muted-foreground">項目を選ぶと、詳細がここに表示されます。</p>
+                        )}
+                      </div>
                     </div>
                   </div>
                 )}

@@ -696,25 +696,34 @@ export function WristbandsTab({ eventId, hasPhysicalWristband = true, allowSelfI
       </Card>
 
       {/* 2026-09-27: 来場者の行が画面を押し下げないよう、検索と編集操作を表モーダルにまとめる。 */}
-      <Modal isOpen={isVisitorTableOpen} onClose={() => setIsVisitorTableOpen(false)} title="登録済み来場者" subtitle={`全${visitorTotal}件`} maxWidth="full">
+      <Modal
+        isOpen={isVisitorTableOpen}
+        onClose={() => setIsVisitorTableOpen(false)}
+        title="登録済み来場者"
+        subtitle={`全${visitorTotal}件`}
+        maxWidth="full"
+        contentClassName="min-h-0 flex flex-col"
+      >
+      {/* 2026-10-20: 全画面モーダルの余った高さを一覧へ渡し、行数が少なくても操作領域を画面下まで確保する。 */}
+      <div className="flex min-h-0 flex-1 flex-col gap-4">
       {/* 検索バー */}
-      <Card className="rounded-none bg-background shadow-none border-thick border-border">
-        <CardContent className="p-4">
+      <Card className="shrink-0 gap-0 rounded-none bg-background shadow-none border-thick border-border p-0">
+        <CardContent className="p-2 sm:p-4">
           {/* 2026-09-27: 狭い画面では検索欄を独立行へ折り返し、操作ボタンの幅を確保する。 */}
-          <form onSubmit={handleSearchSubmit} className="flex min-w-0 flex-wrap gap-2">
+          <form onSubmit={handleSearchSubmit} className="flex min-w-0 flex-wrap gap-1.5 sm:gap-2">
             <div className="relative min-w-0 basis-full sm:basis-0 sm:flex-1">
               <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
               <Input
                 placeholder="ニックネーム、呼出ID（数字のみ）、またはお好きな日付（YYYY-MM-DD）で検索..."
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
-                className="min-w-0 w-full pl-9 border-thick border-border rounded-none focus-visible:ring-0 h-10 text-xs bg-background font-mono"
+                className="min-w-0 w-full pl-9 border-thick border-border rounded-none focus-visible:ring-0 h-9 sm:h-10 text-xs bg-background font-mono"
               />
             </div>
             <Button
               type="submit"
               disabled={isLoading}
-              className="border-thick border-primary bg-primary text-primary-foreground hover:bg-background hover:text-foreground h-10 text-xs font-bold rounded-none shadow-none px-5"
+              className="border-thick border-primary bg-primary text-primary-foreground hover:bg-background hover:text-foreground h-9 sm:h-10 text-xs font-bold rounded-none shadow-none px-5"
             >
               検索
             </Button>
@@ -723,7 +732,7 @@ export function WristbandsTab({ eventId, hasPhysicalWristband = true, allowSelfI
                 type="button"
                 onClick={handleResetSearch}
                 variant="outline"
-                className="border-thick border-border h-10 text-xs font-bold rounded-none shadow-none px-3"
+                className="border-thick border-border h-9 sm:h-10 text-xs font-bold rounded-none shadow-none px-3"
               >
                 クリア
               </Button>
@@ -733,7 +742,7 @@ export function WristbandsTab({ eventId, hasPhysicalWristband = true, allowSelfI
               onClick={() => refetch()}
               variant="outline"
               disabled={isLoading}
-              className="border-thick border-border h-10 px-3 rounded-none"
+              className="border-thick border-border h-9 sm:h-10 px-3 rounded-none"
             >
               <RefreshCw className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`} />
             </Button>
@@ -741,8 +750,8 @@ export function WristbandsTab({ eventId, hasPhysicalWristband = true, allowSelfI
         </CardContent>
       </Card>
 
-      <Card className="rounded-none bg-background shadow-none border-thick border-border">
-        <CardContent className="space-y-3 p-4">
+      <Card className="shrink-0 gap-0 rounded-none bg-background shadow-none border-thick border-border p-0">
+        <CardContent className="space-y-1.5 p-2 sm:space-y-3 sm:p-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <p className="text-xs font-bold uppercase">一覧を絞り込む</p>
             <Button
@@ -750,13 +759,13 @@ export function WristbandsTab({ eventId, hasPhysicalWristband = true, allowSelfI
               variant="outline"
               onClick={handleResetFilters}
               disabled={filters.bandType === "all" && filters.accountStatus === "all" && filters.profileStatus === "all"}
-              className="h-8 border-thick border-border px-3 text-[10px] font-bold"
+              className="h-7 sm:h-8 border-thick border-border px-3 text-[10px] font-bold"
             >
               フィルターをクリア
             </Button>
           </div>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <label className="space-y-1 text-[10px] font-bold">
+          <div className="grid grid-cols-2 gap-1 sm:grid-cols-3 sm:gap-3">
+            <label className="space-y-0.5 text-[10px] font-bold sm:space-y-1">
               <span className="block">登録方法</span>
               <select
                 aria-label="登録方法で絞り込む"
@@ -764,7 +773,7 @@ export function WristbandsTab({ eventId, hasPhysicalWristband = true, allowSelfI
                 onChange={(event) => {
                   setFilters((current) => ({ ...current, bandType: event.target.value as VisitorFilters["bandType"] }));
                 }}
-                className="h-10 w-full border-thick border-border bg-background px-2 text-xs font-mono focus-visible:outline-2 focus-visible:outline-offset-2"
+                className="h-9 sm:h-10 w-full border-thick border-border bg-background px-2 text-xs font-mono focus-visible:outline-2 focus-visible:outline-offset-2"
               >
                 <option value="all">すべて</option>
                 <option value="physical">物理リストバンド</option>
@@ -772,7 +781,7 @@ export function WristbandsTab({ eventId, hasPhysicalWristband = true, allowSelfI
                 <option value="unlinked">有効なIDなし</option>
               </select>
             </label>
-            <label className="space-y-1 text-[10px] font-bold">
+            <label className="space-y-0.5 text-[10px] font-bold sm:space-y-1">
               <span className="block">アカウント状態</span>
               <select
                 aria-label="アカウント状態で絞り込む"
@@ -780,14 +789,14 @@ export function WristbandsTab({ eventId, hasPhysicalWristband = true, allowSelfI
                 onChange={(event) => {
                   setFilters((current) => ({ ...current, accountStatus: event.target.value as VisitorFilters["accountStatus"] }));
                 }}
-                className="h-10 w-full border-thick border-border bg-background px-2 text-xs font-mono focus-visible:outline-2 focus-visible:outline-offset-2"
+                className="h-9 sm:h-10 w-full border-thick border-border bg-background px-2 text-xs font-mono focus-visible:outline-2 focus-visible:outline-offset-2"
               >
                 <option value="all">すべて</option>
                 <option value="available">利用可能</option>
                 <option value="banned">利用停止</option>
               </select>
             </label>
-            <label className="space-y-1 text-[10px] font-bold">
+            <label className="space-y-0.5 text-[10px] font-bold sm:space-y-1">
               <span className="block">プロフィール登録</span>
               <select
                 aria-label="プロフィール登録状態で絞り込む"
@@ -795,7 +804,7 @@ export function WristbandsTab({ eventId, hasPhysicalWristband = true, allowSelfI
                 onChange={(event) => {
                   setFilters((current) => ({ ...current, profileStatus: event.target.value as VisitorFilters["profileStatus"] }));
                 }}
-                className="h-10 w-full border-thick border-border bg-background px-2 text-xs font-mono focus-visible:outline-2 focus-visible:outline-offset-2"
+                className="h-9 sm:h-10 w-full border-thick border-border bg-background px-2 text-xs font-mono focus-visible:outline-2 focus-visible:outline-offset-2"
               >
                 <option value="all">すべて</option>
                 <option value="complete">登録済み</option>
@@ -807,8 +816,8 @@ export function WristbandsTab({ eventId, hasPhysicalWristband = true, allowSelfI
       </Card>
 
       {/* 来場者一覧テーブル */}
-      <Card className="rounded-none bg-background shadow-none border-thick border-border">
-        <CardHeader className="p-4 pb-2 border-b-thin border-border bg-muted/20 flex flex-col items-start gap-2 sm:flex-row sm:items-center sm:justify-between">
+      <Card className="flex min-h-0 flex-1 flex-col gap-0 rounded-none bg-background shadow-none border-thick border-border p-0">
+        <CardHeader className="p-2 pb-1 border-b-thin border-border bg-muted/20 flex flex-col items-start gap-2 sm:p-4 sm:pb-2 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <CardTitle className="text-xs uppercase font-bold">登録済み来場者</CardTitle>
             <CardDescription className="text-[10px]">
@@ -822,9 +831,9 @@ export function WristbandsTab({ eventId, hasPhysicalWristband = true, allowSelfI
             {visitorTotal} 件
           </Badge>
         </CardHeader>
-        <CardContent className="p-0">
-          {/* 2026-10-20: 縦の短い画面でも一覧の操作領域を確保し、表示件数に応じて表だけをスクロールさせる。 */}
-          <div ref={visitorScrollContainerRef} className="max-h-[65vh] min-h-72 overflow-auto">
+        <CardContent className="flex min-h-0 flex-1 flex-col p-0">
+          {/* 2026-10-20: 表のスクロール枠がカードの残り高を使い、表示件数に応じて内側だけをスクロールさせる。 */}
+          <div ref={visitorScrollContainerRef} className="min-h-0 flex-1 overflow-auto">
             {isLoading ? (
               <div className="p-8 text-center text-xs text-muted-foreground flex items-center justify-center gap-2">
                 <Loader2 className="h-4 w-4 animate-spin" />
@@ -969,6 +978,7 @@ export function WristbandsTab({ eventId, hasPhysicalWristband = true, allowSelfI
           </div>
         </CardContent>
       </Card>
+      </div>
       </Modal>
 
       {/* ==========================================

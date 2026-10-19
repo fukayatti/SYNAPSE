@@ -27,6 +27,8 @@ interface ModalProps {
   onClose: () => void;
   children: React.ReactNode;
   maxWidth?: "md" | "lg" | "xl" | "full";
+  // 2026-10-20: 全画面一覧など、呼び出し側が残りの高さを子要素へ配分する場合に使う。
+  contentClassName?: string;
   /** 確認ダイアログ等をこのモーダルの上に重ねる場合に z-index を調整する。 */
   zIndexClassName?: string;
 }
@@ -38,6 +40,7 @@ export function Modal({
   onClose,
   children,
   maxWidth = "lg",
+  contentClassName,
   zIndexClassName = "z-50",
 }: ModalProps) {
   // 背景スクロールロック (Escape 閉じは useFocusTrap 側に統合)
@@ -72,6 +75,8 @@ export function Modal({
         tabIndex={-1}
         className={cn(
           "relative w-full bg-background border-thick border-border shadow-none font-mono text-foreground z-10 max-h-[85vh] flex flex-col",
+          // 2026-10-20: 全画面モーダルは内側の余白を縮め、縦の短い画面でも一覧の表示領域を確保する。
+          maxWidth === "full" && "p-2 sm:p-4",
           MAX_WIDTH[maxWidth],
         )}
       >
@@ -89,7 +94,7 @@ export function Modal({
             <X className="h-4 w-4" />
           </button>
         </CardHeader>
-        <CardContent className="pt-4 space-y-4 flex-1 overflow-y-auto">{children}</CardContent>
+        <CardContent className={cn("pt-4 space-y-4 flex-1 overflow-y-auto", contentClassName)}>{children}</CardContent>
       </Card>
     </div>
   );
