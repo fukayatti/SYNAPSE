@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useLayoutEffect } from "react";
+import { lazy, Suspense, useEffect, useLayoutEffect, useRef } from "react";
 import { Routes, Route, Outlet, Navigate, useLocation, useSearchParams } from "react-router-dom";
 import { useVisitor } from "@/hooks/useVisitor";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
@@ -217,29 +217,119 @@ function RoutePageLoading() {
 function RouteScrollRestoration() {
 	const location = useLocation();
 	const routeKey = `${location.pathname}${location.search}`;
+	const restoringRef = useRef(false);
+	const storageKey = (key: string) => `fesflow:scroll:${key}`;
+	const readPosition = (key: string) => {
+		try {
+			const value = Number(window.sessionStorage.getItem(storageKey(key)) ?? 0);
+			return Number.isFinite(value) && value > 0 ? value : 0;
+		} catch { return 0; }
+	};
+	const savePosition = (key: string, top: number) => {
+		try { window.sessionStorage.setItem(storageKey(key), String(Math.max(0, top))); } catch { /* 保存不可でも遷移を続ける */ }
+	};
+
+	useEffect(() => {
+		// 2026-10-21: ルート別に復元するため、履歴エントリ単位のブラウザー自動復元と競合させない。
+		const previous = window.history.scrollRestoration;
+		window.history.scrollRestoration = "manual";
+		return () => { window.history.scrollRestoration = previous; };
+	}, []);
 
 	useEffect(() => {
 		const key = routeKey;
 		let timer = 0;
-		const save = () => {
-			try { window.sessionStorage.setItem(`fesflow:scroll:${key}`, String(window.scrollY)); } catch { /* 保存不可でも遷移を続ける */ }
-		};
+		// 2026-10-21: 遷移先が短い画面だとDOM更新時にwindow.scrollYが0へ丸められる。
+		// cleanupでその値を保存し直さないよう、最後に観測した位置をルート単位で保持する。
+		let lastKnownTop = readPosition(key);
 		const onScroll = () => {
+			if (restoringRef.current) return;
+			lastKnownTop = window.scrollY;
 			window.clearTimeout(timer);
-			timer = window.setTimeout(save, 120);
+			timer = window.setTimeout(() => savePosition(key, lastKnownTop), 120);
+		};
+		// リンク操作はReact Routerの画面差し替え前に現在位置を同期保存する。
+		const saveBeforeNavigation = () => {
+			if (restoringRef.current) return;
+			lastKnownTop = window.scrollY;
+			savePosition(key, lastKnownTop);
 		};
 		window.addEventListener("scroll", onScroll, { passive: true });
+		window.addEventListener("click", saveBeforeNavigation, true);
+		window.addEventListener("pagehide", saveBeforeNavigation);
 		return () => {
 			window.clearTimeout(timer);
-			save();
+			// 2026-10-21: ここではliveのscrollYを読まない。ReactのDOM差し替え後にcleanupされると
+			// 短い遷移先に丸められた値で、戻り先の位置を上書きしてしまう。
+			savePosition(key, lastKnownTop);
 			window.removeEventListener("scroll", onScroll);
+			window.removeEventListener("click", saveBeforeNavigation, true);
+			window.removeEventListener("pagehide", saveBeforeNavigation);
 		};
 	}, [routeKey]);
 
 	useLayoutEffect(() => {
-		let top = 0;
-		try { top = Number(window.sessionStorage.getItem(`fesflow:scroll:${routeKey}`) ?? 0); } catch { /* 保存不可なら先頭 */ }
-		window.requestAnimationFrame(() => window.scrollTo({ top: Number.isFinite(top) ? top : 0, behavior: "auto" }));
+		const top = readPosition(routeKey);
+		let active = true;
+		let frame = 0;
+		let fallbackTimer = 0;
+		let restored = false;
+		const finish = () => {
+			if (!active || restored) return;
+			restored = true;
+			restoringRef.current = false;
+			observer?.disconnect();
+			window.clearTimeout(fallbackTimer);
+			window.removeEventListener("wheel", cancelRestore, true);
+			window.removeEventListener("touchstart", cancelRestore, true);
+			window.removeEventListener("keydown", cancelForScrollKey, true);
+		};
+		const restoreWhenReady = () => {
+			if (!active || restored) return;
+			const maxTop = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+			if (maxTop + 1 < top) return;
+			window.scrollTo({ top, behavior: "auto" });
+			if (Math.abs(window.scrollY - top) <= 1) finish();
+		};
+		const cancelRestore = () => finish();
+		const cancelForScrollKey = (event: KeyboardEvent) => {
+			if (["ArrowDown", "ArrowUp", "PageDown", "PageUp", "Home", "End", " "].includes(event.key)) finish();
+		};
+		let observer: ResizeObserver | undefined;
+
+		// 2026-10-21: 遅延読込中はスクロール可能な高さがまだないことがある。
+		// 目標位置へ届くまでページ寸法の変化を監視し、ユーザー操作が始まったら復元を止める。
+		restoringRef.current = top > 0;
+		if (top <= 0) {
+			window.scrollTo({ top: 0, behavior: "auto" });
+			return () => { active = false; restoringRef.current = false; };
+		}
+		window.addEventListener("wheel", cancelRestore, true);
+		window.addEventListener("touchstart", cancelRestore, true);
+		window.addEventListener("keydown", cancelForScrollKey, true);
+		if (typeof ResizeObserver !== "undefined") {
+			observer = new ResizeObserver(restoreWhenReady);
+			observer.observe(document.documentElement);
+			observer.observe(document.body);
+		}
+		frame = window.requestAnimationFrame(restoreWhenReady);
+		// ResizeObserverが無効な環境でも、データ描画後の位置へ復元できるよう期限付きで再確認する。
+		fallbackTimer = window.setTimeout(() => {
+			if (!active || restored) return;
+			const maxTop = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+			if (maxTop >= top) window.scrollTo({ top, behavior: "auto" });
+			finish();
+		}, 8000);
+		return () => {
+			active = false;
+			window.cancelAnimationFrame(frame);
+			observer?.disconnect();
+			window.clearTimeout(fallbackTimer);
+			window.removeEventListener("wheel", cancelRestore, true);
+			window.removeEventListener("touchstart", cancelRestore, true);
+			window.removeEventListener("keydown", cancelForScrollKey, true);
+			restoringRef.current = false;
+		};
 	}, [routeKey]);
 
 	return null;
