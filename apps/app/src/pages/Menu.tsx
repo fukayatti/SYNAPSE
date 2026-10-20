@@ -245,7 +245,7 @@ function MenuPageContent() {
   // 未入場 (リストバンド未発行) は空文字。閲覧は許可し注文送信側でゲートする
   const { userId: visitorUserId, session, isLoaded: visitorLoaded } = useVisitor();
   const userId = visitorUserId ?? "";
-  // 2026-10-08: localStorage に利用者IDだけ残っている状態では、入場登録済みのQRと判断しない。
+  // 2026-10-20: QR表示はAPI上の入場登録完了(onboardedAt)を条件にし、下見中の未登録バンドを表示しない。
   const { data: wristbandStatus, isLoading: isWristbandStatusLoading, isError: isWristbandStatusError } = useQuery({
     queryKey: ["userWristbandStatus", userId],
     queryFn: () => wristbandApi.lookup(userId),
@@ -253,7 +253,9 @@ function MenuPageContent() {
   });
   const activeWristband = wristbandStatus?.wristband;
   const familyAllergies = parseJapaneseAllergens(wristbandStatus?.user.allergies);
-  const canDisplayMyQr = !!activeWristband && ["active", "smartphone"].includes(activeWristband.status);
+  const canDisplayMyQr = !!wristbandStatus?.user.onboardedAt
+    && !!activeWristband
+    && ["active", "smartphone"].includes(activeWristband.status);
   const myQrButtonLabel = isWristbandStatusLoading
     ? "入場情報を確認中…"
     : isWristbandStatusError
@@ -1166,7 +1168,7 @@ function MenuPageContent() {
       </Modal>
 
       {/* 2026-10-08: 登録済みバンドがない場合は userId を代用したQRを生成しない。 */}
-      <Modal isOpen={isQrOpen} onClose={() => setIsQrOpen(false)} title="[マイQR]" maxWidth="md">
+      <Modal isOpen={isQrOpen && canDisplayMyQr} onClose={() => setIsQrOpen(false)} title="[マイQR]" maxWidth="md">
         {canDisplayMyQr && activeWristband ? (
           <div className="space-y-3 text-center">
             <div className="inline-block border-thick border-border bg-background p-3">
