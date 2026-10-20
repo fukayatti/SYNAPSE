@@ -10,6 +10,7 @@ import { resolveAssetUrl } from "@/lib/asset-url";
 import { AllergenSelector } from "@/components/menu/AllergenSelector";
 import { QrScannerModal } from "@/components/pos/qr-scanner-modal";
 import { parseJapaneseAllergens, type JapaneseAllergen } from "@fesflow/config/allergens";
+import { VisitorDataUseNoticeButton } from "@/components/visitor/VisitorDataUseNotice";
 
 /**
  * 来場者オンボーディング / プロフィール編集 (2026-07-04, 2026-07-15 編集モード追加)。
@@ -455,6 +456,15 @@ export default function Onboarding() {
             className="rounded-none border-[2px] h-11"
           />
         </div>
+
+        {isAdmissionWizard && (
+          <>
+            <VisitorDataUseNoticeButton />
+            <p className="text-[11px] leading-relaxed text-muted-foreground">
+              「はじめる」を押すと、取得情報の利用目的と取扱いに同意したものとみなします。
+            </p>
+          </>
+        )}
 
         <Button
           type="button"
