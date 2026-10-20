@@ -30,9 +30,9 @@ export default function Providers({ children }: { children: React.ReactNode }) {
         defaultOptions: {
           queries: {
             networkMode: "always",
-            // 2026-10-21: 画面間の再訪ですぐ描画できるよう結果をタブ内メモリーへ保持する。
-            // 永続化プラグインは使わず、注文・個人履歴などは queryCachePolicy.live で短時間保持にする。
-            gcTime: 24 * 60 * 60 * 1000,
+            // 2026-10-21: 未分類の個人・運用データも画面間で再利用するが、タブ内で5分後に破棄する。
+            // 永続化プラグインは使わず、長く表示したいカタログだけ queryCachePolicy.catalog で個別に指定する。
+            gcTime: 5 * 60 * 1000,
             retry: (failureCount) => typeof navigator === "undefined" || (navigator.onLine && failureCount < 1),
           },
           mutations: { networkMode: "always", retry: false },
