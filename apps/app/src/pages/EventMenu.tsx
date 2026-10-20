@@ -25,7 +25,7 @@ import { groupCirclesByStoreArea } from "@/lib/store-areas";
 export default function EventMenu() {
   const { eventId: eventIdParam, eventName: eventNameParam } = useParams();
   const navigate = useNavigate();
-  const { session, isLoaded } = useVisitor();
+  const { session, isLoaded, isOnboarded } = useVisitor();
   const { data: events } = useQuery({
     queryKey: ["events"],
     queryFn: () => eventApi.list(),
@@ -83,6 +83,7 @@ export default function EventMenu() {
     <EventMenuContent
       eventId={eventId}
       isEntered={isEntered}
+      isOnboarded={isOnboarded}
       onBrowseCircle={(circleId) => navigate(`/visitor/menu?circleId=${circleId}`)}
     />
   );
@@ -91,10 +92,12 @@ export default function EventMenu() {
 function EventMenuContent({
   eventId,
   isEntered,
+  isOnboarded,
   onBrowseCircle,
 }: {
   eventId: string;
   isEntered: boolean;
+  isOnboarded: boolean;
   onBrowseCircle: (circleId: string) => void;
 }) {
   const {
@@ -186,7 +189,7 @@ function EventMenuContent({
         )}
 
         {/* 未入場バナー: 閲覧は自由・利用は発行必須 */}
-        {!isEntered && (
+        {!isOnboarded && (
           <div className="border-thick border-border bg-muted/40 p-4 mb-6 flex items-start gap-3">
             <QrCode className="h-5 w-5 shrink-0 mt-0.5" />
             <div className="space-y-1">
@@ -316,7 +319,7 @@ function EventPicker() {
           イベントを選んでメニューを見る
         </h1>
         <p className="text-sm text-muted-foreground leading-relaxed">
-          下見したいイベントを選んでください。ご利用にはリストバンドの発行 (入場) が必要です。
+          メニューの下見は入場登録前でも利用できます。注文やスタンプなどにはリストバンドの登録が必要です。
         </p>
       </div>
 

@@ -157,8 +157,7 @@ describe("リストバンド発行履歴", () => {
         userId: target.userId,
         status: "active",
         nickname: "家族A",
-        birthdayMonthDay: "04-05",
-        age: 12,
+        ageGroup: "10s",
         onboardedAt: sourceOnboardedAt,
       },
       { id: familyBandId, userId: target.userId, status: "active", nickname: "家族B" },
@@ -185,8 +184,7 @@ describe("リストバンド発行履歴", () => {
       userId: target.userId,
       status: "active",
       nickname: "家族A",
-      birthdayMonthDay: "04-05",
-      age: 12,
+      ageGroup: "10s",
       onboardedAt: sourceOnboardedAt,
     });
     expect((await db.select().from(wristband).where(eq(wristband.id, familyBandId)))[0]).toMatchObject({

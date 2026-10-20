@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { visitorApi, eventApi, wristbandApi } from "@/lib/api";
@@ -11,6 +11,7 @@ import { AllergenSelector } from "@/components/menu/AllergenSelector";
 import { QrScannerModal } from "@/components/pos/qr-scanner-modal";
 import { parseJapaneseAllergens, type JapaneseAllergen } from "@fesflow/config/allergens";
 import { VisitorDataUseNoticeButton } from "@/components/visitor/VisitorDataUseNotice";
+import { VISITOR_AGE_GROUPS, visitorAgeGroupLabel, type VisitorAgeGroup } from "@fesflow/config/visitor-profile";
 
 /**
  * 来場者オンボーディング / プロフィール編集 (2026-07-04, 2026-07-15 編集モード追加)。
@@ -25,17 +26,13 @@ export default function Onboarding() {
   const isAllergyEdit = searchParams.get("allergies") === "1";
   const { isLoaded, isEntered, session, userId } = useVisitor();
   const [nickname, setNickname] = useState("");
-  const [birthdayMonth, setBirthdayMonth] = useState("");
-  const [birthdayDay, setBirthdayDay] = useState("");
-  const [age, setAge] = useState("");
+  const [ageGroup, setAgeGroup] = useState<VisitorAgeGroup | "">("");
   const [step, setStep] = useState<"profile" | "family" | "allergies">(isAllergyEdit ? "allergies" : "profile");
   const [allergies, setAllergies] = useState<JapaneseAllergen[] | null>(null);
   const [isFamilyScannerOpen, setIsFamilyScannerOpen] = useState(false);
   const [familyCode, setFamilyCode] = useState("");
   const [familyNickname, setFamilyNickname] = useState("");
-  const [familyBirthdayMonth, setFamilyBirthdayMonth] = useState("");
-  const [familyBirthdayDay, setFamilyBirthdayDay] = useState("");
-  const [familyAge, setFamilyAge] = useState("");
+  const [familyAgeGroup, setFamilyAgeGroup] = useState<VisitorAgeGroup | "">("");
   const queryClient = useQueryClient();
   const isAdmissionWizard = !isEdit && !isAllergyEdit;
 
@@ -46,8 +43,7 @@ export default function Onboarding() {
     }
   }, [isLoaded, isEntered, navigate]);
 
-  // 編集モードでは既に登録済みかを確認する。未登録の来場者が編集URLから
-  // 誕生日・年齢を省略して送信すると、APIが400で拒否するため必須状態を合わせる。
+  // 編集モードでは登録済みかを確認し、未登録プロフィールに年代入力を必須にする。
   const { data: profile, isLoading: profileLoading } = useQuery({
     queryKey: ["visitorProfile", userId],
     queryFn: () => wristbandApi.lookup(userId!),
@@ -60,11 +56,8 @@ export default function Onboarding() {
   }, [profile?.user.nickname, session?.nickname]);
 
   useEffect(() => {
-    const [month = "", day = ""] = profile?.user.birthdayMonthDay?.split("-") ?? [];
-    if (month) setBirthdayMonth(String(Number(month)));
-    if (day) setBirthdayDay(String(Number(day)));
-    if (profile?.user.age != null) setAge(String(profile.user.age));
-  }, [profile?.user.birthdayMonthDay, profile?.user.age]);
+    setAgeGroup(profile?.user.ageGroup ?? "");
+  }, [profile?.user.ageGroup]);
 
   useEffect(() => {
     if (profile?.user.allergies !== undefined) {
@@ -72,19 +65,8 @@ export default function Onboarding() {
     }
   }, [profile?.user.allergies]);
 
-  // 2026-10-08: 生年を集めない要件のため月日を別選択にし、2月29日も選べるよううるう年で日数を出す。
-  const daysInBirthdayMonth = birthdayMonth
-    ? new Date(Date.UTC(2000, Number(birthdayMonth), 0)).getUTCDate()
-    : 31;
-  const birthdayMonthDay = birthdayMonth && birthdayDay
-    ? birthdayMonth.padStart(2, "0") + "-" + birthdayDay.padStart(2, "0")
-    : "";
-  const ageNumber = age === "" ? undefined : Number(age);
-  const hasValidAge =
-    ageNumber !== undefined && Number.isInteger(ageNumber) && ageNumber >= 0 && ageNumber <= 120;
-  const hasBirthday = !!birthdayMonthDay && Number(birthdayDay) <= daysInBirthdayMonth;
-  const requiresAdmissionDetails = !isEdit || !profile?.user.onboardedAt;
-  const hasRequiredAdmissionDetails = !requiresAdmissionDetails || (hasBirthday && hasValidAge);
+  const requiresAdmissionDetails = !isEdit || !profile?.user.onboardedAt || !profile.user.ageGroup;
+  const hasRequiredAdmissionDetails = !requiresAdmissionDetails || !!ageGroup;
 
   const mutation = useMutation({
     mutationFn: () => {
@@ -94,8 +76,7 @@ export default function Onboarding() {
         userId: v.userId,
         wristbandId: v.wristbandId,
         nickname: nickname.trim(),
-        birthdayMonthDay: hasBirthday ? birthdayMonthDay : undefined,
-        age: hasValidAge ? ageNumber : undefined,
+        ageGroup: ageGroup || undefined,
       });
     },
     onSuccess: (result) => {
@@ -123,24 +104,18 @@ export default function Onboarding() {
     mutationFn: () => {
       const visitor = getVisitor();
       if (!visitor?.userId) throw new Error("セッションが見つかりません");
-      const birthdayMonthDay = familyBirthdayMonth && familyBirthdayDay
-        ? `${familyBirthdayMonth.padStart(2, "0")}-${familyBirthdayDay.padStart(2, "0")}`
-        : "";
       return wristbandApi.addFamilyMember({
         userId: visitor.userId,
         wristbandId: familyCode.trim(),
         nickname: familyNickname.trim(),
-        birthdayMonthDay,
-        age: Number(familyAge),
+        ageGroup: familyAgeGroup as VisitorAgeGroup,
       });
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["visitorProfile", userId] });
       setFamilyCode("");
       setFamilyNickname("");
-      setFamilyBirthdayMonth("");
-      setFamilyBirthdayDay("");
-      setFamilyAge("");
+      setFamilyAgeGroup("");
       toast.success("家族のリストバンドを登録しました。続けて追加できます");
     },
     onError: (e: any) => toast.error(e?.message || "家族の追加に失敗しました"),
@@ -185,6 +160,11 @@ export default function Onboarding() {
         </div>
       )}
       <div className="border-[3px] border-border p-6 space-y-6">
+        {isAdmissionWizard && (
+          <p className="text-right text-xs font-bold">
+            <Link className="underline underline-offset-2" to="/visitor/events">入場登録前にお店を見る →</Link>
+          </p>
+        )}
         {isAdmissionWizard && (
           /* 2026-10-16: イベント作成ウィザードと揃え、各工程の下線と現在地の反転で進捗を示す。 */
           <ol aria-label="入場登録の進行状況" className="flex items-center justify-between gap-2 text-center text-[10px] font-bold sm:text-xs">
@@ -262,6 +242,7 @@ export default function Onboarding() {
                 家族のリストバンドを撮影して追加し、ご本人と同じ情報を登録してください。複数人いる場合は続けて登録できます。
               </p>
             </div>
+            <VisitorDataUseNoticeButton />
 
             <section aria-labelledby="family-registered-heading" className="space-y-2 border-b-thin border-border pb-4">
               <div className="flex items-center justify-between gap-2">
@@ -272,8 +253,7 @@ export default function Onboarding() {
                 .filter((band) => band.id !== session?.wristbandId)
                 .map((band) => (
                   <div key={band.id} className="border-thin border-border bg-muted/20 px-3 py-2 text-xs">
-                    <p className="font-bold">{band.nickname || "ニックネーム未設定"} · {band.age == null ? "年齢未設定" : `${band.age}歳`}</p>
-                    <p className="text-muted-foreground">誕生日 {band.birthdayMonthDay || "未設定"}</p>
+                    <p className="font-bold">{band.nickname || "ニックネーム未設定"} · {visitorAgeGroupLabel(band.ageGroup)}</p>
                   </div>
                 ))}
               {!profileLoading && (profile?.familyWristbands ?? []).filter((band) => band.id !== session?.wristbandId).length === 0 && (
@@ -306,43 +286,17 @@ export default function Onboarding() {
               </div>
 
               <div className="space-y-2">
-                <label className="text-[11px] font-black uppercase tracking-wider text-muted-foreground">誕生日（月日） <span className="text-destructive">*</span></label>
-                {/* 2026-10-20: ラベルと月/日の選択欄で入力形式を示すため、補足文は表示しない。 */}
-                <div className="flex items-center gap-3">
-                  <select
-                    aria-label="家族の誕生日の月"
-                    value={familyBirthdayMonth}
-                    onChange={(e) => { setFamilyBirthdayMonth(e.target.value); setFamilyBirthdayDay(""); }}
-                    className="h-11 min-w-0 flex-1 border-[2px] bg-input px-3 font-mono"
-                  >
-                    <option value="">月を選択</option>
-                    {Array.from({ length: 12 }, (_, index) => String(index + 1)).map((month) => <option key={month} value={month}>{month}月</option>)}
-                  </select>
-                  <select
-                    aria-label="家族の誕生日の日"
-                    value={familyBirthdayDay}
-                    onChange={(e) => setFamilyBirthdayDay(e.target.value)}
-                    disabled={!familyBirthdayMonth}
-                    className="h-11 min-w-0 flex-1 border-[2px] bg-input px-3 font-mono disabled:opacity-50"
-                  >
-                    <option value="">日を選択</option>
-                    {Array.from({ length: familyBirthdayMonth ? new Date(Date.UTC(2000, Number(familyBirthdayMonth), 0)).getUTCDate() : 0 }, (_, index) => String(index + 1)).map((day) => <option key={day} value={day}>{day}日</option>)}
-                  </select>
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <label htmlFor="family-age" className="text-[11px] font-black uppercase tracking-wider text-muted-foreground">年齢 <span className="text-destructive">*</span></label>
-                <Input id="family-age" type="number" inputMode="numeric" min={0} max={120} step={1} value={familyAge} onChange={(e) => setFamilyAge(e.target.value)} placeholder="例: 10" />
-                {familyAge !== "" && (!Number.isInteger(Number(familyAge)) || Number(familyAge) < 0 || Number(familyAge) > 120) && (
-                  <p className="text-xs text-destructive">0〜120の整数を入力してください。</p>
-                )}
+                <label htmlFor="family-age-group" className="text-[11px] font-black uppercase tracking-wider text-muted-foreground">年代 <span className="text-destructive">*</span></label>
+                <select id="family-age-group" value={familyAgeGroup} onChange={(e) => setFamilyAgeGroup(e.target.value as VisitorAgeGroup | "")} required className="h-11 w-full border-[2px] bg-input px-3 font-mono">
+                  <option value="">年代を選択</option>
+                  {VISITOR_AGE_GROUPS.map(({ value, label }) => <option key={value} value={value}>{label}</option>)}
+                </select>
               </div>
 
               <Button
                 type="button"
                 className="w-full h-12"
-                disabled={!familyCode.trim() || !familyNickname.trim() || !familyBirthdayMonth || !familyBirthdayDay || familyAge === "" || !Number.isInteger(Number(familyAge)) || Number(familyAge) < 0 || Number(familyAge) > 120 || familyMutation.isPending}
+                disabled={!familyCode.trim() || !familyNickname.trim() || !familyAgeGroup || familyMutation.isPending}
                 onClick={() => familyMutation.mutate()}
               >
                 {familyMutation.isPending ? "登録しています…" : "家族を登録して次を追加"}
@@ -370,85 +324,30 @@ export default function Onboarding() {
           <h1 className="text-2xl font-black uppercase tracking-wider">
             {isEdit ? "プロフィール編集" : eventData?.eventName || "ようこそ"}
           </h1>
-          <p className="text-sm text-muted-foreground">
-            {isEdit
-              ? requiresAdmissionDetails
-                ? "ニックネーム・誕生日・年齢を登録してください。"
-                : "ニックネーム・誕生日・年齢を編集できます。"
-              : "ニックネーム・誕生日・年齢を登録してください。"}
-          </p>
         </div>
 
         <div className="space-y-2">
-          <label htmlFor="visitor-birthday-month" className="text-[11px] font-black uppercase tracking-wider text-muted-foreground">
-            誕生日（月日） {requiresAdmissionDetails && <span className="text-destructive">*</span>}
+          <label htmlFor="visitor-age-group" className="text-[11px] font-black uppercase tracking-wider text-muted-foreground">
+            年代 {requiresAdmissionDetails && <span className="text-destructive">*</span>}
           </label>
-          {/* 2026-10-20: ラベルと月/日の選択欄で入力形式を示すため、補足文は表示しない。 */}
-          <div className="flex items-center gap-3">
-            <select
-              id="visitor-birthday-month"
-              value={birthdayMonth}
-              onChange={(e) => {
-                const month = e.target.value;
-                setBirthdayMonth(month);
-                if (!month || Number(birthdayDay) > new Date(Date.UTC(2000, Number(month), 0)).getUTCDate()) {
-                  setBirthdayDay("");
-                }
-              }}
-              aria-label="誕生日の月"
-              required={requiresAdmissionDetails}
-              className="h-11 min-w-0 flex-1 rounded-none border-[2px] bg-input px-3 font-mono"
-            >
-              <option value="">月を選択</option>
-              {Array.from({ length: 12 }, (_, index) => String(index + 1)).map((month) => (
-                <option key={month} value={month}>{month}月</option>
-              ))}
-            </select>
-            <select
-              id="visitor-birthday-day"
-              value={birthdayDay}
-              onChange={(e) => setBirthdayDay(e.target.value)}
-              aria-label="誕生日の日"
-              required={requiresAdmissionDetails}
-              disabled={!birthdayMonth}
-              className="h-11 min-w-0 flex-1 rounded-none border-[2px] bg-input px-3 font-mono disabled:opacity-50"
-            >
-              <option value="">日を選択</option>
-              {Array.from({ length: daysInBirthdayMonth }, (_, index) => String(index + 1)).map((day) => (
-                <option key={day} value={day}>{day}日</option>
-              ))}
-            </select>
-          </div>
-        </div>
-
-        <div className="space-y-2">
-          <label htmlFor="visitor-age" className="text-[11px] font-black uppercase tracking-wider text-muted-foreground">
-            年齢 {requiresAdmissionDetails && <span className="text-destructive">*</span>}
-          </label>
-          <Input
-            id="visitor-age"
-            type="number"
-            inputMode="numeric"
-            min={0}
-            max={120}
-            step={1}
-            value={age}
-            onChange={(e) => setAge(e.target.value)}
-            placeholder="例: 16"
+          <select
+            id="visitor-age-group"
+            value={ageGroup}
+            onChange={(e) => setAgeGroup(e.target.value as VisitorAgeGroup | "")}
             required={requiresAdmissionDetails}
-            aria-invalid={age !== "" && !hasValidAge}
-            className="rounded-none border-[2px] h-11"
-          />
-          {age !== "" && !hasValidAge && (
-            <p className="text-xs text-destructive">0〜120の整数を入力してください。</p>
-          )}
+            className="h-11 w-full rounded-none border-[2px] bg-input px-3 font-mono"
+          >
+            <option value="">年代を選択</option>
+            {VISITOR_AGE_GROUPS.map(({ value, label }) => <option key={value} value={value}>{label}</option>)}
+          </select>
         </div>
 
         <div className="space-y-2">
-          <label className="text-[11px] font-black uppercase tracking-wider text-muted-foreground">
+          <label htmlFor="visitor-nickname" className="text-[11px] font-black uppercase tracking-wider text-muted-foreground">
             ニックネーム <span className="text-destructive">*</span>
           </label>
           <Input
+            id="visitor-nickname"
             value={nickname}
             onChange={(e) => setNickname(e.target.value)}
             placeholder="例: たろう"
@@ -474,8 +373,7 @@ export default function Onboarding() {
             mutation.isPending ||
             profileLoading ||
             !nickname.trim() ||
-            !hasRequiredAdmissionDetails ||
-            (age !== "" && !hasValidAge)
+            !hasRequiredAdmissionDetails
           }
         >
           {mutation.isPending ? "保存中..." : isEdit ? "保存する" : "はじめる"}

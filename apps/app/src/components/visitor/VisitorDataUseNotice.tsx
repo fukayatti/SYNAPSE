@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Modal } from "@/components/ui/Modal";
+import { VISITOR_PROFILE_PURPOSES } from "@fesflow/config/visitor-profile";
 
 const noticeTitle = "FesFlowにおける取得情報の利用目的と取扱いについて";
 
@@ -12,15 +13,15 @@ export function VisitorDataUseNoticeContent() {
       <dl className="space-y-3">
         <div className="border-b-thin border-border pb-3">
           <dt className="font-black">年代</dt>
-          <dd className="mt-1 text-muted-foreground">来場者属性および購入傾向の分析、紛失時の本人確認</dd>
+          <dd className="mt-1 text-muted-foreground">{VISITOR_PROFILE_PURPOSES.ageGroup}</dd>
         </div>
         <div className="border-b-thin border-border pb-3">
           <dt className="font-black">ニックネーム</dt>
-          <dd className="mt-1 text-muted-foreground">紛失時の本人確認</dd>
+          <dd className="mt-1 text-muted-foreground">{VISITOR_PROFILE_PURPOSES.nickname}</dd>
         </div>
         <div>
           <dt className="font-black">グループ内のアレルギー情報（和集合）</dt>
-          <dd className="mt-1 text-muted-foreground">食品注文時のアレルギーに関する警告表示</dd>
+          <dd className="mt-1 text-muted-foreground">{VISITOR_PROFILE_PURPOSES.allergies}</dd>
         </div>
       </dl>
 

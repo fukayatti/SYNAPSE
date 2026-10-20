@@ -34,7 +34,7 @@ export default function Home() {
         <PortalCard
           icon={UtensilsCrossed}
           title="お店を探す"
-          desc="出店一覧からメニューを見て、事前注文できます。"
+          desc="入場登録前でも出店一覧とメニューを見られます。事前注文にはリストバンドの登録が必要です。"
           cta="出店一覧を見る"
           onClick={() => navigate("/visitor/events")}
           primary
