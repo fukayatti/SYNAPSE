@@ -38,7 +38,6 @@ export default function EventMenu() {
   // ルート優先。無ければ入場中リストバンドのイベントを使う。
   const routeEventId = eventIdParam || namedEvent?.id || null;
   const eventId = routeEventId || (eventNameParam ? null : session?.eventId || null);
-  const isEntered = !!session?.userId;
 
   if (!isLoaded) {
     return <div className="mx-auto max-w-4xl p-6 font-mono" role="status" aria-busy="true">読み込み中…</div>;
@@ -82,7 +81,6 @@ export default function EventMenu() {
   return (
     <EventMenuContent
       eventId={eventId}
-      isEntered={isEntered}
       isOnboarded={isOnboarded}
       onBrowseCircle={(circleId) => navigate(`/visitor/menu?circleId=${circleId}`)}
     />
@@ -91,12 +89,10 @@ export default function EventMenu() {
 
 function EventMenuContent({
   eventId,
-  isEntered,
   isOnboarded,
   onBrowseCircle,
 }: {
   eventId: string;
-  isEntered: boolean;
   isOnboarded: boolean;
   onBrowseCircle: (circleId: string) => void;
 }) {
@@ -304,8 +300,8 @@ function EventMenuContent({
           </div>
         )}
 
-        {/* マイページ導線 (入場済みのみ) */}
-        {isEntered && (
+        {/* 2026-10-20: 下見中の未登録者へマイQR導線を出さず、入場登録完了後にだけ表示する。 */}
+        {isOnboarded && (
           <div className="mt-8">
             <Link
               to="/visitor/mypage"

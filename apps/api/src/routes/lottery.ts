@@ -52,7 +52,8 @@ lotteryRoutes.get("/", async (c) => {
   const lot = lots[0];
   if (!lot) return c.json({ lottery: null });
 
-  const prizes = await db.select().from(lotteryPrize).where(eq(lotteryPrize.lotteryId, lot.id));
+  const allPrizes = await db.select().from(lotteryPrize).where(eq(lotteryPrize.lotteryId, lot.id));
+  const prizes = allPrizes.filter((prize: any) => !prize.isArchived);
   const entries = await db.select().from(lotteryEntry).where(eq(lotteryEntry.lotteryId, lot.id));
   const winners = await db.select().from(lotteryWinner).where(eq(lotteryWinner.lotteryId, lot.id));
 
@@ -62,7 +63,7 @@ lotteryRoutes.get("/", async (c) => {
     ? await db.select().from(eventUser).where(inArray(eventUser.id, winnerUserIds))
     : [];
   const userLabel = new Map(users.map((u: any) => [u.id, u.nickname || `#${u.displayId}`]));
-  const prizeName = new Map(prizes.map((p: any) => [p.id, p.name]));
+  const prizeName = new Map(allPrizes.map((p: any) => [p.id, p.name]));
 
   return c.json({
     lottery: { ...lot, entryConfig: JSON.parse(lot.entryConfig) },
@@ -141,7 +142,10 @@ lotteryRoutes.delete("/:id/prizes/:prizeId", async (c) => {
   if (!(await hasPermission(c, null, "event:write", lots[0]!.eventId))) {
     apiError("FORBIDDEN", "景品を削除する権限がありません");
   }
-  await db.delete(lotteryPrize).where(and(eq(lotteryPrize.id, prizeId), eq(lotteryPrize.lotteryId, id)));
+  // 2026-10-21: lottery_winner は景品削除時に cascade するため、結果履歴を残して候補から外す。
+  await db.update(lotteryPrize)
+    .set({ isArchived: true })
+    .where(and(eq(lotteryPrize.id, prizeId), eq(lotteryPrize.lotteryId, id)));
   return c.json({ success: true });
 });
 
@@ -157,7 +161,10 @@ lotteryRoutes.post("/:id/draw", async (c) => {
   }
   if (lot!.status === "drawn") apiError("BAD_REQUEST", "この抽選は既に実行済みです");
 
-  const prizes = await db.select().from(lotteryPrize).where(eq(lotteryPrize.lotteryId, id));
+  const prizes = await db.select().from(lotteryPrize).where(and(
+    eq(lotteryPrize.lotteryId, id),
+    eq(lotteryPrize.isArchived, false),
+  ));
   if (prizes.length === 0) apiError("BAD_REQUEST", "景品がありません");
   const entries = await db.select().from(lotteryEntry).where(eq(lotteryEntry.lotteryId, id));
   if (entries.length === 0) apiError("BAD_REQUEST", "応募者がいません");

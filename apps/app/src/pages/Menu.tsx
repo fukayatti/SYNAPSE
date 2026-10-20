@@ -119,7 +119,7 @@ function VisitorMenuCard({
   };
 
   return (
-    <Card className={menu.soldOut ? "opacity-60" : ""}>
+    <Card>
       <CardHeader>
         <div className="relative h-48 w-full overflow-hidden border-b-thick border-border">
           {menu.imagePath ? (
@@ -133,8 +133,9 @@ function VisitorMenuCard({
               <span className="font-mono text-[14px] uppercase tracking-[1px]">No Image</span>
             </div>
           )}
+          {/* 2026-10-21: 売切を販売停止の状態色で示し、商品画像上でも見落としにくくする。 */}
           {menu.soldOut && (
-            <div className="absolute inset-0 bg-foreground/85 flex items-center justify-center">
+            <div className="absolute inset-0 bg-error/85 flex items-center justify-center">
               <span className="text-background text-[24px] font-headline uppercase tracking-[2px]">
                 売り切れ
               </span>
@@ -247,7 +248,7 @@ function MenuPageContent() {
   // 未入場 (リストバンド未発行) は空文字。閲覧は許可し注文送信側でゲートする
   const { userId: visitorUserId, session, isLoaded: visitorLoaded } = useVisitor();
   const userId = visitorUserId ?? "";
-  // 2026-10-08: localStorage に利用者IDだけ残っている状態では、入場登録済みのQRと判断しない。
+  // 2026-10-20: QR表示はAPI上の入場登録完了(onboardedAt)を条件にし、下見中の未登録バンドを表示しない。
   const { data: wristbandStatus, isLoading: isWristbandStatusLoading, isError: isWristbandStatusError } = useQuery({
     queryKey: ["userWristbandStatus", userId],
     queryFn: () => wristbandApi.lookup(userId),
@@ -255,14 +256,6 @@ function MenuPageContent() {
   });
   const activeWristband = wristbandStatus?.wristband;
   const familyAllergies = parseJapaneseAllergens(wristbandStatus?.user.allergies);
-  const canDisplayMyQr = !!activeWristband && ["active", "smartphone"].includes(activeWristband.status);
-  const myQrButtonLabel = isWristbandStatusLoading
-    ? "入場情報を確認中…"
-    : isWristbandStatusError
-      ? "入場情報を確認できません"
-      : canDisplayMyQr
-        ? "マイQRを表示"
-        : "入場登録をおこなってください";
 
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
   const [selectedCircleId, setSelectedCircleId] = useState<string | null>(
@@ -459,12 +452,35 @@ function MenuPageContent() {
   }, [isMobileOrderRoute, mobileCartStorageKey, draftKey, hydratedDraftKey, cart]);
 
   // サークルが属するイベントのテーマ (配色/ロゴ) を取得して画面に反映
-  const { data: circleEvent } = useQuery({
+  const {
+    data: circleEvent,
+    isLoading: isCircleEventLoading,
+    isError: isCircleEventError,
+  } = useQuery({
     queryKey: ["event", circleData?.eventId],
     queryFn: () => eventApi.get(circleData!.eventId),
     enabled: !!circleData?.eventId,
     networkMode: "always",
   });
+  // 2026-10-20: 来場案内と同じイベント設定を使い、物理バンド必須のイベントではスマホQRを出さない。
+  const mustPresentPhysicalWristband = Boolean(
+    circleEvent?.hasPhysicalWristband && !circleEvent.allowSelfIssue
+  );
+  const canDisplayMyQr = !!circleEvent
+    && !isCircleEventError
+    && !mustPresentPhysicalWristband
+    && !!wristbandStatus?.user.onboardedAt
+    && !!activeWristband
+    && ["active", "smartphone"].includes(activeWristband.status);
+  const myQrButtonLabel = isWristbandStatusLoading || isCircleEventLoading
+    ? "入場情報を確認中…"
+    : isWristbandStatusError || isCircleEventError
+      ? "入場情報を確認できません"
+      : mustPresentPhysicalWristband
+        ? "物理リストバンドを提示してください"
+        : canDisplayMyQr
+          ? "マイQRを表示"
+          : "入場登録をおこなってください";
 
   useEffect(() => {
     if (circleIdParam) {
@@ -1082,11 +1098,13 @@ function MenuPageContent() {
                 </Button>
               )}
             </div>
-            {!canDisplayMyQr && !isWristbandStatusLoading && (
+            {!canDisplayMyQr && !isWristbandStatusLoading && !isCircleEventLoading && (
               <p className="text-[10px] text-primary-foreground/80 font-mono" role="status">
-                {isWristbandStatusError
+                {isWristbandStatusError || isCircleEventError
                   ? "入場情報を確認できません。通信を確認して画面を再読み込みしてください。"
-                  : "受付・本部で入場登録すると、注文の受取や店頭会計で使うQRを表示できます。"}
+                  : mustPresentPhysicalWristband
+                    ? "このイベントではスマートフォンQRを発行していません。物理リストバンドを提示してください。"
+                    : "受付・本部で入場登録すると、注文の受取や店頭会計で使うQRを表示できます。"}
               </p>
             )}
           </div>
@@ -1247,7 +1265,7 @@ function MenuPageContent() {
       </Modal>
 
       {/* 2026-10-08: 登録済みバンドがない場合は userId を代用したQRを生成しない。 */}
-      <Modal isOpen={isQrOpen} onClose={() => setIsQrOpen(false)} title="[マイQR]" maxWidth="md">
+      <Modal isOpen={isQrOpen && canDisplayMyQr} onClose={() => setIsQrOpen(false)} title="[マイQR]" maxWidth="md">
         {canDisplayMyQr && activeWristband ? (
           <div className="space-y-3 text-center">
             <div className="inline-block border-thick border-border bg-background p-3">

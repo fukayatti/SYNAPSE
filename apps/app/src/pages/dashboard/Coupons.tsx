@@ -69,8 +69,9 @@ function CouponsContent() {
     queryFn: () => toppingApi.list(circleId),
     enabled: !!circleId,
   });
-  const menuName = (menuId: string) => menus?.find((m) => m.id === menuId)?.name ?? menuId;
-  const toppingName = (toppingId: string) => toppings?.find((t) => t.id === toppingId)?.name ?? toppingId;
+  // 2026-10-21: 使用停止済みの対象は候補一覧から消えるため、クーポン管理では状態が分かる表示にする。
+  const menuName = (menuId: string) => menus?.find((m) => m.id === menuId)?.name ?? `使用停止済み (${menuId})`;
+  const toppingName = (toppingId: string) => toppings?.find((t) => t.id === toppingId)?.name ?? `使用停止済み (${toppingId})`;
 
   // トッピングはメニューに紐付いていないと、客側の注文画面に選択肢として出てこない
   // (メニュー編集画面の「対応トッピング」で紐付けが必要)。紐付いていないトッピングを対象にした
@@ -273,12 +274,15 @@ function CouponsContent() {
                     </p>}
                     {c.kind === "free_topping" && c.toppingIds.some((id) => !reachableToppingIds.has(id)) && (
                       <p className="text-warning">
-                        対象トッピングがどのメニューにも紐付いていないため、お客様は選べず使えません。
+                        対象トッピングが販売停止中、またはメニューに紐付いていないため、お客様は選べず使えません。
                         <Link to="/circle/dashboard/menu" className="underline hover:text-foreground">
                           メニュー管理
                         </Link>
                         から対象メニューを編集し、「対応トッピング」で紐付けてください。
                       </p>
+                    )}
+                    {c.kind === "menu_discount" && c.menuIds.some((id) => !(menus ?? []).some((menu) => menu.id === id)) && (
+                      <p className="text-warning">対象メニューが販売停止中のため、このクーポンは現在利用できません。</p>
                     )}
                     <div className="flex flex-wrap items-center gap-2 pt-1">
                       {!c.registerOnly && <Button

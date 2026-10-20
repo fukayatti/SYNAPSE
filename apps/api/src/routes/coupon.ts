@@ -133,7 +133,7 @@ couponRoutes.post(
 
       if (body.kind === "menu_discount") {
         // クロスサークルIDOR対策 (pre_order.ts と同じ方針)。他サークルのメニューが混入していないか検証する。
-        const menus = await db.select().from(menu).where(inArray(menu.id, body.menuIds));
+        const menus = await db.select().from(menu).where(and(inArray(menu.id, body.menuIds), eq(menu.isArchived, false)));
         if (menus.length !== body.menuIds.length || menus.some((m) => m.circleId !== circleId)) {
           apiError("BAD_REQUEST", "指定されたメニューの一部が見つからないか、このサークルのものではありません");
         }
@@ -155,7 +155,7 @@ couponRoutes.post(
         const rows = await db.select().from(coupon).where(eq(coupon.id, id));
         return c.json({ ...rows[0], menuIds: body.menuIds, toppingIds: [] }, 201);
       } else if (body.kind === "free_topping") {
-        const toppings = await db.select().from(topping).where(inArray(topping.id, body.toppingIds));
+        const toppings = await db.select().from(topping).where(and(inArray(topping.id, body.toppingIds), eq(topping.isArchived, false)));
         if (toppings.length !== body.toppingIds.length || toppings.some((t) => t.circleId !== circleId)) {
           apiError("BAD_REQUEST", "指定されたトッピングの一部が見つからないか、このサークルのものではありません");
         }
