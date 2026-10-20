@@ -4,6 +4,7 @@ import type { RoleType } from "@fesflow/config";
 import type { JapaneseAllergen } from "@fesflow/config/allergens";
 import type { VisitorAgeGroup } from "@fesflow/config/visitor-profile";
 import { createOrderResultSchema, type CreateOrderInput, type CreateOrderResult, type OrderStatus } from "@fesflow/config/order-contract";
+import type { RegisterDisplaySnapshot } from "@fesflow/config/register-display-contract";
 export type { CreateOrderInput, CreateOrderResult, OrderStatus } from "@fesflow/config/order-contract";
 
 export function getApiBaseUrl(): string {
@@ -277,11 +278,50 @@ export const staffApi = {
 };
 
 // Order API
+export interface ProjectorOrder {
+  orderNumber: string;
+  status: string;
+}
+
+export interface RegisterDisplaySession {
+  id: string;
+  token: string;
+  revision: number;
+  expiresAt: number;
+}
+
+export interface RegisterDisplayResponse {
+  snapshot: RegisterDisplaySnapshot;
+  revision: number;
+  updatedAt: number;
+  expiresAt: number;
+}
+
 export const orderApi = {
   list: (circleId: string, status?: string) =>
     fetchApi<OrderWithItems[]>(
       `/api/orders?circleId=${circleId}${status ? `&status=${status}` : ""}`
     ),
+  projector: (circleId: string) =>
+    fetchApi<ProjectorOrder[]>(`/api/orders/projector?circleId=${encodeURIComponent(circleId)}`),
+  createRegisterDisplay: (circleId: string, snapshot: RegisterDisplaySnapshot) =>
+    fetchApi<RegisterDisplaySession>("/api/orders/register-displays", {
+      method: "POST",
+      body: { circleId, snapshot },
+    }),
+  updateRegisterDisplay: (id: string, snapshot: RegisterDisplaySnapshot, revision: number) =>
+    fetchApi<{ success: boolean }>(`/api/orders/register-displays/${encodeURIComponent(id)}/snapshot`, {
+      method: "PUT",
+      body: { snapshot, revision },
+    }),
+  getRegisterDisplay: (id: string, token: string) =>
+    fetchApi<RegisterDisplayResponse>(`/api/orders/register-displays/${encodeURIComponent(id)}/snapshot`, {
+      headers: { Authorization: `Bearer ${token}` },
+    }),
+  closeRegisterDisplay: (id: string) =>
+    fetchApi<{ success: boolean }>(`/api/orders/register-displays/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    }),
   get: (id: string) => fetchApi<OrderWithItems>(`/api/orders/${id}`),
   // 来場者本人の注文履歴 (レジを通った注文)。code = eventUser.id or リストバンドID。
   // 旧実装 (getByCode) の .catch(()=>[]) は 500 を空表示に握り潰し障害を隠していたため、

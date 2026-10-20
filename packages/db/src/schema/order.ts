@@ -16,6 +16,33 @@ import { menu, topping } from "./menu";
 import { eventUser } from "./visitor";
 import { ulid } from "ulidx";
 
+// 2026-10-21: 別端末のレジ表示は期限付きの読取トークンで共有し、顧客用の最小スナップショットだけを保持する。
+export const registerDisplaySession = sqliteTable(
+  "register_display_session",
+  {
+    id: text("id").primaryKey(),
+    circleId: text("circle_id")
+      .notNull()
+      .references(() => circle.id, { onDelete: "cascade" }),
+    tokenHash: text("token_hash").notNull(),
+    snapshot: text("snapshot").notNull(),
+    revision: integer("revision").notNull().default(0),
+    expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
+    revokedAt: integer("revoked_at", { mode: "timestamp_ms" }),
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+      .notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (table) => [
+    index("register_display_session_circle_idx").on(table.circleId),
+    index("register_display_session_expires_idx").on(table.expiresAt),
+  ],
+);
+
 // 2026-10-03 (#81/#82): 一意な採番と再送の結果をDBで所有する。
 // ガードは同じbatch内で削除する作業行。CHECK違反で業務条件の失敗も全体をrollbackする。
 export const orderSequence = sqliteTable("order_sequence", {

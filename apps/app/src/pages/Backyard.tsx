@@ -1,5 +1,5 @@
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { CircleAuthGuard, useAuth } from "@/hooks/useCircleAuth";
 import { orderApi, toppingApi } from "@/lib/api";
@@ -8,6 +8,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState } from "@/components/ui/ErrorState";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { toast } from "sonner";
+import { Monitor } from "lucide-react";
 import { SwipeableOrderStack, type KitchenOrderView } from "@/components/pos/SwipeableOrderStack";
 
 function BackyardPageContent() {
@@ -16,6 +17,7 @@ function BackyardPageContent() {
   // useAuth() (authChange 購読で常に最新値) に統一する。
   const { circleId: authCircleId } = useAuth();
   const circleId = authCircleId ?? "";
+  const orderNumberDisplayWindow = useRef<Window | null>(null);
   // 2026-10-17: 起動時は未着手と調理中を一続きの作業キューにし、最初に対応すべき注文へ案内する。
   const [selectedStatus, setSelectedStatus] = useState<string | undefined>("actionable");
   const [view, setView] = useState<KitchenOrderView>("horizontal");
@@ -81,6 +83,21 @@ function BackyardPageContent() {
     return updateStatus.mutateAsync({ id: orderId, status: "preparing" });
   };
 
+  const openOrderNumberDisplay = () => {
+    if (orderNumberDisplayWindow.current && !orderNumberDisplayWindow.current.closed) {
+      orderNumberDisplayWindow.current.focus();
+      return;
+    }
+    // 2026-10-21: 認証対象のサークルIDはsessionStorageにあるため、新窓へ複製してからopenerを切る。
+    const popup = window.open("/circle/backyard/display", `fesflow-order-number-display-${Date.now()}`);
+    if (!popup) {
+      toast.error("番号表示画面を開けませんでした。ポップアップを許可してください。");
+      return;
+    }
+    popup.opener = null;
+    orderNumberDisplayWindow.current = popup;
+  };
+
   const handleComplete = (orderId: string) => {
     return completeOrder.mutateAsync({ id: orderId });
   };
@@ -137,9 +154,19 @@ function BackyardPageContent() {
     <div className="container mx-auto space-y-4 p-3 sm:space-y-6 sm:p-4">
       <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 border-b-thick border-border pb-3">
         <h1 className="text-2xl sm:text-3xl font-headline uppercase tracking-tight">厨房管理</h1>
-        <Button onClick={() => refetch()} variant="outline" className="w-full sm:w-auto border-thick border-border rounded-none font-mono uppercase">
-          更新
-        </Button>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <Button
+            onClick={openOrderNumberDisplay}
+            variant="outline"
+            className="w-full sm:w-auto border-thick border-border rounded-none font-mono uppercase"
+          >
+            <Monitor className="mr-2 h-4 w-4" />
+            番号表示
+          </Button>
+          <Button onClick={() => refetch()} variant="outline" className="w-full sm:w-auto border-thick border-border rounded-none font-mono uppercase">
+            更新
+          </Button>
+        </div>
       </div>
 
       {/* ステータスフィルター */}

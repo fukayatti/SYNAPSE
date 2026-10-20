@@ -23,6 +23,8 @@ const pageImports = {
 	Login: () => import("@/pages/Login"),
 	Register: () => import("@/pages/Register"),
 	Backyard: () => import("@/pages/Backyard"),
+	OrderNumberDisplay: () => import("@/pages/OrderNumberDisplay"),
+	RegisterCustomerDisplay: () => import("@/pages/RegisterCustomerDisplay"),
 	Checkin: () => import("@/pages/Checkin"),
 	Invite: () => import("@/pages/Invite"),
 	Admin: () => import("@/pages/Admin"),
@@ -64,6 +66,8 @@ const Home = lazy(pageImports.Home);
 const Login = lazy(pageImports.Login);
 const Register = lazy(pageImports.Register);
 const Backyard = lazy(pageImports.Backyard);
+const OrderNumberDisplay = lazy(pageImports.OrderNumberDisplay);
+const RegisterCustomerDisplay = lazy(pageImports.RegisterCustomerDisplay);
 const Checkin = lazy(pageImports.Checkin);
 const Invite = lazy(pageImports.Invite);
 const Admin = lazy(pageImports.Admin);
@@ -103,7 +107,7 @@ const CouponRedeem = lazy(pageImports.CouponRedeem);
 // 関連モジュールをバックグラウンドで一括ダウンロードする。
 export function preloadStaffPages() {
 	const staffKeys: (keyof typeof pageImports)[] = [
-		"Home", "Login", "Register", "Backyard", "Checkin", "Invite", "Admin", 
+		"Home", "Login", "Register", "Backyard", "OrderNumberDisplay", "RegisterCustomerDisplay", "Checkin", "Invite", "Admin",
 		"EventDashboard", "DashboardIndex", "DashboardCircle", "DashboardMembers", 
 		"DashboardMenu", "DashboardQr", "DashboardSales", "DashboardStaff",
 		"DashboardStock", "DashboardAnalytics", "DashboardExport", "DashboardCoupons", "DashboardDiscounts", "StaffOnboarding"
@@ -197,6 +201,9 @@ export default function App() {
 				{/* ドメインルートはブランディングページ (VisitorHeader なし) */}
 				<Route element={<BareLayout />}>
 					<Route path="/" element={<Branding />} />
+					{/* 2026-10-21: 店頭表示はナビゲーションを外し、プロジェクターと顧客用端末で画面を占有する。 */}
+					<Route path="/circle/backyard/display" element={<CircleAuthGuard><OrderNumberDisplay /></CircleAuthGuard>} />
+					<Route path="/register-display/:sessionId" element={<RegisterCustomerDisplay />} />
 					{/* 2026-10-20: 入場前でも取得情報の利用目的と取扱いを確認できる公開ページ。 */}
 					<Route path="/visitor/data-use" element={<VisitorDataUseNoticePage />} />
 				</Route>
