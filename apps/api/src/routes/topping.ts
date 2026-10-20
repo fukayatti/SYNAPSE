@@ -2,8 +2,8 @@ import { Hono } from "hono";
 import { zBody } from "../z-validator";
 import { apiError } from "../http-error";
 import { z } from "zod";
-import { topping, menuTopping } from "@fesflow/db";
-import { asc, desc, eq } from "drizzle-orm";
+import { topping } from "@fesflow/db";
+import { and, asc, desc, eq } from "drizzle-orm";
 import { ulid } from "ulidx";
 import { hasPermission } from "../utils/auth";
 import type { AppEnv } from "../types";
@@ -30,7 +30,7 @@ toppingRoutes.get("/", async (c) => {
   const toppings = await db
     .select()
     .from(topping)
-    .where(eq(topping.circleId, circleId))
+    .where(and(eq(topping.circleId, circleId), eq(topping.isArchived, false)))
     .orderBy(asc(topping.sortOrder), asc(topping.createdAt));
 
   return c.json(toppings);
@@ -40,7 +40,7 @@ toppingRoutes.get("/", async (c) => {
 toppingRoutes.get("/:id", async (c) => {
   const db = c.get("db");
   const id = c.req.param("id");
-  const toppings = await db.select().from(topping).where(eq(topping.id, id));
+  const toppings = await db.select().from(topping).where(and(eq(topping.id, id), eq(topping.isArchived, false)));
 
   if (toppings.length === 0) {
     apiError("NOT_FOUND", "トッピングが見つかりません");
@@ -133,7 +133,7 @@ toppingRoutes.put(
     const existingTopping = await db
       .select()
       .from(topping)
-      .where(eq(topping.id, id));
+      .where(and(eq(topping.id, id), eq(topping.isArchived, false)));
     if (existingTopping.length === 0) {
       apiError("NOT_FOUND", "トッピングが見つかりません");
     }
@@ -174,7 +174,7 @@ toppingRoutes.put(
     const id = c.req.param("id");
     const { stockQuantity } = c.req.valid("json");
 
-    const existing = await db.select().from(topping).where(eq(topping.id, id));
+    const existing = await db.select().from(topping).where(and(eq(topping.id, id), eq(topping.isArchived, false)));
     if (existing.length === 0) {
       apiError("NOT_FOUND", "トッピングが見つかりません");
     }
@@ -198,10 +198,8 @@ toppingRoutes.delete("/:id", async (c) => {
   const id = c.req.param("id");
 
   // 2026-07-05: 認可チェックが皆無だったため追加。存在確認の上、対象のcircleIdで判定
-  const existingTopping = await db
-    .select()
-    .from(topping)
-    .where(eq(topping.id, id));
+  const existingTopping = await db.select().from(topping)
+    .where(and(eq(topping.id, id), eq(topping.isArchived, false)));
   if (existingTopping.length === 0) {
     apiError("NOT_FOUND", "トッピングが見つかりません");
   }
@@ -210,10 +208,8 @@ toppingRoutes.delete("/:id", async (c) => {
     apiError("FORBIDDEN", "権限がありません");
   }
 
-  // 2026-07-05: 関連するmenu_topping中間テーブル行を連動削除（menu.tsの削除実装に準拠）
-  await db.delete(menuTopping).where(eq(menuTopping.toppingId, id));
-
-  await db.delete(topping).where(eq(topping.id, id));
+  // 2026-10-21: 履歴行の外部キーを保ちつつ、新規の選択肢と販売対象から外す。
+  await db.update(topping).set({ isArchived: true }).where(eq(topping.id, id));
   return c.json({ success: true });
 });
 

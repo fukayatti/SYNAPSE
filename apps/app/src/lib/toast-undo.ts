@@ -95,6 +95,8 @@ export function undoableDelete<T extends { id: string }>(opts: {
 }) {
   const { queryClient, queryKey, id, message, commit, duration } = opts;
   const prev = queryClient.getQueryData<T[]>(queryKey);
+  const removedIndex = prev?.findIndex((item) => item.id === id) ?? -1;
+  const removedItem = removedIndex >= 0 ? prev?.[removedIndex] : undefined;
 
   undoableAction({
     message,
@@ -103,7 +105,19 @@ export function undoableDelete<T extends { id: string }>(opts: {
       queryClient.setQueryData<T[]>(queryKey, (old) =>
         old ? old.filter((x) => x.id !== id) : old,
       ),
-    rollback: () => queryClient.setQueryData(queryKey, prev),
+    rollback: () => {
+      if (!removedItem) return;
+
+      // 2026-10-20: 複数削除が重なっても、古い全件スナップショットで他の更新を巻き戻さない。
+      queryClient.setQueryData<T[]>(queryKey, (current) => {
+        const items = current ?? prev;
+        if (!items || items.some((item) => item.id === id)) return items;
+
+        const restored = [...items];
+        restored.splice(Math.min(removedIndex, restored.length), 0, removedItem);
+        return restored;
+      });
+    },
     commit: async () => {
       await commit();
       queryClient.invalidateQueries({ queryKey });

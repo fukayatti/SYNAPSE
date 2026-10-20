@@ -112,7 +112,7 @@ function MenuCard({
     .reduce((sum, t) => sum + t.price, 0);
 
   return (
-    <Card className={menu.soldOut ? "opacity-60" : ""}>
+    <Card>
       <CardHeader className="p-0">
         <div className="relative h-28 sm:h-36 w-full overflow-hidden border-b-thick border-border">
           {menu.imagePath ? (
@@ -122,8 +122,9 @@ function MenuCard({
               <span className="font-mono text-[11px] sm:text-[14px] uppercase tracking-[1px]">No Image</span>
             </div>
           )}
+          {/* 2026-10-21: 来場者画面と同じ赤系の売切表示にそろえる。 */}
           {menu.soldOut && (
-            <div className="absolute inset-0 bg-foreground/85 flex items-center justify-center">
+            <div className="absolute inset-0 bg-error/85 flex items-center justify-center">
               <span className="text-background text-[18px] sm:text-[24px] font-headline uppercase tracking-[2px]">売り切れ</span>
             </div>
           )}

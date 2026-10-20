@@ -264,8 +264,22 @@
     {
       "idx": 37,
       "version": "6",
-      "when": 1792516018909,
-      "tag": "0037_new_eddie_brock",
+      "when": 1792508991097,
+      "tag": "0037_absurd_dragon_man",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "6",
+      "when": 1792510370515,
+      "tag": "0038_happy_puck",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "6",
+      "when": 1792517353500,
+      "tag": "0039_low_moon_knight",
       "breakpoints": true
     }
   ]
