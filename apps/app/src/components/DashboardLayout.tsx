@@ -1,10 +1,12 @@
 import { ReactNode, useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { Link, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
 import { circleApi, eventApi, parseCircleSettings } from "@/lib/api";
 import { useAuth } from "@/hooks/useCircleAuth";
 import { useFocusTrap } from "@/hooks/useFocusTrap";
+import { useBodyScrollLock } from "@/hooks/useBodyScrollLock";
 import { useGuardedNavigation } from "@/components/UnsavedNavigationGuard";
 import {
   LayoutDashboard,
@@ -140,15 +142,7 @@ export default function DashboardLayout({
     };
   }, []);
 
-  // 背景スクロールロック (Modal.tsx と同じパターン)。アンマウント/クローズ時に必ず元へ戻す。
-  useEffect(() => {
-    if (!isMobileMenuOpen) return;
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = prevOverflow;
-    };
-  }, [isMobileMenuOpen]);
+  useBodyScrollLock(isMobileMenuOpen);
 
   // Escape 閉じ・フォーカストラップは Modal.tsx と同じ共通フックを再利用する。
   const drawerFocusTrapRef = useFocusTrap<HTMLDivElement>(isMobileMenuOpen, {
@@ -377,12 +371,12 @@ export default function DashboardLayout({
                 className={itemClass}
               >
                 <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
-                <span className="truncate">{item.title}</span>
+                <span className="min-w-0 break-words whitespace-normal">{item.title}</span>
               </Link>
             ) : (
               <button key={item.tab ?? itemIndex} type="button" onClick={handleItemClick} className={itemClass}>
                 <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
-                <span className="truncate">{item.title}</span>
+                <span className="min-w-0 break-words whitespace-normal">{item.title}</span>
               </button>
             );
           })}
@@ -392,15 +386,15 @@ export default function DashboardLayout({
   });
 
   return (
-    <div className="max-w-7xl mx-auto p-4 md:p-6 font-mono bg-background text-foreground">
+    <div className="mx-auto box-border w-full min-w-0 max-w-7xl p-3 sm:p-4 md:p-6 font-mono bg-background text-foreground">
       {/* 共通ヘッダー: 左にタイトル、右に画面主要アクション (actions スロット)。
           モバイルでは縦積みにしてボタンが潰れないようにする。 */}
       <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3 border-b-thick border-border pb-3 mb-6">
         <div className="min-w-0">
-          <h1 className="text-lg sm:text-2xl font-black uppercase tracking-wider font-mono flex items-center gap-2">
+          <h1 className="min-w-0 break-words text-lg sm:text-2xl font-black uppercase tracking-wider font-mono flex items-center gap-2">
             {type === "system" && <Shield className="h-6 w-6 text-foreground shrink-0" />}
             {type === "event" && <Calendar className="h-6 w-6 text-foreground shrink-0" />}
-            <span className="truncate">{title}</span>
+            <span className="min-w-0 break-words">{title}</span>
           </h1>
           {subtitle && (
             <p className="font-mono text-[10px] sm:text-xs uppercase tracking-[1px] mt-1 text-muted-foreground">
@@ -409,7 +403,7 @@ export default function DashboardLayout({
           )}
         </div>
         {actions && (
-          <div className="flex items-center gap-2 flex-wrap shrink-0">
+          <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2">
             {actions}
           </div>
         )}
@@ -431,11 +425,13 @@ export default function DashboardLayout({
         </div>
       )}
 
-      {/* モバイルメニュー ドロワー (md未満)。トリガーとは別要素として常にマウントしておき、
+      {/* 2026-10-21: 固定ヘッダーや親の overflow の重なり順から独立させるため body 直下へ描画する。
+          モバイルメニュー ドロワー (md未満)。トリガーとは別要素として常にマウントしておき、
           開閉は translate-x の CSS transition のみで行う (アンマウント方式だと閉じるアニメーションが
           出せないため)。閉じている間は `inert` で背景要素としてフォーカス/操作を無効化し、
           スライドアウト先 (画面外) にあるリンク/ボタンが Tab で拾われないようにする。
           z-index はヘッダーの sticky z-50 より上 (z-[60]) にして必ず前面に出す。 */}
+      {createPortal((
       <div
         className={cn(
           "md:hidden fixed inset-0 z-[60] transition-opacity duration-200",
@@ -458,7 +454,7 @@ export default function DashboardLayout({
           aria-modal="true"
           aria-label="メニュー"
           className={cn(
-            "absolute inset-y-0 left-0 w-[82vw] max-w-xs bg-background border-r-thick border-border shadow-none flex flex-col transition-transform duration-200 ease-out",
+            "absolute inset-y-0 left-0 w-[82vw] max-w-xs bg-background border-r-thick border-border pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] shadow-none flex flex-col transition-transform duration-200 ease-out",
             isMobileMenuOpen ? "translate-x-0" : "-translate-x-full",
           )}
         >
@@ -479,6 +475,7 @@ export default function DashboardLayout({
           </nav>
         </div>
       </div>
+      ), document.body)}
 
       {/* 2カラムレイアウト */}
       <div className="flex flex-col md:flex-row gap-6 items-start">
@@ -495,7 +492,7 @@ export default function DashboardLayout({
         {/* 右メインコンテンツ */}
         {/* min-w-0: flex 子要素の既定 min-width:auto により中身が広いと縮まず、
             ビューポートを超えて横スクロール(モバイルの横幅ズレ)が発生するのを防ぐ。 */}
-        <main className="flex-1 w-full min-w-0 border-thick border-border p-4 md:p-6 bg-background rounded-none shadow-none min-h-[500px]">
+        <main className="box-border flex-1 w-full min-w-0 max-w-full border-thick border-border p-3 sm:p-4 md:p-6 bg-background rounded-none shadow-none min-h-[500px]">
           {type === "event" && !authLoading && !activeItem ? (
             <p className="border-thick border-warning bg-warning/10 p-4 text-sm" role="status">
               この画面を利用する権限がありません。利用できる管理画面へ移動しています。

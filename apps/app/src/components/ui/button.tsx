@@ -5,7 +5,8 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
 
 const buttonVariants = cva(
-	"inline-flex items-center justify-center gap-2 whitespace-nowrap font-headline uppercase tracking-[2px] transition-all disabled:pointer-events-none disabled:bg-muted disabled:border-muted disabled:text-muted-foreground [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:ring-0 active:border-heavy active:bg-primary active:text-primary-foreground",
+	// 2026-10-21: 長いラベルでボタンや親レイアウトが横に膨らまないよう、縮小と折り返しを許可する。
+	"inline-flex min-w-0 max-w-full items-center justify-center gap-2 whitespace-normal break-words text-center leading-snug font-headline uppercase tracking-[2px] transition-all disabled:pointer-events-none disabled:bg-muted disabled:border-muted disabled:text-muted-foreground [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 [&_svg]:shrink-0 outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-info active:border-heavy active:bg-primary active:text-primary-foreground",
 	{
 		variants: {
 			variant: {
@@ -24,9 +25,9 @@ const buttonVariants = cva(
 				link: "text-info underline underline-offset-4 border-transparent",
 			},
 			size: {
-				default: "h-[44px] px-[24px] text-[14px]",
-				sm: "h-[32px] px-[16px] text-[12px]",
-				lg: "h-[56px] px-[40px] text-[18px]",
+				default: "min-h-[44px] py-2 px-[24px] text-[14px]",
+				sm: "min-h-[32px] py-1 px-[16px] text-[12px]",
+				lg: "min-h-[56px] py-3 px-[40px] text-[18px]",
 				icon: "size-[44px]",
 			},
 		},

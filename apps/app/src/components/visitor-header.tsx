@@ -18,7 +18,7 @@ export default function VisitorHeader() {
   const isActive = (matchPaths: string[]) => matchPaths.some((path) => pathname.startsWith(path));
 
   return (
-    <header className="sticky top-0 z-50 border-b-thick border-border bg-background text-foreground font-mono">
+    <header className="sticky top-0 z-50 border-b-thick border-border bg-background pt-[env(safe-area-inset-top)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] text-foreground font-mono">
       <div className="mx-auto flex max-w-3xl flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2 sm:flex-nowrap sm:px-4">
         <Link
           to="/visitor"
@@ -49,7 +49,7 @@ export default function VisitorHeader() {
                 }`}
               >
                 <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
-                <span className="whitespace-nowrap">{label}</span>
+                <span className="break-words">{label}</span>
               </Link>
             );
           })}

@@ -68,10 +68,10 @@ Google Fonts を `index.html` で読み込み、`index.css` の `@theme` で変�
 
 | 要素 / クラス | フォント | サイズ / 行間 | ウェイト |
 | :--- | :--- | :--- | :--- |
-| `h1` | headline | 64px / 1.0 | normal |
-| `h2` | headline | 48px / 1.05 | normal |
-| `h3` | headline | 32px / 1.1 | normal |
-| `h4` | body | 22px / 1.2 | semibold |
+| `h1` | headline | clamp(32px, 8vw, 64px) / 1.0 | normal |
+| `h2` | headline | clamp(28px, 6vw, 48px) / 1.05 | normal |
+| `h3` | headline | clamp(22px, 4.5vw, 32px) / 1.1 | normal |
+| `h4` | body | clamp(18px, 4vw, 22px) / 1.2 | semibold |
 | `.text-body` | body | 16px / 1.6 | normal |
 | `.text-small` | body | 14px / 1.5 | normal |
 | `.text-tiny` | body | 12px / 1.4 | normal |
@@ -140,7 +140,7 @@ hover で前景/背景反転、active で `border-heavy`。
 - **destructive**: 赤塗り → hover で primary 背景＋赤文字
 - **outline / secondary**: 背景塗り → hover で primary 反転
 - **ghost / link**: 枠なし・`info` 色の下線テキスト
-- サイズ: `sm(32px) / default(44px) / lg(56px) / icon(44px)`
+- サイズ: `sm(min 32px) / default(min 44px) / lg(min 56px) / icon(44px)`。ラベルは折り返し可能にし、文言が増えても固定高や親幅を押し広げない。
 
 ### Input（`ui/input.tsx`）
 
