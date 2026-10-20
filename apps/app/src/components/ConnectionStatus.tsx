@@ -90,7 +90,7 @@ export function ConnectionStatusBanner({ showQueue = true }: { showQueue?: boole
     : isOffline
     ? `オフライン中${showQueue && pending ? ` · 注文${pending}件は送信待ち` : ""}`
     : isUnstable
-      ? "通信が不安定です。入力内容を保持しています"
+      ? "通信が不安定です。保存・取得に失敗した操作は画面に表示します"
       : isAttention
         ? `送信できない注文が${attention}件あります。注文履歴で確認してください`
         : syncing
