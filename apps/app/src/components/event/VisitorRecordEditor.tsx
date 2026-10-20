@@ -19,6 +19,7 @@ import {
   type WristbandStatus,
 } from "@/lib/api";
 import { extractIdFromCode } from "@/lib/utils";
+import { VISITOR_AGE_GROUPS, type VisitorAgeGroup } from "@fesflow/config/visitor-profile";
 
 type EditorDraft = {
   profile: {
@@ -26,8 +27,7 @@ type EditorDraft = {
     status: VisitorAccountStatus;
     nickname: string;
     favoriteDate: string;
-    birthdayMonthDay: string;
-    age: number | "";
+    ageGroup: VisitorAgeGroup | "";
     allergies: VisitorAdminEditorUpdate["profile"]["allergies"];
     onboardedAt: string;
   };
@@ -37,8 +37,7 @@ type EditorDraft = {
     isNew: boolean;
     status: WristbandStatus;
     nickname: string;
-    birthdayMonthDay: string;
-    age: number | "";
+    ageGroup: VisitorAgeGroup | "";
     onboardedAt: string;
     assignedAt: string;
     deactivatedAt: string;
@@ -106,8 +105,7 @@ function toDraft(data: VisitorAdminEditorData): EditorDraft {
       status: data.user.status,
       nickname: data.user.nickname ?? "",
       favoriteDate: data.user.favoriteDate ?? "",
-      birthdayMonthDay: data.user.birthdayMonthDay ?? "",
-      age: data.user.age ?? "",
+      ageGroup: data.user.ageGroup ?? "",
       allergies: parseAllergies(data.user.allergies),
       onboardedAt: toLocalDateTime(data.user.onboardedAt),
     },
@@ -117,8 +115,7 @@ function toDraft(data: VisitorAdminEditorData): EditorDraft {
       isNew: false,
       status: band.status,
       nickname: band.nickname ?? "",
-      birthdayMonthDay: band.birthdayMonthDay ?? "",
-      age: band.age ?? "",
+      ageGroup: band.ageGroup ?? "",
       onboardedAt: toLocalDateTime(band.onboardedAt),
       assignedAt: toLocalDateTime(band.assignedAt),
       deactivatedAt: toLocalDateTime(band.deactivatedAt),
@@ -184,8 +181,7 @@ export function VisitorRecordEditor({
         status: draft.profile.status,
         nickname: draft.profile.nickname.trim() || null,
         favoriteDate: draft.profile.favoriteDate.trim() || null,
-        birthdayMonthDay: draft.profile.birthdayMonthDay.trim() || null,
-        age: draft.profile.age === "" ? null : Number(draft.profile.age),
+        ageGroup: draft.profile.ageGroup || null,
         allergies: draft.profile.allergies,
         onboardedAt: fromLocalDateTime(draft.profile.onboardedAt),
       },
@@ -194,8 +190,7 @@ export function VisitorRecordEditor({
         isNew: band.isNew,
         status: band.status,
         nickname: band.nickname.trim() || null,
-        birthdayMonthDay: band.birthdayMonthDay.trim() || null,
-        age: band.age === "" ? null : Number(band.age),
+        ageGroup: band.ageGroup || null,
         onboardedAt: fromLocalDateTime(band.onboardedAt),
         assignedAt: fromLocalDateTime(band.assignedAt)!,
         deactivatedAt: fromLocalDateTime(band.deactivatedAt),
@@ -291,8 +286,7 @@ export function VisitorRecordEditor({
         isNew: true,
         status: "active",
         nickname: "",
-        birthdayMonthDay: "",
-        age: "",
+        ageGroup: "",
         onboardedAt: "",
         assignedAt: toLocalDateTime(new Date()),
         deactivatedAt: "",
@@ -380,8 +374,10 @@ export function VisitorRecordEditor({
               />
               <FormField id="visitor-nickname" label="ニックネーム" value={draft.profile.nickname} onChange={(event) => editProfile({ nickname: event.target.value })} />
               <FormField id="visitor-favorite-date" label="お好きな日付" type="date" value={draft.profile.favoriteDate} onChange={(event) => editProfile({ favoriteDate: event.target.value })} />
-              <FormField id="visitor-birthday" label="誕生日（月日）" type="text" placeholder="MM-DD" maxLength={5} value={draft.profile.birthdayMonthDay} onChange={(event) => editProfile({ birthdayMonthDay: event.target.value })} />
-              <FormField id="visitor-age" label="年齢" type="number" min={0} max={120} value={draft.profile.age} onChange={(event) => editProfile({ age: event.target.value ? Number(event.target.value) : "" })} />
+              <FormSelect id="visitor-age-group" label="年代" value={draft.profile.ageGroup} onChange={(event) => editProfile({ ageGroup: event.target.value as VisitorAgeGroup | "" })}>
+                <option value="">未設定</option>
+                {VISITOR_AGE_GROUPS.map(({ value, label }) => <option key={value} value={value}>{label}</option>)}
+              </FormSelect>
               <FormSelect id="visitor-account-status" label="イベント来場者アカウントの利用状態" value={draft.profile.status} onChange={(event) => editProfile({ status: event.target.value as VisitorAccountStatus })}>
                 <option value="available">利用可能</option>
                 <option value="banned">利用禁止</option>
@@ -468,8 +464,10 @@ export function VisitorRecordEditor({
                       {(Object.keys(WRISTBAND_STATUS_LABEL) as WristbandStatus[]).map((status) => <option key={status} value={status}>{WRISTBAND_STATUS_LABEL[status]}</option>)}
                     </FormSelect>
                     <FormField id={`band-nickname-${band.draftKey}`} label="本人・家族のニックネーム" value={band.nickname} onChange={(event) => editBand(index, { nickname: event.target.value })} />
-                    <FormField id={`band-birthday-${band.draftKey}`} label="誕生日（月日）" placeholder="MM-DD" maxLength={5} value={band.birthdayMonthDay} onChange={(event) => editBand(index, { birthdayMonthDay: event.target.value })} />
-                    <FormField id={`band-age-${band.draftKey}`} label="年齢" type="number" min={0} max={120} value={band.age} onChange={(event) => editBand(index, { age: event.target.value ? Number(event.target.value) : "" })} />
+                    <FormSelect id={`band-age-group-${band.draftKey}`} label="年代" value={band.ageGroup} onChange={(event) => editBand(index, { ageGroup: event.target.value as VisitorAgeGroup | "" })}>
+                      <option value="">未設定</option>
+                      {VISITOR_AGE_GROUPS.map(({ value, label }) => <option key={value} value={value}>{label}</option>)}
+                    </FormSelect>
                     <label className="block space-y-1 text-xs font-bold uppercase" htmlFor={`band-assigned-${band.draftKey}`}>
                       <span>割当日時</span>
                       <Input id={`band-assigned-${band.draftKey}`} type="datetime-local" className={formControlClassName} value={band.assignedAt} onChange={(event) => editBand(index, { assignedAt: event.target.value })} />

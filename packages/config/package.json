@@ -22,6 +22,9 @@
 		},
 		"./allergens": {
 			"default": "./src/allergens.ts"
+		},
+		"./visitor-profile": {
+			"default": "./src/visitor-profile.ts"
 		}
 	},
 	"dependencies": {

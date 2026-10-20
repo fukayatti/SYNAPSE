@@ -4,6 +4,7 @@ import { ArrowLeft, Camera, Pencil, Plus, UserRoundCog, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { parseJapaneseAllergens, type JapaneseAllergen } from "@fesflow/config/allergens";
+import { VISITOR_AGE_GROUPS, visitorAgeGroupLabel, type VisitorAgeGroup } from "@fesflow/config/visitor-profile";
 import { AllergenSelector } from "@/components/menu/AllergenSelector";
 import { QrScannerModal } from "@/components/pos/qr-scanner-modal";
 import { Button } from "@/components/ui/button";
@@ -20,70 +21,29 @@ type Wristband = WristbandLookupResult["familyWristbands"][number];
 function WristbandProfileFields({
   idPrefix,
   nickname,
-  month,
-  day,
-  age,
+  ageGroup,
   onNicknameChange,
-  onMonthChange,
-  onDayChange,
-  onAgeChange,
+  onAgeGroupChange,
 }: {
   idPrefix: string;
   nickname: string;
-  month: string;
-  day: string;
-  age: string;
+  ageGroup: VisitorAgeGroup | "";
   onNicknameChange: (value: string) => void;
-  onMonthChange: (value: string) => void;
-  onDayChange: (value: string) => void;
-  onAgeChange: (value: string) => void;
+  onAgeGroupChange: (value: VisitorAgeGroup | "") => void;
 }) {
-  const daysInMonth = month ? new Date(Date.UTC(2000, Number(month), 0)).getUTCDate() : 0;
-
   return (
     <div className="space-y-3">
       <div className="space-y-1">
         <label htmlFor={`${idPrefix}-nickname`} className="text-xs font-bold">ニックネーム</label>
         <Input id={`${idPrefix}-nickname`} value={nickname} onChange={(event) => onNicknameChange(event.target.value)} maxLength={30} autoComplete="nickname" />
       </div>
-      <fieldset className="space-y-1">
-        <legend className="text-xs font-bold">誕生日と年齢</legend>
-        <div className="grid grid-cols-3 gap-2">
-          <select
-            id={`${idPrefix}-month`}
-            aria-label="誕生月"
-            value={month}
-            onChange={(event) => onMonthChange(event.target.value)}
-            className="h-10 min-w-0 border-thick border-border bg-input px-2 font-mono text-xs"
-          >
-            <option value="">月</option>
-            {Array.from({ length: 12 }, (_, index) => String(index + 1)).map((value) => <option key={value} value={value}>{value}月</option>)}
-          </select>
-          <select
-            id={`${idPrefix}-day`}
-            aria-label="誕生日"
-            value={day}
-            onChange={(event) => onDayChange(event.target.value)}
-            disabled={!month}
-            className="h-10 min-w-0 border-thick border-border bg-input px-2 font-mono text-xs disabled:opacity-50"
-          >
-            <option value="">日</option>
-            {Array.from({ length: daysInMonth }, (_, index) => String(index + 1)).map((value) => <option key={value} value={value}>{value}日</option>)}
-          </select>
-          <Input
-            id={`${idPrefix}-age`}
-            aria-label="年齢"
-            type="number"
-            inputMode="numeric"
-            min={0}
-            max={120}
-            step={1}
-            value={age}
-            onChange={(event) => onAgeChange(event.target.value)}
-            placeholder="年齢"
-          />
-        </div>
-      </fieldset>
+      <div className="space-y-1">
+        <label htmlFor={`${idPrefix}-age-group`} className="text-xs font-bold">年代</label>
+        <select id={`${idPrefix}-age-group`} value={ageGroup} onChange={(event) => onAgeGroupChange(event.target.value as VisitorAgeGroup | "")} className="h-10 w-full border-thick border-border bg-input px-2 font-mono text-xs">
+          <option value="">年代を選択</option>
+          {VISITOR_AGE_GROUPS.map(({ value, label }) => <option key={value} value={value}>{label}</option>)}
+        </select>
+      </div>
     </div>
   );
 }
@@ -103,14 +63,10 @@ export default function VisitorAccountPage() {
   const [isScannerOpen, setIsScannerOpen] = useState(false);
   const [bandCode, setBandCode] = useState("");
   const [bandNickname, setBandNickname] = useState("");
-  const [bandMonth, setBandMonth] = useState("");
-  const [bandDay, setBandDay] = useState("");
-  const [bandAge, setBandAge] = useState("");
+  const [bandAgeGroup, setBandAgeGroup] = useState<VisitorAgeGroup | "">("");
   const [editingBandId, setEditingBandId] = useState<string | null>(null);
   const [editNickname, setEditNickname] = useState("");
-  const [editMonth, setEditMonth] = useState("");
-  const [editDay, setEditDay] = useState("");
-  const [editAge, setEditAge] = useState("");
+  const [editAgeGroup, setEditAgeGroup] = useState<VisitorAgeGroup | "">("");
   const [allergies, setAllergies] = useState<JapaneseAllergen[] | null>(null);
   const [isAllergyEditorOpen, setIsAllergyEditorOpen] = useState(false);
 
@@ -131,16 +87,13 @@ export default function VisitorAccountPage() {
       userId: userId!,
       wristbandId: bandCode.trim(),
       nickname: bandNickname.trim(),
-      birthdayMonthDay: `${bandMonth.padStart(2, "0")}-${bandDay.padStart(2, "0")}`,
-      age: Number(bandAge),
+      ageGroup: bandAgeGroup as VisitorAgeGroup,
     }),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["userWristbandStatus", userId] });
       setBandCode("");
       setBandNickname("");
-      setBandMonth("");
-      setBandDay("");
-      setBandAge("");
+      setBandAgeGroup("");
       setIsAddingBand(false);
       setIsAllergyEditorOpen(true);
       toast.success("リストバンドを登録しました。アカウント全体のアレルギー情報も確認してください。");
@@ -153,8 +106,7 @@ export default function VisitorAccountPage() {
       userId: userId!,
       wristbandId: editingBandId!,
       nickname: editNickname.trim(),
-      birthdayMonthDay: `${editMonth.padStart(2, "0")}-${editDay.padStart(2, "0")}`,
-      age: Number(editAge),
+      ageGroup: editAgeGroup as VisitorAgeGroup,
     }),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["userWristbandStatus", userId] });
@@ -165,12 +117,9 @@ export default function VisitorAccountPage() {
   });
 
   const beginEdit = (band: Wristband) => {
-    const [month = "", day = ""] = band.birthdayMonthDay?.split("-") ?? [];
     setEditingBandId(band.id);
     setEditNickname(band.nickname ?? "");
-    setEditMonth(month ? String(Number(month)) : "");
-    setEditDay(day ? String(Number(day)) : "");
-    setEditAge(band.age == null ? "" : String(band.age));
+    setEditAgeGroup(band.ageGroup ?? "");
   };
 
   const allergyMutation = useMutation({
@@ -204,8 +153,7 @@ export default function VisitorAccountPage() {
     );
   }
 
-  const isValidBandProfile = (nickname: string, month: string, day: string, age: string) =>
-    !!nickname.trim() && !!month && !!day && age !== "" && Number.isInteger(Number(age)) && Number(age) >= 0 && Number(age) <= 120;
+  const isValidBandProfile = (nickname: string, ageGroup: string) => !!nickname.trim() && !!ageGroup;
   const savedAllergies = allergies === null ? null : allergies.length ? allergies.join("・") : "アレルゲンなし";
 
   return (
@@ -234,8 +182,7 @@ export default function VisitorAccountPage() {
         <dl className="grid gap-2 text-sm sm:grid-cols-[auto_1fr] sm:gap-x-6">
           <dt className="text-xs text-muted-foreground">ニックネーム</dt>
           <dd className="font-bold">{user?.nickname || "未設定"}</dd>
-          {user?.birthdayMonthDay && <><dt className="text-xs text-muted-foreground">誕生日</dt><dd>{user.birthdayMonthDay}</dd></>}
-          {user?.age != null && <><dt className="text-xs text-muted-foreground">年齢</dt><dd>{user.age}歳</dd></>}
+          {user?.ageGroup && <><dt className="text-xs text-muted-foreground">年代</dt><dd>{visitorAgeGroupLabel(user.ageGroup)}</dd></>}
         </dl>
       </section>
 
@@ -256,9 +203,7 @@ export default function VisitorAccountPage() {
                   <div className="min-w-0 space-y-1">
                     <p className="break-words text-sm font-bold">{band.nickname || "ニックネーム未設定"}</p>
                     <p className="text-xs text-muted-foreground">
-                      {band.age == null ? "年齢未設定" : `${band.age}歳`}
-                      <span aria-hidden="true"> · </span>
-                      誕生日 {band.birthdayMonthDay || "未設定"}
+                      {visitorAgeGroupLabel(band.ageGroup)}
                     </p>
                   </div>
                   <Button
@@ -282,17 +227,13 @@ export default function VisitorAccountPage() {
                     <WristbandProfileFields
                       idPrefix={`edit-${band.id}`}
                       nickname={editNickname}
-                      month={editMonth}
-                      day={editDay}
-                      age={editAge}
+                      ageGroup={editAgeGroup}
                       onNicknameChange={setEditNickname}
-                      onMonthChange={(value) => { setEditMonth(value); setEditDay(""); }}
-                      onDayChange={setEditDay}
-                      onAgeChange={setEditAge}
+                      onAgeGroupChange={setEditAgeGroup}
                     />
                     <div className="flex gap-2">
                       <Button type="button" variant="outline" className="flex-1" onClick={() => setEditingBandId(null)}>キャンセル</Button>
-                      <Button type="submit" className="flex-1" disabled={!isValidBandProfile(editNickname, editMonth, editDay, editAge) || editBandMutation.isPending}>
+                      <Button type="submit" className="flex-1" disabled={!isValidBandProfile(editNickname, editAgeGroup) || editBandMutation.isPending}>
                         {editBandMutation.isPending ? "保存中…" : "保存"}
                       </Button>
                     </div>
@@ -330,15 +271,11 @@ export default function VisitorAccountPage() {
             <WristbandProfileFields
               idPrefix="new-band"
               nickname={bandNickname}
-              month={bandMonth}
-              day={bandDay}
-              age={bandAge}
+              ageGroup={bandAgeGroup}
               onNicknameChange={setBandNickname}
-              onMonthChange={(value) => { setBandMonth(value); setBandDay(""); }}
-              onDayChange={setBandDay}
-              onAgeChange={setBandAge}
+              onAgeGroupChange={setBandAgeGroup}
             />
-            <Button type="submit" className="w-full" disabled={!bandCode.trim() || !isValidBandProfile(bandNickname, bandMonth, bandDay, bandAge) || addBandMutation.isPending}>
+            <Button type="submit" className="w-full" disabled={!bandCode.trim() || !isValidBandProfile(bandNickname, bandAgeGroup) || addBandMutation.isPending}>
               {addBandMutation.isPending ? "登録中…" : "このバンドを登録"}
             </Button>
           </form>

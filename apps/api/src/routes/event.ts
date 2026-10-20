@@ -23,6 +23,7 @@ import { eq, and, inArray, isNull, desc } from "drizzle-orm";
 import { ulid } from "ulidx";
 import { getAdminSession, getSession, hasPermission } from "../utils/auth";
 import type { AppEnv } from "../types";
+import { VISITOR_AGE_GROUPS } from "@fesflow/config/visitor-profile";
 
 const eventRoutes = new Hono<AppEnv>();
 
@@ -953,7 +954,7 @@ eventRoutes.get("/:id/analytics", async (c) => {
   );
   // 家族プロフィールは共有アカウント(eventUser)ではなく、有効な各バンドに保存される。
   const activeWristbands = await db
-    .select({ userId: wristband.userId, age: wristband.age })
+    .select({ userId: wristband.userId, ageGroup: wristband.ageGroup })
     .from(wristband)
     .innerJoin(eventUser, eq(wristband.userId, eventUser.id))
     .where(and(
@@ -1043,7 +1044,7 @@ eventRoutes.get("/:id/analytics", async (c) => {
     .sort((a, b) => b.quantity - a.quantity)
     .slice(0, 20);
 
-  // 2026-10-16: 生年を保存しないため申告年齢はリストバンドごとに集計する。
+  // 2026-10-20: 申告年代はリストバンドごとに集計し、来場者属性の分析に使う。
   // 注文・回遊は共有アカウント単位なので年代別へ配賦せず、注文集計は別軸にする。
   const wristbandsByAccount = new Map<string, typeof activeWristbands>();
   for (const band of activeWristbands) {
@@ -1053,15 +1054,15 @@ eventRoutes.get("/:id/analytics", async (c) => {
   }
   const ageProfiles = registeredVisitors.flatMap((visitor) => {
     const accountBands = wristbandsByAccount.get(visitor.id) ?? [];
-    // バンド記録がない従来/スマホ利用者はアカウントに残る申告年齢を1件として扱う。
-    return accountBands.length > 0 ? accountBands : [{ userId: visitor.id, age: visitor.age }];
+    return accountBands.length > 0 ? accountBands : [{ userId: visitor.id, ageGroup: visitor.ageGroup }];
   });
   const ageBucketsMap = new Map<string, number>();
-  const ageOrder = ["〜9歳", "10代", "20代", "30代", "40代", "50代〜"];
+  const ageOrder = VISITOR_AGE_GROUPS.map(({ label }) => label);
   for (const profile of ageProfiles) {
-    const age = profile.age;
-    if (age == null || !Number.isInteger(age) || age < 0 || age > 120) continue;
-    const label = age < 10 ? "〜9歳" : age < 20 ? "10代" : age < 30 ? "20代" : age < 40 ? "30代" : age < 50 ? "40代" : "50代〜";
+    const ageGroup = profile.ageGroup;
+    if (!ageGroup) continue;
+    const label = VISITOR_AGE_GROUPS.find((group) => group.value === ageGroup)?.label;
+    if (!label) continue;
     ageBucketsMap.set(label, (ageBucketsMap.get(label) || 0) + 1);
   }
   const ageBuckets = ageOrder
