@@ -103,7 +103,9 @@ export default function MyPage() {
   const status = query.data;
   const activeWristband = status?.familyWristbands.find((band) => band.id === session?.wristbandId) ?? status?.wristband;
   const qrBandId = activeWristband?.id;
-  const checkinUrl = qrBandId && origin ? `${origin}/w/${qrBandId}` : null;
+  // 2026-10-20: メニュー下見で未登録バンドがあってもQRを出さないよう、サーバーの入場登録完了を必須にする。
+  const hasCompletedAdmission = !!status?.user.onboardedAt;
+  const checkinUrl = hasCompletedAdmission && qrBandId && origin ? `${origin}/w/${qrBandId}` : null;
   const mustPresentPhysicalWristband = Boolean(
     eventSettingsQuery.data?.hasPhysicalWristband && !eventSettingsQuery.data.allowSelfIssue
   );
@@ -139,8 +141,14 @@ export default function MyPage() {
         <section className="flex items-start gap-3 border-thick border-border bg-muted p-4" aria-labelledby="visitor-qr-title">
           <QrCode className="mt-0.5 h-5 w-5 shrink-0" aria-hidden="true" />
           <div className="space-y-1">
-            <h2 id="visitor-qr-title" className="text-sm font-bold">提示できるリストバンドがありません</h2>
-            <p className="text-xs leading-relaxed text-muted-foreground">受付で登録済みのリストバンドを確認してください。</p>
+            <h2 id="visitor-qr-title" className="text-sm font-bold">
+              {hasCompletedAdmission ? "提示できるリストバンドがありません" : "入場登録が必要です"}
+            </h2>
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              {hasCompletedAdmission
+                ? "受付で登録済みのリストバンドを確認してください。"
+                : "入場登録が完了すると、来場用QRを確認できます。"}
+            </p>
           </div>
         </section>
       )}
