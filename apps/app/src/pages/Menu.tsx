@@ -3,7 +3,7 @@ import { useEffect, useRef, useState, Suspense } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { ModSandbox } from "@/components/ModSandbox";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { eventApi, circleApi, menuApi, preOrderApi, orderApi, wristbandApi, type CreatePreOrderInput, type MenuWithToppings, type Topping } from "@/lib/api";
+import { eventApi, circleApi, menuApi, preOrderApi, orderApi, wristbandApi, reviewApi, type CreatePreOrderInput, type MenuWithToppings, type Topping, type PublicStoreReviewList } from "@/lib/api";
 import { useVisitor } from "@/hooks/useVisitor";
 import { getCouponsForCircle, type StoredCoupon } from "@/lib/coupon-storage";
 import { cn } from "@/lib/utils";
@@ -24,7 +24,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { toast } from "sonner";
 import { EventTheme } from "@/components/EventTheme";
 import { ApiError } from "@/lib/api-error";
-import { ShoppingCart, Plus, Minus, CheckCircle, UtensilsCrossed, Ticket, X, QrCode } from "lucide-react";
+import { ShoppingCart, Plus, Minus, CheckCircle, UtensilsCrossed, Ticket, X, QrCode, Star, MessageSquareText } from "lucide-react";
 import { resolveAssetUrl } from "@/lib/asset-url";
 import { isEventEnded } from "@/lib/event-lifecycle";
 import { QRCodeSVG } from "qrcode.react";
@@ -271,6 +271,7 @@ function MenuPageContent() {
   const [selectedMenuCategory, setSelectedMenuCategory] = useState<string | null>(null);
   const [hydratedDraftKey, setHydratedDraftKey] = useState<string | null>(null);
   const [isQrOpen, setIsQrOpen] = useState(false);
+  const [isReviewsOpen, setIsReviewsOpen] = useState(false);
   const [appOrigin, setAppOrigin] = useState("");
   const [draftSaveRetry, setDraftSaveRetry] = useState(0);
   const [draftRetryWaitElapsed, setDraftRetryWaitElapsed] = useState(true);
@@ -344,6 +345,20 @@ function MenuPageContent() {
     queryFn: () => circleApi.get(selectedCircleId!),
     enabled: !!selectedCircleId,
     networkMode: "always",
+  });
+
+  const { data: publicReviewSummaries } = useQuery({
+    queryKey: ["public-review-summaries", circleData?.eventId],
+    queryFn: () => reviewApi.publicStores(circleData!.eventId),
+    enabled: !!circleData?.eventId,
+    staleTime: 30_000,
+  });
+  const publicReviewSummary = publicReviewSummaries?.find((summary) => summary.circleId === selectedCircleId);
+  const publicReviewsQuery = useQuery<PublicStoreReviewList>({
+    queryKey: ["public-store-reviews", circleData?.eventId, selectedCircleId],
+    queryFn: () => reviewApi.publicStoreReviews(circleData!.eventId, selectedCircleId!),
+    enabled: isReviewsOpen && !!circleData?.eventId && !!selectedCircleId && !!publicReviewSummary,
+    staleTime: 15_000,
   });
 
   // 選択したサークルのメニュー取得
@@ -986,6 +1001,19 @@ function MenuPageContent() {
         </div>
       )}
 
+      {circleData && publicReviewSummary && (
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => setIsReviewsOpen(true)}
+          aria-haspopup="dialog"
+          className="min-h-12 w-full border-thick border-border bg-background px-4 font-mono text-sm font-black hover:bg-primary hover:text-primary-foreground sm:w-auto"
+        >
+          <MessageSquareText className="mr-2 h-4 w-4" aria-hidden="true" />
+          レビューを見る
+        </Button>
+      )}
+
       {eventEnded && (
         <section className="border-heavy border-error bg-error/10 p-4" role="status" aria-live="polite">
           <p className="text-sm font-black text-error">開催終了・注文受付終了</p>
@@ -1282,6 +1310,76 @@ function MenuPageContent() {
             </Button>
           )}
         </div>
+      </Modal>
+
+      {/* 2026-10-21: 店舗が公開を選んだ項目だけを表示し、匿名レビューに来場者IDを含めない。 */}
+      <Modal
+        isOpen={isReviewsOpen && !!publicReviewSummary}
+        onClose={() => setIsReviewsOpen(false)}
+        title={`[${circleData?.name ?? "店舗"}のレビュー]`}
+        subtitle="来場者から寄せられたレビューです"
+        maxWidth="lg"
+      >
+        {publicReviewsQuery.isLoading ? (
+          <div className="space-y-3" role="status" aria-busy="true">
+            <Skeleton className="h-16 w-full" />
+            <Skeleton className="h-24 w-full" />
+            <span className="sr-only">レビューを読み込んでいます</span>
+          </div>
+        ) : publicReviewsQuery.isError ? (
+          <ErrorState
+            error={publicReviewsQuery.error}
+            title="レビューを読み込めませんでした"
+            onRetry={() => void publicReviewsQuery.refetch()}
+          />
+        ) : publicReviewsQuery.data && publicReviewSummary ? (
+          <div className="space-y-4">
+            {publicReviewSummary.showAverageRating && (
+              <div className="flex flex-wrap items-center gap-2 border-thick border-border bg-muted/30 p-3">
+                <span className="text-2xl font-black tabular-nums">
+                  {publicReviewSummary.averageRating == null ? "—" : publicReviewSummary.averageRating.toFixed(1)}
+                </span>
+                <span className="inline-flex items-center" role="img" aria-label={`${publicReviewSummary.averageRating?.toFixed(1) ?? "評価なし"} / 5`}>
+                  {Array.from({ length: 5 }, (_, index) => (
+                    <Star key={index} aria-hidden="true" className={`h-4 w-4 ${publicReviewSummary.averageRating != null && index < Math.round(publicReviewSummary.averageRating) ? "fill-primary text-primary" : "text-muted-foreground"}`} />
+                  ))}
+                </span>
+                <span className="text-xs text-muted-foreground">{publicReviewSummary.reviewCount}件の評価</span>
+              </div>
+            )}
+
+            {!publicReviewsQuery.data.showStars && !publicReviewsQuery.data.showComments ? (
+              <div className="border-thick border-border bg-muted/30 p-4 text-sm leading-relaxed">
+                この店舗はレビューを公開していますが、星と文章は表示しない設定です。
+              </div>
+            ) : publicReviewsQuery.data.reviews.length === 0 ? (
+              <EmptyState icon={MessageSquareText} message="公開中のレビューはまだありません" />
+            ) : (
+              <div className="space-y-2" role="list" aria-label="公開中のレビュー">
+                {publicReviewsQuery.data.reviews.map((review, index) => (
+                  <article key={`${review.createdAt}-${index}`} role="listitem" className="min-w-0 border-thick border-border p-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      {publicReviewsQuery.data!.showStars && review.rating != null ? (
+                        <span className="inline-flex items-center gap-1" role="img" aria-label={`${review.rating}つ星`}>
+                          {Array.from({ length: 5 }, (_, starIndex) => (
+                            <Star key={starIndex} aria-hidden="true" className={`h-4 w-4 ${starIndex < review.rating! ? "fill-primary text-primary" : "text-muted-foreground"}`} />
+                          ))}
+                          <span className="ml-1 text-xs font-bold tabular-nums">{review.rating}.0</span>
+                        </span>
+                      ) : <span className="text-xs font-bold text-muted-foreground">レビュー</span>}
+                      <time className="text-[10px] text-muted-foreground">
+                        {new Date(review.createdAt).toLocaleDateString("ja-JP")}
+                      </time>
+                    </div>
+                    {publicReviewsQuery.data!.showComments && review.comment?.trim() && (
+                      <p className="mt-2 break-words whitespace-pre-wrap text-sm leading-relaxed">{review.comment}</p>
+                    )}
+                  </article>
+                ))}
+              </div>
+            )}
+          </div>
+        ) : null}
       </Modal>
 
       {/* 2026-10-08: 登録済みバンドがない場合は userId を代用したQRを生成しない。 */}

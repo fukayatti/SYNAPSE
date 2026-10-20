@@ -15,6 +15,8 @@ type CreatedCircleSettings = {
   extensions: { stock: boolean; staff: boolean };
   acceptedPayments: string[];
   storeAreaId: string | null;
+  // 2026-10-21: 新規店舗のレビューは、運用設定で明示されるまで非公開にする。
+  reviewPublication: { publishReviews: boolean; showAverageRating: boolean; showStars: boolean; showComments: boolean };
 };
 
 export function CircleCreateWizard({
@@ -76,6 +78,7 @@ export function CircleCreateWizard({
       extensions: { stock: stockEnabled, staff: staffEnabled },
       acceptedPayments,
       storeAreaId: storeAreaId || null,
+      reviewPublication: { publishReviews: false, showAverageRating: false, showStars: false, showComments: false },
     };
     try {
       const result = await circleApi.create({

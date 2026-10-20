@@ -384,14 +384,24 @@ export interface VisitorReviewTarget {
 export interface VisitorReviewStoreSummary {
   circleId: string;
   circleName: string;
+  showAverageRating: boolean;
   averageRating: number | null;
   reviewCount: number;
+  /** 1つ星から5つ星の件数。星の平均を公開している店舗だけ集計する。 */
+  ratingDistribution: number[];
 }
 
 export interface VisitorPublicReview {
-  rating: number;
+  rating: number | null;
   comment: string | null;
   createdAt: string | number | Date;
+}
+
+export interface PublicStoreReviewList {
+  reviewCount: number;
+  showStars: boolean;
+  showComments: boolean;
+  reviews: VisitorPublicReview[];
 }
 
 export interface ManagedReview {
@@ -408,6 +418,9 @@ export const reviewApi = {
   mine: (code: string) => fetchApi<VisitorReviewTarget[]>(`/api/reviews/visitor/${encodeURIComponent(code)}`),
   stores: (code: string) => fetchApi<VisitorReviewStoreSummary[]>(`/api/reviews/visitor/${encodeURIComponent(code)}/stores`),
   storeReviews: (code: string, circleId: string) => fetchApi<VisitorPublicReview[]>(`/api/reviews/visitor/${encodeURIComponent(code)}/stores/${encodeURIComponent(circleId)}`),
+  // 2026-10-21: 未登録の来場者も評価を見られるようイベントIDで公開一覧を取得し、API側で店舗設定を適用する。
+  publicStores: (eventId: string) => fetchApi<VisitorReviewStoreSummary[]>(`/api/reviews/public/events/${encodeURIComponent(eventId)}/stores`),
+  publicStoreReviews: (eventId: string, circleId: string) => fetchApi<PublicStoreReviewList>(`/api/reviews/public/events/${encodeURIComponent(eventId)}/stores/${encodeURIComponent(circleId)}/reviews`),
   submit: (code: string, body: { circleId: string; rating: number; comment: string }) =>
     fetchApi<{ success: boolean }>(`/api/reviews/visitor/${encodeURIComponent(code)}`, { method: "POST", body }),
   circle: (circleId: string) => fetchApi<ManagedReview[]>(`/api/reviews/circle/${encodeURIComponent(circleId)}`),
@@ -1060,6 +1073,14 @@ export function recentWaitTimeReports(raw?: string | null, limit = 8): WaitTimeR
 
 // サークル運用設定 (circle.settings JSON のシェイプ)
 export type OrderFlowMode = "pending" | "preparing" | "completed";
+// 2026-10-21: レビューは店舗の明示設定を公開境界とし、平均・星・文章を個別に制御する。
+export interface CircleReviewPublicationSettings {
+  publishReviews: boolean;
+  showAverageRating: boolean;
+  showStars: boolean;
+  showComments: boolean;
+}
+
 export interface CircleSettings {
   // 新規注文の初期状態: pending=未着手 / preparing=調理中 / completed=即完成
   orderFlowMode: OrderFlowMode;
@@ -1075,6 +1096,7 @@ export interface CircleSettings {
   acceptedPayments: string[];
   // 2026-10-16 (#126): event.storeAreas のどの位置に出店するかを参照するID。
   storeAreaId: string | null;
+  reviewPublication: CircleReviewPublicationSettings;
 }
 
 // settings JSON をパースし、未設定キーを既定値で補完する
@@ -1085,6 +1107,12 @@ export function parseCircleSettings(raw?: string | null): CircleSettings {
     extensions: { stock: false, staff: false },
     acceptedPayments: [],
     storeAreaId: null,
+    reviewPublication: {
+      publishReviews: false,
+      showAverageRating: false,
+      showStars: false,
+      showComments: false,
+    },
   };
   if (!raw) return defaults;
   try {
@@ -1104,6 +1132,13 @@ export function parseCircleSettings(raw?: string | null): CircleSettings {
         ? parsed.acceptedPayments.filter((x: unknown) => typeof x === "string")
         : [],
       storeAreaId: typeof parsed?.storeAreaId === "string" ? parsed.storeAreaId : null,
+      // 2026-10-21: 既存店舗はレビューを未公開として扱い、明示的な公開設定なしに文章や評価を配信しない。
+      reviewPublication: {
+        publishReviews: parsed?.reviewPublication?.publishReviews === true,
+        showAverageRating: parsed?.reviewPublication?.showAverageRating === true,
+        showStars: parsed?.reviewPublication?.showStars === true,
+        showComments: parsed?.reviewPublication?.showComments === true,
+      },
     };
   } catch {
     return defaults;

@@ -1,13 +1,13 @@
 import { useMemo } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { eventApi, circleApi, activeWaitTimeReport, parseCircleSettings, parseStoreAreas } from "@/lib/api";
+import { eventApi, circleApi, reviewApi, activeWaitTimeReport, parseCircleSettings, parseStoreAreas, type VisitorReviewStoreSummary } from "@/lib/api";
 import { useVisitor } from "@/hooks/useVisitor";
 import { EventTheme } from "@/components/EventTheme";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState } from "@/components/ui/ErrorState";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { Store, ArrowRight, QrCode, Calendar, ChevronRight, ShoppingCart } from "lucide-react";
+import { Store, ArrowRight, QrCode, Calendar, ChevronRight, ShoppingCart, Star } from "lucide-react";
 import { resolveAssetUrl } from "@/lib/asset-url";
 import { findVisitorRouteItem } from "@/lib/visitor-route";
 import { groupCirclesByStoreArea } from "@/lib/store-areas";
@@ -119,6 +119,16 @@ function EventMenuContent({
     // 2026-10-07 (#9): 表示したまま30分経過した報告も未報告へ更新する。
     refetchInterval: 60_000,
   });
+
+  const { data: publicReviewSummaries } = useQuery({
+    queryKey: ["public-review-summaries", eventId],
+    queryFn: () => reviewApi.publicStores(eventId),
+    staleTime: 30_000,
+  });
+  const reviewSummaryByCircle = useMemo(
+    () => new Map((publicReviewSummaries ?? []).map((summary) => [summary.circleId, summary])),
+    [publicReviewSummaries],
+  );
 
   const theme = useMemo(() => event ?? null, [event]);
   const storeAreas = useMemo(() => parseStoreAreas(event?.storeAreas), [event?.storeAreas]);
@@ -268,6 +278,9 @@ function EventMenuContent({
                     const report = activeWaitTimeReport(circle.settings);
                     return <div className="mt-1 break-words text-[9px] font-bold sm:text-[10px]">待ち時間: {report ? `約${report.minutes}分（${report.minutesAgo}分前）` : "未報告"}</div>;
                   })()}
+                  {reviewSummaryByCircle.get(circle.id)?.showAverageRating && (
+                    <PublicRatingSummary summary={reviewSummaryByCircle.get(circle.id)!} />
+                  )}
                   <div className="mt-1 inline-flex flex-wrap items-center gap-1 text-[9px] font-black uppercase tracking-wider sm:text-[10px]">
                     メニューを見る
                     <ArrowRight className="h-3 w-3 transition-transform group-hover:translate-x-1" />
@@ -314,6 +327,55 @@ function EventMenuContent({
         )}
       </div>
     </EventTheme>
+  );
+}
+
+function PublicRatingSummary({ summary }: { summary: VisitorReviewStoreSummary }) {
+  const average = summary.averageRating;
+  const maxCount = Math.max(summary.reviewCount, 1);
+
+  return (
+    <div className="mt-2 space-y-1.5 border-t-thin border-border pt-2" role="group" aria-label={
+      average == null
+        ? `公開レビュー、${summary.reviewCount}件、評価はまだありません`
+        : `公開レビュー、平均${average.toFixed(1)}、${summary.reviewCount}件`
+    }>
+      <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5">
+        <span className="text-sm font-black tabular-nums leading-none">{average == null ? "—" : average.toFixed(1)}</span>
+        <span className="inline-flex items-center" aria-hidden="true">
+          {Array.from({ length: 5 }, (_, index) => (
+            <Star key={index} className={`h-2.5 w-2.5 ${average != null && index < Math.round(average) ? "fill-primary text-primary" : "text-muted-foreground"}`} />
+          ))}
+        </span>
+        <span className="text-[9px] text-muted-foreground">{summary.reviewCount}件</span>
+      </div>
+      {summary.reviewCount > 0 ? (
+        <div className="space-y-0.5" aria-label="星ごとの評価件数">
+          {[5, 4, 3, 2, 1].map((star) => {
+            const count = summary.ratingDistribution[star - 1] ?? 0;
+            return (
+              <div
+                key={star}
+                className="grid grid-cols-[1.5rem_minmax(0,1fr)_1rem] items-center gap-1 text-[8px] leading-none text-muted-foreground"
+                role="meter"
+                aria-label={`${star}つ星`}
+                aria-valuemin={0}
+                aria-valuemax={maxCount}
+                aria-valuenow={count}
+              >
+                <span className="inline-flex items-center gap-0.5">{star}<Star className="h-2 w-2 fill-current" aria-hidden="true" /></span>
+                <span className="h-1.5 overflow-hidden bg-muted">
+                  <span className="block h-full bg-primary" style={{ width: `${Math.min(100, (count / maxCount) * 100)}%` }} />
+                </span>
+                <span className="text-right tabular-nums">{count}</span>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <p className="text-[9px] leading-snug text-muted-foreground">レビューはまだありません</p>
+      )}
+    </div>
   );
 }
 
