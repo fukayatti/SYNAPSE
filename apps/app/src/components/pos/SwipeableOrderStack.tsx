@@ -137,6 +137,7 @@ function KitchenOrderCard({
 
   // 2026-10-17: 明示ボタンを残したままカード全体で上下操作を受け、カード内に操作案内を重ねない。
   const onGestureDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (view !== "horizontal") return;
     if (isUpdating || exitDirection || (!action && !canCancel) || !event.isPrimary || event.button !== 0) return;
     if ((event.target as HTMLElement).closest("button, a, input, select, textarea")) return;
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -144,6 +145,7 @@ function KitchenOrderCard({
     setGestureHint(null);
   };
   const onGestureMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (view !== "horizontal") return;
     const start = gestureStart.current;
     if (!start || isUpdating) return;
     const dx = event.clientX - start.x;
@@ -153,6 +155,7 @@ function KitchenOrderCard({
     setGestureHint(dy < -16 ? (action?.kind ?? null) : dy > 16 && canCancel ? "cancel" : null);
   };
   const onGestureEnd = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (view !== "horizontal") return;
     const start = gestureStart.current;
     gestureStart.current = null;
     setGestureHint(null);
@@ -168,6 +171,7 @@ function KitchenOrderCard({
   };
 
   const onGestureKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (view !== "horizontal") return;
     if (event.target !== event.currentTarget || isUpdating || exitDirection) return;
     if (event.key === "ArrowUp" && action) {
       event.preventDefault();
@@ -182,7 +186,7 @@ function KitchenOrderCard({
   // 2026-10-17: スワイプの方向説明は表示・読み上げとも省き、状態名だけを伝える。
   return (
     <Card
-      className={`relative flex h-full flex-col border-thick border-border bg-background transition-[transform,opacity,background-color] duration-300 ease-in-out motion-reduce:transition-none ${view === "horizontal" ? "snap-start" : ""} ${exitDirection === "up" ? "-translate-y-8 bg-success/30 opacity-0" : exitDirection === "down" ? "translate-y-8 bg-destructive/30 opacity-0" : ""} ${action || canCancel ? "touch-pan-x cursor-grab select-none active:cursor-grabbing" : ""}`}
+      className={`relative flex h-full flex-col border-thick border-border bg-background transition-[transform,opacity,background-color] duration-300 ease-in-out motion-reduce:transition-none ${view === "horizontal" ? "snap-start" : ""} ${exitDirection === "up" ? "-translate-y-8 bg-success/30 opacity-0" : exitDirection === "down" ? "translate-y-8 bg-destructive/30 opacity-0" : ""} ${view === "horizontal" && (action || canCancel) ? "touch-pan-x cursor-grab select-none active:cursor-grabbing" : ""}`}
       data-order-id={order.id}
       onPointerDown={onGestureDown}
       onPointerMove={onGestureMove}
@@ -192,7 +196,7 @@ function KitchenOrderCard({
         setGestureHint(null);
       }}
       onKeyDown={onGestureKeyDown}
-      tabIndex={action || canCancel ? 0 : undefined}
+      tabIndex={view === "horizontal" && (action || canCancel) ? 0 : undefined}
       role="group"
       aria-label={`注文 ${order.orderNumber}、${badge.label}`}
     >

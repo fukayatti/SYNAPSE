@@ -7,7 +7,7 @@ import { EventTheme } from "@/components/EventTheme";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState } from "@/components/ui/ErrorState";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { Store, ArrowRight, QrCode, Calendar, ChevronRight } from "lucide-react";
+import { Store, ArrowRight, QrCode, Calendar, ChevronRight, ShoppingCart } from "lucide-react";
 import { resolveAssetUrl } from "@/lib/asset-url";
 import { findVisitorRouteItem } from "@/lib/visitor-route";
 import { groupCirclesByStoreArea } from "@/lib/store-areas";
@@ -175,13 +175,19 @@ function EventMenuContent({
 
         {/* イベント取得失敗: ヘッダーは上でフォールバック表示済みだが、
             テーマ/イベント名が欠けたまま気づかず進むのを避けるため明示的にエラーを出す */}
-        {eventError && (
+        {eventError && !event && (
           <ErrorState
             error={eventErrorObj}
             title="イベント情報の取得に失敗しました"
             onRetry={() => refetchEvent()}
             className="mb-6"
           />
+        )}
+        {eventError && event && (
+          <div role="status" className="mb-6 flex flex-wrap items-center justify-between gap-2 border-thick border-warning bg-warning/10 p-3 text-xs font-bold">
+            <span>通信に失敗しました。前回取得したイベント情報を表示しています。</span>
+            <button type="button" onClick={() => void refetchEvent()} className="min-h-10 border-thick border-border px-3 underline">再接続して更新</button>
+          </div>
         )}
 
         {/* 未入場バナー: 閲覧は自由・利用は発行必須 */}
@@ -211,7 +217,7 @@ function EventMenuContent({
               <Skeleton key={i} className="h-24" />
             ))}
           </div>
-        ) : circlesError ? (
+        ) : circlesError && !circles ? (
           <ErrorState error={circlesErrorObj} onRetry={() => refetchCircles()} />
         ) : uniqueCircles && uniqueCircles.length > 0 ? (
           <div className="space-y-5">
@@ -224,12 +230,15 @@ function EventMenuContent({
                 {/* 2026-10-16: 画面を有効に使うため、スマートフォンでも店舗を2列で一覧できるようにする。 */}
                 <div className="grid grid-cols-2 gap-2 sm:gap-3">
                   {group.circles.map((circle) => (
-              <button
+              <article
                 key={circle.id}
-                type="button"
-                onClick={() => onBrowseCircle(circle.id)}
-                className="group flex min-w-0 w-full cursor-pointer items-center gap-2 border-thick border-border bg-background p-2 text-left transition-colors hover:bg-muted sm:gap-3 sm:p-3"
+                className="flex min-w-0 flex-col gap-2 border-thick border-border bg-background p-2 sm:p-3"
               >
+                <button
+                  type="button"
+                  onClick={() => onBrowseCircle(circle.id)}
+                  className="group flex min-h-16 min-w-0 w-full cursor-pointer items-center gap-2 text-left transition-colors hover:bg-muted sm:gap-3"
+                >
                 {circle.iconImagePath ? (
                   <img
                     src={resolveAssetUrl(circle.iconImagePath)}
@@ -264,7 +273,17 @@ function EventMenuContent({
                     <ArrowRight className="h-3 w-3 transition-transform group-hover:translate-x-1" />
                   </div>
                 </div>
-              </button>
+                </button>
+                {parseCircleSettings(circle.settings).mobileOrderEnabled && (
+                  <Link
+                    to={`/visitor/order/${circle.id}`}
+                    className="inline-flex min-h-11 items-center justify-center gap-2 border-thick border-primary bg-primary px-2 text-center text-[10px] font-black text-primary-foreground hover:bg-background hover:text-foreground sm:text-xs"
+                  >
+                    <ShoppingCart className="h-4 w-4" aria-hidden="true" />
+                    モバイル注文
+                  </Link>
+                )}
+              </article>
                   ))}
                 </div>
               </section>
@@ -272,6 +291,13 @@ function EventMenuContent({
           </div>
         ) : (
           <EmptyState icon={Store} message="このイベントにはまだ出店が登録されていません" />
+        )}
+
+        {circlesError && circles && (
+          <div role="status" className="mt-3 flex flex-wrap items-center justify-between gap-2 border-thick border-warning bg-warning/10 p-3 text-xs font-bold">
+            <span>通信に失敗しました。前回取得した出店一覧を表示しています。</span>
+            <button type="button" onClick={() => void refetchCircles()} className="min-h-10 border-thick border-border px-3 underline">再接続して更新</button>
+          </div>
         )}
 
         {/* 2026-10-20: 下見中の未登録者へマイQR導線を出さず、入場登録完了後にだけ表示する。 */}

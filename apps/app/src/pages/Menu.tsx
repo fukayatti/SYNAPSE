@@ -30,6 +30,7 @@ import { QRCodeSVG } from "qrcode.react";
 // 2026-10-03: 画面をまたぐカート規則と再送制御を機能モジュールに集約する。
 import { addCartLine, updateCartQuantity, toggleCartTopping, lineSubtotal, cartTotal, cartCount, type CartLine, type CartTopping } from "@/features/orders/cart";
 import { useOrderSubmission } from "@/features/orders/use-order-submission";
+import { submitMobileOrder } from "@/features/orders/mobile-order-outbox";
 import { getPreOrderSaveRetryAfterMs, getPreOrderSaveRetryDelay, isRetryablePreOrderSaveError, shouldRetryPreOrderSave } from "@/features/orders/pre-order-save";
 import type { CreateOrderInput } from "@fesflow/config/order-contract";
 import { ToppingSelection, parseToppingCategoryMaximums, parseToppingCategoryMinimums } from "@/components/menu/ToppingSelection";
@@ -239,10 +240,11 @@ function VisitorMenuCard({
 }
 
 function MenuPageContent() {
-  const { eventName: eventNameParam, circleName: circleNameParam } = useParams();
+  const { eventName: eventNameParam, circleName: circleNameParam, circleId: routeCircleId } = useParams();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const circleIdParam = searchParams.get("circleId");
+  const circleIdParam = searchParams.get("circleId") || routeCircleId || null;
+  const isMobileOrderRoute = !!routeCircleId;
   // 未入場 (リストバンド未発行) は空文字。閲覧は許可し注文送信側でゲートする
   const { userId: visitorUserId, session, isLoaded: visitorLoaded } = useVisitor();
   const userId = visitorUserId ?? "";
@@ -300,6 +302,7 @@ function MenuPageContent() {
   const { data: events, isLoading: eventsLoading } = useQuery({
     queryKey: ["events"],
     queryFn: () => eventApi.list(),
+    networkMode: "always",
   });
 
   // 2026-10-08: App.tsx に登録済みの名称URLは、イベント一覧を読み込んでから選択状態へ解決する。
@@ -314,6 +317,7 @@ function MenuPageContent() {
     queryKey: ["circles", selectedEventId],
     queryFn: () => circleApi.list(selectedEventId!),
     enabled: !!selectedEventId,
+    networkMode: "always",
   });
 
   useEffect(() => {
@@ -333,6 +337,7 @@ function MenuPageContent() {
     queryKey: ["circle", selectedCircleId],
     queryFn: () => circleApi.get(selectedCircleId!),
     enabled: !!selectedCircleId,
+    networkMode: "always",
   });
 
   // 選択したサークルのメニュー取得
@@ -347,13 +352,17 @@ function MenuPageContent() {
     queryFn: () => menuApi.list(selectedCircleId!),
     // 登録済み来場者は、サークルの所属イベント確認後に自分のイベントのメニューだけ取得する。
     enabled: visitorLoaded && !!selectedCircleId && (!session?.userId || !session.eventId || circleData?.eventId === session.eventId),
+    networkMode: "always",
   });
 
   const draftKey = userId && selectedCircleId ? `${userId}:${selectedCircleId}` : null;
+  const mobileCartStorageKey = userId && selectedCircleId
+    ? `fesflow-mobile-cart:${userId}:${selectedCircleId}`
+    : null;
   const { data: savedDrafts, isSuccess: draftsLoaded } = useQuery({
     queryKey: ["preOrderDraft", userId, selectedCircleId],
     queryFn: () => preOrderApi.getByCode(userId, selectedCircleId!),
-    enabled: visitorLoaded && !!userId && !!selectedCircleId,
+    enabled: visitorLoaded && !!userId && !!selectedCircleId && !isMobileOrderRoute,
   });
 
   useEffect(() => {
@@ -368,6 +377,36 @@ function MenuPageContent() {
   }, [selectedCircleId, userId]);
 
   useEffect(() => {
+    if (isMobileOrderRoute) {
+      if (!draftKey || !mobileCartStorageKey || !menus || hydratedDraftKey === draftKey) return;
+      let storedLines: CartLine[] = [];
+      try {
+        const raw = localStorage.getItem(mobileCartStorageKey);
+        storedLines = raw ? JSON.parse(raw) as CartLine[] : [];
+      } catch {
+        storedLines = [];
+      }
+      const menuById = new Map(menus.map((item) => [item.id, item]));
+      setCart(storedLines.flatMap((line) => {
+        const menuItem = menuById.get(line.menuId);
+        if (!menuItem) return [];
+        const validToppings = new Map((menuItem.toppings ?? []).map((topping) => [topping.id, topping]));
+        return [{
+          ...line,
+          menuName: menuItem.name,
+          menuPrice: menuItem.price,
+          toppings: line.toppings.flatMap((topping) => {
+            const current = validToppings.get(topping.toppingId);
+            return current && !current.soldOut
+              ? [{ toppingId: current.id, toppingName: current.name, toppingPrice: current.price }]
+              : [];
+          }),
+        }];
+      }));
+      suppressNextDraftSaveRef.current = true;
+      setHydratedDraftKey(draftKey);
+      return;
+    }
     if (!draftKey || !draftsLoaded || !menus || hydratedDraftKey === draftKey) return;
     const draft = savedDrafts?.[0];
     // 2026-10-07 Issue #49: 以後のautosaveは初回から同じIDを使い、claim後の遅延要求を新規注文にしない。
@@ -400,7 +439,17 @@ function MenuPageContent() {
     setCart(restoredCart);
     suppressNextDraftSaveRef.current = true;
     setHydratedDraftKey(draftKey);
-  }, [draftKey, draftsLoaded, savedDrafts, menus, hydratedDraftKey, selectedCircleId]);
+  }, [isMobileOrderRoute, draftKey, mobileCartStorageKey, draftsLoaded, savedDrafts, menus, hydratedDraftKey, selectedCircleId]);
+
+  useEffect(() => {
+    if (!isMobileOrderRoute || !mobileCartStorageKey || !draftKey || hydratedDraftKey !== draftKey) return;
+    try {
+      if (cart.length > 0) localStorage.setItem(mobileCartStorageKey, JSON.stringify(cart));
+      else localStorage.removeItem(mobileCartStorageKey);
+    } catch {
+      // 2026-10-21: 端末容量不足でも注文画面を止めず、送信待ち保存時に明示的に失敗させる。
+    }
+  }, [isMobileOrderRoute, mobileCartStorageKey, draftKey, hydratedDraftKey, cart]);
 
   // サークルが属するイベントのテーマ (配色/ロゴ) を取得して画面に反映
   const {
@@ -411,6 +460,7 @@ function MenuPageContent() {
     queryKey: ["event", circleData?.eventId],
     queryFn: () => eventApi.get(circleData!.eventId),
     enabled: !!circleData?.eventId,
+    networkMode: "always",
   });
   // 2026-10-20: 来場案内と同じイベント設定を使い、物理バンド必須のイベントではスマホQRを出さない。
   const mustPresentPhysicalWristband = Boolean(
@@ -497,37 +547,66 @@ function MenuPageContent() {
 
   const orderInput: CreateOrderInput | null = selectedCircleId && userId && cart.length > 0 ? {
     circleId: selectedCircleId, userId, peopleCount: 1,
+    ...(isMobileOrderRoute ? { expectedTotalPrice: cartTotal(cart) } : {}),
     items: cart.map((line) => ({ menuId: line.menuId, quantity: line.quantity, toppingIds: line.toppings.map((t) => t.toppingId) })),
   } : null;
-  const submitOrder = useOrderSubmission(orderInput, orderApi.createMobile);
-  // 代引オーダー（本注文）も同じカートの再送では Idempotency-Key を維持する (2026-10-03)。
+  const circleNameForSubmission = useRef(circleData?.name || "サークル");
+  circleNameForSubmission.current = circleData?.name || "サークル";
+  const mobileOrderDisplayItems = useRef(cart.map((line) => ({
+    menuName: line.menuName,
+    quantity: line.quantity,
+    unitPrice: line.menuPrice + line.toppings.reduce((sum, topping) => sum + topping.toppingPrice, 0),
+    toppings: line.toppings.map((topping) => topping.toppingName),
+  })));
+  mobileOrderDisplayItems.current = cart.map((line) => ({
+    menuName: line.menuName,
+    quantity: line.quantity,
+    unitPrice: line.menuPrice + line.toppings.reduce((sum, topping) => sum + topping.toppingPrice, 0),
+    toppings: line.toppings.map((topping) => topping.toppingName),
+  }));
+  const submitOrder = useOrderSubmission(orderInput, (input, key) =>
+    submitMobileOrder(input, circleNameForSubmission.current, mobileOrderDisplayItems.current, key),
+  );
+  const clearSavedMobileCart = () => {
+    try {
+      if (mobileCartStorageKey) localStorage.removeItem(mobileCartStorageKey);
+    } catch {
+      // 2026-10-21: 注文の受付処理を端末キャッシュの削除失敗で覆い隠さない。
+    }
+  };
+  // モバイル注文は送信前に冪等キーと内容を端末へ保存し、通信断後も同じ注文として再送する。
   const codOrderMutation = useMutation({
+    networkMode: "always",
     mutationFn: async () => {
       if (!orderInput) throw new Error("注文にはリストバンドとカート内の商品が必要です");
       return submitOrder(orderInput);
     },
     onSuccess: (orderData) => {
       if (!orderData) return;
-      try {
-        const stored = localStorage.getItem("fesorder_direct_orders");
-        const directOrders = stored ? JSON.parse(stored) : [];
-        directOrders.push({
-          orderId: orderData.id,
-          orderNumber: orderData.orderNumber,
-          circleId: selectedCircleId,
-          circleName: circleData?.name || "サークル",
-          totalPrice: getTotalPrice(),
-          createdAt: new Date().toISOString()
-        });
-        localStorage.setItem("fesorder_direct_orders", JSON.stringify(directOrders));
-      } catch (e) {}
-
+      clearSavedMobileCart();
       toast.success(`注文を受け付けました！呼出番号: ${orderData.orderNumber}`);
       setCart([]);
-      // 注文直後は注文履歴に遷移し、店頭注文の状態(呼出番号・受取状況)を確認できるようにする (2026-07-11)
-      navigate("/visitor/orders");
+      // 2026-10-21: 注文履歴で今回の注文を注文票として強調し、番号・内容・金額を店頭で伝えられるようにする。
+      navigate("/visitor/orders", {
+        state: isMobileOrderRoute ? {
+          mobileOrderReceipt: {
+            orderId: orderData.id,
+            orderNumber: orderData.orderNumber,
+            circleName: circleNameForSubmission.current,
+            totalPrice: cartTotal(cart),
+            items: mobileOrderDisplayItems.current,
+          },
+        } : undefined,
+      });
     },
     onError: (error: any) => {
+      if (error instanceof ApiError && (error.code === "NETWORK" || error.status === 429 || error.status >= 500)) {
+        clearSavedMobileCart();
+        toast.message("受付状態を確認中です。通信が戻ると同じ注文キーで受付結果を確認します。");
+        setCart([]);
+        navigate("/visitor/orders");
+        return;
+      }
       toast.error(error.message || "注文の送信に失敗しました");
     },
   });
@@ -544,7 +623,7 @@ function MenuPageContent() {
   // このメニューに関係するクーポン (2026-10-16)。cart_percentage は商品小計全体が対象。
   // menu_discount はこのメニューが対象、free_topping は紐づくトッピングが対象。
   const relevantCouponsForMenu = (menu: MenuWithToppings) =>
-    appliedCoupons.filter((c) =>
+    (isMobileOrderRoute ? [] : appliedCoupons).filter((c) =>
       c.kind === "cart_percentage"
         ? true
         : c.kind === "menu_discount"
@@ -661,7 +740,7 @@ function MenuPageContent() {
   };
   // 実際に効くクーポン = 明示的にONにしていて、かつ対象商品がカートにある (割引>0) もの。
   const couponApplications: { coupon: StoredCoupon; discount: number }[] = [];
-  if (!isPreOrderEnabled()) {
+  if (!isMobileOrderRoute && !isPreOrderEnabled()) {
     for (const c of appliedCoupons) {
       if (!enabledCouponSlugs.has(c.slug)) continue;
       const remaining = Math.max(0, getTotalPrice() - couponApplications.reduce((sum, item) => sum + item.discount, 0));
@@ -684,7 +763,7 @@ function MenuPageContent() {
 
   useEffect(() => {
     if (
-      !draftKey || hydratedDraftKey !== draftKey || !userId || !visitorLoaded ||
+      isMobileOrderRoute || !draftKey || hydratedDraftKey !== draftKey || !userId || !visitorLoaded ||
       couponsLoadedCircleId !== selectedCircleId || isPreOrderEnabled()
     ) return;
 
@@ -703,7 +782,7 @@ function MenuPageContent() {
     return () => window.clearTimeout(timeout);
   }, [
     draftKey, hydratedDraftKey, userId, visitorLoaded, couponsLoadedCircleId,
-    selectedCircleId, draftPayload, saveDraft, draftSaveRetry,
+    selectedCircleId, draftPayload, saveDraft, draftSaveRetry, isMobileOrderRoute,
   ]);
 
   // 外部モッド用グローバルAPIの公開
@@ -789,7 +868,7 @@ function MenuPageContent() {
 
   // サークル情報 or メニュー取得失敗: どちらも欠けると画面が成立しないため
   // 一つの ErrorState にまとめて表示し、両方をまとめて再試行する
-  if (circleError || menusError) {
+  if ((circleError && !circleData) || (menusError && !menus)) {
     return (
       <div className="max-w-6xl mx-auto p-sp-4">
         <ErrorState
@@ -800,6 +879,17 @@ function MenuPageContent() {
             refetchMenus();
           }}
         />
+      </div>
+    );
+  }
+
+  // 2026-10-21: モバイル注文の可否は現行のサークル設定で判定し、旧COD拡張の有効化を必須にしない。
+  if (isMobileOrderRoute && circleData && !isMobileOrderEnabled()) {
+    return (
+      <div className="mx-auto max-w-xl p-6 font-mono" role="alert">
+        <h1 className="text-xl font-black">モバイル注文は利用できません</h1>
+        <p className="my-4">このサークルは現在、モバイル注文を受け付けていません。</p>
+        <Button onClick={() => navigate("/visitor/events")}>出店一覧へ戻る</Button>
       </div>
     );
   }
@@ -850,6 +940,12 @@ function MenuPageContent() {
     {/* 2026-09-27: スマートフォンでは固定カートバーがカード末尾の「カートに追加」を
         隠すため、バーの最大高さぶんスクロール余白を確保する。 */}
     <div className="max-w-6xl mx-auto p-sp-3 sm:p-sp-4 space-y-sp-4 sm:space-y-sp-5 pb-56 sm:pb-36">
+      {(circleError || menusError) && (
+        <div role="status" className="flex flex-wrap items-center justify-between gap-2 border-thick border-warning bg-warning/10 p-3 text-xs font-bold">
+          <span>通信に失敗しました。前回取得したメニューを表示しています。</span>
+          <Button type="button" variant="outline" onClick={() => { void refetchCircle(); void refetchMenus(); }} className="min-h-10 border-thick border-border">再接続して更新</Button>
+        </div>
+      )}
       {/* 戻るボタン */}
       <button
         onClick={() => {
@@ -905,7 +1001,7 @@ function MenuPageContent() {
           すぐ下に関係するクーポンを出す (2026-09-16、モーダル案は撤回してカード内に戻した)。 */}
       <div>
         <h2 className="text-[24px] sm:text-[32px] font-headline uppercase tracking-tight mb-sp-3 leading-[1.1]">
-          メニューを選択して事前注文
+            {isMobileOrderRoute ? "モバイル注文" : "メニューを選択して事前注文"}
         </h2>
         {menus && menus.length > 0 ? (
           <>
@@ -1010,7 +1106,7 @@ function MenuPageContent() {
                   onClick={() => setIsCartOpen(true)}
                   className="w-full sm:flex-1 h-12 border-thick border-border bg-background px-3 font-mono text-sm font-black uppercase text-foreground rounded-none hover:bg-primary hover:text-primary-foreground"
                 >
-                  <ShoppingCart className="mr-2 h-5 w-5 shrink-0" />注文を確認する
+                  <ShoppingCart className="mr-2 h-5 w-5 shrink-0" />{isMobileOrderRoute ? "注文内容を確認する" : "注文を確認する"}
                 </Button>
               )}
             </div>
@@ -1131,11 +1227,9 @@ function MenuPageContent() {
             <span>¥{getDiscountedTotal().toLocaleString()}</span>
           </div>
           <p className="text-[11px] text-muted-foreground leading-normal">
-            {!isMobileOrderEnabled()
-              ? "このサークルはモバイルオーダーを受け付けていません。カートを保存し、レジでお支払いください。"
-              : isPreOrderEnabled()
-              ? "※「注文を送信する」を押すと注文が送信されます。番号が呼ばれたら受取口にてお支払いください。"
-              : "カートの内容は自動保存されています。レジでマイQRコード、または連携したリストバンドを提示してお支払いください。"}
+            {isMobileOrderEnabled()
+              ? "注文はサーバーで受付が完了してから確定します。通信が切れた場合は端末に保存し、復帰後に再送します。"
+              : "このサークルはモバイルオーダーを受け付けていません。カートを保存し、レジでお支払いください。"}
           </p>
         </div>
 
@@ -1152,16 +1246,15 @@ function MenuPageContent() {
         )}
 
         <div className="flex flex-col gap-2 pt-2">
-          {isPreOrderEnabled() && isMobileOrderEnabled() ? <Button
+          {/* 2026-10-21: APIも mobileOrderEnabled だけを受付条件にするため、画面側も同じ設定へ揃える。 */}
+          {isMobileOrderRoute && isMobileOrderEnabled() ? <Button
             onClick={() => {
               if (!userId) {
                 toast.error("注文にはリストバンドが必要です。QR を読み取って入場してください。");
                 return;
               }
               setIsCartOpen(false);
-              if (isPreOrderEnabled()) {
-                codOrderMutation.mutate();
-              }
+              codOrderMutation.mutate();
             }}
             disabled={!userId || codOrderMutation.isPending}
             className="w-full h-12 border-thick border-border bg-primary text-primary-foreground text-base font-black uppercase rounded-none hover:bg-background hover:text-foreground transition-all disabled:opacity-50"
