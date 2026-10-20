@@ -726,6 +726,7 @@ export interface StampRallyOrder {
 
 export interface VisitorStampRally {
   enabled: boolean;
+  eventEnded: boolean;
   stampedCircleIds: string[];
   stampedCount: number;
   targetCircleCount: number;

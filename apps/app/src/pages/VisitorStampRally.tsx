@@ -44,6 +44,7 @@ export default function VisitorStampRallyPage() {
   });
 
   const data = query.data;
+  const eventEnded = data?.eventEnded ?? false;
   const stampedCount = data?.stampedCount ?? 0;
   const areaRequirement = data?.qualification.minQualifiedAreaCount ?? null;
   const areaRequirementActive = areaRequirement !== null;
@@ -72,11 +73,13 @@ export default function VisitorStampRallyPage() {
 
       {!query.isError && data?.enabled && data.areas.length > 0 && (
         <>
-          <section className={`border-heavy border-border p-3 space-y-2 ${data.eligible && data.remainingCount > 0 ? "bg-primary text-primary-foreground" : "bg-muted"}`} aria-live="polite">
+          <section className={`border-heavy border-border p-3 space-y-2 ${data.eligible && data.remainingCount > 0 && !eventEnded ? "bg-primary text-primary-foreground" : "bg-muted"}`} aria-live="polite">
             <div className="flex items-center justify-between gap-3">
               <div className="min-w-0">
                 <h2 className="text-sm font-black">
-                  {data.familyMemberCount === 0
+                  {eventEnded
+                    ? "開催終了・景品交換終了"
+                    : data.familyMemberCount === 0
                     ? "リストバンドを登録してください"
                     : data.remainingCount === 0
                       ? "家族の交換枠を利用済み"
@@ -84,7 +87,7 @@ export default function VisitorStampRallyPage() {
                         ? "景品交換できます"
                         : "景品交換まであと少し"}
                 </h2>
-                <p className={`text-xs mt-1 ${data.eligible && data.remainingCount > 0 ? "text-primary-foreground/85" : "text-muted-foreground"}`}>
+                <p className={`text-xs mt-1 ${data.eligible && data.remainingCount > 0 && !eventEnded ? "text-primary-foreground/85" : "text-muted-foreground"}`}>
                   {areaRequirementActive
                     ? `達成エリア ${qualifiedAreaCount} / ${areaRequirement} エリア`
                     : `利用店舗 ${stampedCount} / ${totalStoreRequirement ?? 0} 店舗`}
@@ -101,9 +104,10 @@ export default function VisitorStampRallyPage() {
             <div className="grid grid-cols-3 gap-2 border-t-thin border-current/40 pt-2 text-center">
               <div><p className="text-[10px] opacity-80">家族</p><p className="font-black tabular-nums">{data.familyMemberCount}人</p></div>
               <div><p className="text-[10px] opacity-80">交換済み</p><p className="font-black tabular-nums">{data.redeemedCount}個</p></div>
-              <div><p className="text-[10px] opacity-80">あと交換できる数</p><p className="font-black tabular-nums">{data.remainingCount}個</p></div>
+              <div><p className="text-[10px] opacity-80">{eventEnded ? "未使用枠" : "あと交換できる数"}</p><p className="font-black tabular-nums">{data.remainingCount}個</p></div>
             </div>
-            {data.eligible && data.remainingCount > 0 && (
+            {eventEnded && <p className="border-t-thin border-current/40 pt-2 text-xs font-bold">開催終了後のため景品交換はできません。スタンプと利用履歴は引き続き確認できます。</p>}
+            {data.eligible && data.remainingCount > 0 && !eventEnded && (
               <div className="border-t-thin border-current/40 pt-2 space-y-1">
                 <p className="font-bold text-sm">交換できる景品</p>
                 <p className="text-xs">{data.rewards.map((reward) => reward.name).join("・")}</p>

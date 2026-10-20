@@ -26,6 +26,7 @@ import { EventTheme } from "@/components/EventTheme";
 import { ApiError } from "@/lib/api-error";
 import { ShoppingCart, Plus, Minus, CheckCircle, UtensilsCrossed, Ticket, X, QrCode } from "lucide-react";
 import { resolveAssetUrl } from "@/lib/asset-url";
+import { isEventEnded } from "@/lib/event-lifecycle";
 import { QRCodeSVG } from "qrcode.react";
 // 2026-10-03: 画面をまたぐカート規則と再送制御を機能モジュールに集約する。
 import { addCartLine, updateCartQuantity, toggleCartTopping, lineSubtotal, cartTotal, cartCount, type CartLine, type CartTopping } from "@/features/orders/cart";
@@ -51,12 +52,16 @@ function VisitorMenuCard({
   enabledCouponSlugs,
   onToggleCoupon,
   onAdd,
+  orderingDisabled,
+  orderingDisabledLabel,
 }: {
   menu: MenuWithToppings;
   relevantCoupons: StoredCoupon[];
   enabledCouponSlugs: Set<string>;
   onToggleCoupon: (slug: string) => void;
   onAdd: (menu: MenuWithToppings, toppings: CartTopping[]) => void;
+  orderingDisabled: boolean;
+  orderingDisabledLabel: string;
 }) {
   // 既定トッピング: menu.defaultToppingIds のうち、このメニューに紐づく売切れでないもの。
   const defaultIds = () => {
@@ -110,7 +115,7 @@ function VisitorMenuCard({
     .reduce((s, t) => s + (freeToppingIds.has(t.id) ? 0 : t.price), 0);
 
   const handleAdd = () => {
-    if (!selectionReady) return;
+    if (orderingDisabled || !selectionReady) return;
     const chosen: CartTopping[] = availableToppings
       .filter((t) => selected.has(t.id))
       .map((t) => ({ toppingId: t.id, toppingName: t.name, toppingPrice: t.price }));
@@ -165,7 +170,7 @@ function VisitorMenuCard({
               freeIds={freeToppingIds}
               onToggle={toggle}
               wizardEnabled={menu.toppingWizardEnabled}
-              disabled={menu.soldOut}
+              disabled={menu.soldOut || orderingDisabled}
               minimums={toppingMinimums}
               maximums={toppingMaximums}
               onReadyChange={setSelectionReady}
@@ -209,8 +214,9 @@ function VisitorMenuCard({
                   <button
                     type="button"
                     onClick={() => onToggleCoupon(c.slug)}
+                    disabled={orderingDisabled}
                     className={cn(
-                      "border-thick px-4 py-2 text-sm font-black uppercase shrink-0 transition-all",
+                      "border-thick px-4 py-2 text-sm font-black uppercase shrink-0 transition-all disabled:cursor-not-allowed disabled:opacity-50",
                       enabled
                         ? "border-primary bg-primary text-primary-foreground"
                         : "border-border bg-background hover:bg-muted"
@@ -228,11 +234,11 @@ function VisitorMenuCard({
       <CardFooter className="border-t-thick border-border pt-4">
         <Button
           onClick={handleAdd}
-          disabled={menu.soldOut || !selectionReady}
-          className="w-full h-14 border-thick border-border bg-primary font-mono text-lg font-black uppercase text-primary-foreground rounded-none hover:bg-background hover:text-foreground transition-colors"
+          disabled={orderingDisabled || menu.soldOut || !selectionReady}
+          className="w-full h-14 border-thick border-border bg-primary font-mono text-lg font-black uppercase text-primary-foreground rounded-none hover:bg-background hover:text-foreground transition-colors disabled:bg-muted disabled:text-muted-foreground disabled:opacity-100"
         >
           <ShoppingCart className="mr-2 h-5 w-5" />
-          カートに追加
+          {orderingDisabled ? orderingDisabledLabel : "カートに追加"}
         </Button>
       </CardFooter>
     </Card>
@@ -461,13 +467,24 @@ function MenuPageContent() {
     queryFn: () => eventApi.get(circleData!.eventId),
     enabled: !!circleData?.eventId,
     networkMode: "always",
+    // 2026-10-21: 開いたままの注文画面にも運営の終了状態を反映する。
+    refetchInterval: 15_000,
+    refetchIntervalInBackground: false,
   });
+  const eventEnded = isEventEnded(circleEvent);
+  const orderEntryDisabled = eventEnded || isCircleEventLoading || isCircleEventError;
+  const orderEntryDisabledLabel = eventEnded
+    ? "開催終了"
+    : isCircleEventError
+      ? "開催状態を確認できません"
+      : "開催状態を確認中…";
   // 2026-10-20: 来場案内と同じイベント設定を使い、物理バンド必須のイベントではスマホQRを出さない。
   const mustPresentPhysicalWristband = Boolean(
     circleEvent?.hasPhysicalWristband && !circleEvent.allowSelfIssue
   );
   const canDisplayMyQr = !!circleEvent
     && !isCircleEventError
+    && !eventEnded
     && !mustPresentPhysicalWristband
     && !!wristbandStatus?.user.onboardedAt
     && !!activeWristband
@@ -478,6 +495,8 @@ function MenuPageContent() {
       ? "入場情報を確認できません"
       : mustPresentPhysicalWristband
         ? "物理リストバンドを提示してください"
+        : eventEnded
+          ? "開催終了のためQRは表示できません"
         : canDisplayMyQr
           ? "マイQRを表示"
           : "入場登録をおこなってください";
@@ -578,6 +597,8 @@ function MenuPageContent() {
   const codOrderMutation = useMutation({
     networkMode: "always",
     mutationFn: async () => {
+      if (eventEnded) throw new Error("開催終了後は注文を受け付けていません");
+      if (orderEntryDisabled) throw new Error("開催状態を確認できないため、注文を受け付けられません");
       if (!orderInput) throw new Error("注文にはリストバンドとカート内の商品が必要です");
       return submitOrder(orderInput);
     },
@@ -613,10 +634,17 @@ function MenuPageContent() {
 
   const [isCartOpen, setIsCartOpen] = useState(false);
 
+  // 2026-10-21: 終了境界をまたいで開いていた注文・QRモーダルを閉じ、終了前の操作状態を持ち越さない。
+  useEffect(() => {
+    if (!orderEntryDisabled) return;
+    setIsCartOpen(false);
+    setIsQrOpen(false);
+  }, [orderEntryDisabled]);
 
 
   // カードで選んだトッピング付きで1行追加。トッピング構成まで同一なら数量+1、違えば別行。
   const addLine = (menu: MenuWithToppings, chosen: CartTopping[]) => {
+    if (orderEntryDisabled) return;
     setCart((prev) => addCartLine(prev, menu, chosen));
   };
 
@@ -644,6 +672,7 @@ function MenuPageContent() {
   // 既存モッドは addToCart(menuId,...) / updateQuantity(menuId, delta) を呼ぶため、
   // トッピング無し行に対して従来通り menuId 単位で操作するラッパーを維持する。
   const addToCart = (menuId: string, menuName: string, menuPrice: number) => {
+    if (orderEntryDisabled) return;
     setCart((prev) => {
       const existing = prev.find((l) => l.menuId === menuId && l.toppings.length === 0);
       if (existing) {
@@ -657,6 +686,7 @@ function MenuPageContent() {
   };
 
   const updateQuantity = (menuId: string, delta: number) => {
+    if (orderEntryDisabled) return;
     setCart((prev) =>
       prev
         .map((l) =>
@@ -884,54 +914,13 @@ function MenuPageContent() {
   }
 
   // 2026-10-21: モバイル注文の可否は現行のサークル設定で判定し、旧COD拡張の有効化を必須にしない。
-  if (isMobileOrderRoute && circleData && !isMobileOrderEnabled()) {
+  if (isMobileOrderRoute && circleData && !isMobileOrderEnabled() && !eventEnded) {
     return (
       <div className="mx-auto max-w-xl p-6 font-mono" role="alert">
         <h1 className="text-xl font-black">モバイル注文は利用できません</h1>
         <p className="my-4">このサークルは現在、モバイル注文を受け付けていません。</p>
         <Button onClick={() => navigate("/visitor/events")}>出店一覧へ戻る</Button>
       </div>
-    );
-  }
-
-  // イベント終了後は注文を受け付けず「ご来場ありがとうございました」の御礼画面にする (2026-07-15)。
-  // 来場者の主目的(注文)が終わっているため、メニュー閲覧の代わりに御礼と注文履歴への導線を出す。
-  if (circleEvent && (circleEvent.lifecycleStatus === "ended" || circleEvent.lifecycleStatus === "archived")) {
-    return (
-      <EventTheme theme={circleEvent} className="bg-background text-foreground">
-        <div className="max-w-xl mx-auto p-sp-3 sm:p-sp-4 text-center font-mono my-12">
-          <div className="border-heavy border-border p-sp-5 space-y-sp-4 bg-background">
-            {circleEvent.logoUrl ? (
-              <img src={resolveAssetUrl(circleEvent.logoUrl)} alt={circleEvent.eventName} className="max-h-24 mx-auto block border-thick border-border" />
-            ) : (
-              <div className="inline-flex items-center justify-center h-14 w-14 border-thick border-border bg-primary text-primary-foreground mx-auto">
-                <UtensilsCrossed className="h-7 w-7" />
-              </div>
-            )}
-            <h1 className="text-[22px] sm:text-[30px] font-headline uppercase tracking-tight leading-[1.15] text-foreground">
-              ご来場<br />ありがとうございました
-            </h1>
-            <p className="text-[13px] sm:text-[14px] leading-[1.6] text-muted-foreground">
-              {circleEvent.eventName} は終了しました。ご利用いただきありがとうございました。
-              新しいご注文の受付は終了しています。
-            </p>
-            <div className="border-t-[3px] border-border pt-sp-4 flex flex-col gap-sp-2">
-              <Button
-                onClick={() => navigate("/visitor/orders")}
-                className="w-full h-12 border-thick border-border bg-primary text-primary-foreground font-mono font-bold uppercase hover:bg-background hover:text-foreground"
-              >
-                注文履歴を見る
-              </Button>
-              <Button
-                onClick={() => navigate("/visitor/mypage")}
-                className="w-full h-12 border-thick border-border bg-background text-foreground font-mono font-bold hover:bg-accent hover:text-accent-foreground"
-              >
-                マイページ
-              </Button>
-            </div>
-          </div>
-        </div>
-      </EventTheme>
     );
   }
 
@@ -997,6 +986,23 @@ function MenuPageContent() {
         </div>
       )}
 
+      {eventEnded && (
+        <section className="border-heavy border-error bg-error/10 p-4" role="status" aria-live="polite">
+          <p className="text-sm font-black text-error">開催終了・注文受付終了</p>
+          <p className="mt-1 text-xs leading-relaxed text-foreground">メニューと価格は引き続きご覧いただけます。カート追加、注文送信、マイQRの表示はできません。</p>
+        </section>
+      )}
+      {!eventEnded && orderEntryDisabled && (
+        <section className="border-heavy border-border bg-muted p-4" role="status" aria-live="polite">
+          <p className="text-sm font-black">{isCircleEventLoading ? "開催状況を確認しています" : "開催状況を確認できません"}</p>
+          <p className="mt-1 text-xs leading-relaxed text-foreground">
+            {isCircleEventLoading
+              ? "受付状況を確認するまでカート追加を停止しています。"
+              : "受付状況を取得できませんでした。通信を確認して再読み込みしてください。"}
+          </p>
+        </section>
+      )}
+
       {/* メニュー一覧。常設のクーポンセクションは置かず、各カードの中でトッピング選択の
           すぐ下に関係するクーポンを出す (2026-09-16、モーダル案は撤回してカード内に戻した)。 */}
       <div>
@@ -1015,6 +1021,8 @@ function MenuPageContent() {
                 enabledCouponSlugs={enabledCouponSlugs}
                 onToggleCoupon={toggleCoupon}
                 onAdd={addLine}
+                orderingDisabled={orderEntryDisabled}
+                orderingDisabledLabel={orderEntryDisabledLabel}
               />
             ))}
           </div>
@@ -1025,7 +1033,7 @@ function MenuPageContent() {
       </div>
 
       {/* 2026-10-07 Issue #49: カート保存状態とマイQRを同じ操作起点に置き、注文確定前でも提示できるようにする。 */}
-      {(cart.length > 0 || userId) && (
+      {!orderEntryDisabled && (cart.length > 0 || userId) && (
         <div id="standard-cart-bar" className="fixed bottom-0 left-0 right-0 z-40 bg-primary text-primary-foreground border-t-heavy border-border p-3 sm:p-4">
           <div className="max-w-4xl mx-auto flex flex-col gap-3">
             {cart.length > 0 && <div className="flex items-center justify-between gap-2">
@@ -1125,7 +1133,7 @@ function MenuPageContent() {
 
       {/* 標準カート確認モーダル */}
       <Modal
-        isOpen={isCartOpen}
+        isOpen={isCartOpen && !orderEntryDisabled}
         onClose={() => setIsCartOpen(false)}
         title="[カートの中身を確認]"
         maxWidth="lg"
@@ -1314,8 +1322,14 @@ function MenuPageContent() {
                 circleData,
                 cart,
                 userId, // guest_user_idを引き渡し
+                eventEnded,
+                orderingDisabled: orderEntryDisabled,
               }}
               onAction={(actionType, payload) => {
+                if (orderEntryDisabled && ["ADD_TO_CART", "UPDATE_QUANTITY", "SAVE_DIRECT_ORDER"].includes(actionType)) {
+                  toast.message(eventEnded ? "開催終了のため注文を受け付けていません" : "開催状況を確認できるまで注文できません");
+                  return;
+                }
                 if (actionType === "ADD_TO_CART") {
                   addToCart(payload.menuId, payload.menuName, payload.menuPrice);
                 } else if (actionType === "UPDATE_QUANTITY") {
@@ -1358,8 +1372,14 @@ function MenuPageContent() {
                 circleData,
                 cart,
                 userId, // guest_user_idを引き渡し
+                eventEnded,
+                orderingDisabled: orderEntryDisabled,
               }}
               onAction={(actionType, payload) => {
+                if (orderEntryDisabled && ["ADD_TO_CART", "UPDATE_QUANTITY", "SAVE_DIRECT_ORDER"].includes(actionType)) {
+                  toast.message(eventEnded ? "開催終了のため注文を受け付けていません" : "開催状況を確認できるまで注文できません");
+                  return;
+                }
                 if (actionType === "ADD_TO_CART") {
                   addToCart(payload.menuId, payload.menuName, payload.menuPrice);
                 } else if (actionType === "UPDATE_QUANTITY") {

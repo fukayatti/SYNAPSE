@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { ArrowRight, QrCode, UserRoundCog } from "lucide-react";
+import { ArrowRight, HeartHandshake, QrCode, UserRoundCog } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -9,6 +9,7 @@ import { ErrorState } from "@/components/ui/ErrorState";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useVisitor, saveVisitor } from "@/hooks/useVisitor";
 import { eventApi, wristbandApi } from "@/lib/api";
+import { isEventEnded } from "@/lib/event-lifecycle";
 
 // 2026-10-16: QRの提示とアカウント情報の編集を別画面に分け、来場時に必要な操作を先に見せる。
 export default function MyPage() {
@@ -20,12 +21,22 @@ export default function MyPage() {
   const [origin, setOrigin] = useState("");
   const [isIssuing, setIsIssuing] = useState(false);
   // 2026-10-20: QR表示条件はURLで切り替えられないよう、入場中イベントの設定を優先する。
-  const settingsEventId = session?.eventId || eventId || null;
+  const query = useQuery({
+    queryKey: ["userWristbandStatus", userId],
+    queryFn: () => wristbandApi.lookup(userId!),
+    enabled: !!userId && !isIssuing,
+  });
+  // 2026-10-21: 古い来場セッションにイベントIDがない場合も、登録バンドのイベントから終了状態を確認する。
+  const settingsEventId = session?.eventId || query.data?.user.eventId || eventId || null;
   const eventSettingsQuery = useQuery({
     queryKey: ["visitor-event-settings", settingsEventId],
     queryFn: () => eventApi.get(settingsEventId!),
     enabled: !!settingsEventId,
+    // 2026-10-21: 開催終了を画面を開いたままでも検知し、終了後はQRを隠す。
+    refetchInterval: 15_000,
+    refetchIntervalInBackground: false,
   });
+  const eventEnded = isEventEnded(eventSettingsQuery.data);
 
   useEffect(() => {
     setOrigin(window.location.origin);
@@ -33,11 +44,16 @@ export default function MyPage() {
 
   useEffect(() => {
     if (action !== "issue" || !eventId || !isLoaded) return;
-    if (session?.eventId === eventId && session.userId) {
+    if ((session?.eventId === eventId && session.userId) || query.data?.user.eventId === eventId) {
       navigate("/visitor/mypage", { replace: true });
       return;
     }
     if (eventSettingsQuery.isPending) return;
+    if (eventSettingsQuery.isError) return;
+    if (eventEnded) {
+      navigate(`/visitor/mypage?eventId=${encodeURIComponent(eventId)}`, { replace: true });
+      return;
+    }
     // 2026-10-19: 物理バンド運用中にセルフ発行を止めている場合、直リンクでも発行を試さず案内へ戻す。
     if (eventSettingsQuery.data?.hasPhysicalWristband && !eventSettingsQuery.data.allowSelfIssue) {
       navigate(`/visitor/mypage?eventId=${encodeURIComponent(eventId)}`, { replace: true });
@@ -67,13 +83,39 @@ export default function MyPage() {
     };
 
     void issueDigitalBand();
-  }, [action, eventId, eventSettingsQuery.data, eventSettingsQuery.isPending, isLoaded, navigate, session]);
+  }, [action, eventId, eventEnded, eventSettingsQuery.data, eventSettingsQuery.isError, eventSettingsQuery.isPending, isLoaded, navigate, query.data?.user.eventId, session]);
 
-  const query = useQuery({
-    queryKey: ["userWristbandStatus", userId],
-    queryFn: () => wristbandApi.lookup(userId!),
-    enabled: !!userId && !isIssuing,
-  });
+  if (settingsEventId && eventSettingsQuery.isError && !eventEnded) {
+    return (
+      <div className="mx-auto max-w-2xl p-4 font-mono">
+        <ErrorState error={eventSettingsQuery.error} title="イベント設定を読み込めませんでした" onRetry={() => eventSettingsQuery.refetch()} />
+      </div>
+    );
+  }
+
+  if (eventEnded) {
+    return (
+      <main className="mx-auto max-w-2xl space-y-5 px-4 py-6 pb-10 font-mono sm:py-8">
+        <header className="space-y-1 border-b-thick border-border pb-4">
+          <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">来場者メニュー</p>
+          <h1 className="text-2xl font-black tracking-tight sm:text-3xl">開催終了</h1>
+        </header>
+        <section className="space-y-4 border-heavy border-border bg-primary p-5 text-center text-primary-foreground sm:p-7" aria-labelledby="event-ended-title">
+          <HeartHandshake className="mx-auto h-10 w-10" aria-hidden="true" />
+          <h2 id="event-ended-title" className="text-2xl font-black sm:text-3xl">ご来場ありがとうございました</h2>
+          <p className="text-sm leading-relaxed text-primary-foreground/85">
+            {eventSettingsQuery.data?.eventName ? `${eventSettingsQuery.data.eventName}は終了しました。` : "イベントは終了しました。"}
+            <br />マイQRの表示は終了しています。注文履歴やレビューは引き続きご利用いただけます。
+          </p>
+        </section>
+        <nav className="grid gap-2 sm:grid-cols-2" aria-label="開催終了後のメニュー">
+          <Button type="button" variant="outline" className="min-h-12" onClick={() => navigate("/visitor/events")}>メニューを見る</Button>
+          <Button type="button" className="min-h-12" onClick={() => navigate("/visitor/orders")}>注文履歴を見る</Button>
+          <Button type="button" variant="outline" className="min-h-12 sm:col-span-2" onClick={() => navigate("/visitor/reviews")}>レビューを投稿・編集する</Button>
+        </nav>
+      </main>
+    );
+  }
 
   if (!isLoaded || query.isLoading || isIssuing || (!!settingsEventId && eventSettingsQuery.isPending)) {
     return (
@@ -88,14 +130,6 @@ export default function MyPage() {
     return (
       <div className="mx-auto max-w-2xl p-4 font-mono">
         <ErrorState error={query.error} title="来場者情報を読み込めませんでした" onRetry={() => query.refetch()} />
-      </div>
-    );
-  }
-
-  if (settingsEventId && eventSettingsQuery.isError) {
-    return (
-      <div className="mx-auto max-w-2xl p-4 font-mono">
-        <ErrorState error={eventSettingsQuery.error} title="イベント設定を読み込めませんでした" onRetry={() => eventSettingsQuery.refetch()} />
       </div>
     );
   }
