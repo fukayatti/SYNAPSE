@@ -253,16 +253,6 @@ function MenuPageContent() {
   });
   const activeWristband = wristbandStatus?.wristband;
   const familyAllergies = parseJapaneseAllergens(wristbandStatus?.user.allergies);
-  const canDisplayMyQr = !!wristbandStatus?.user.onboardedAt
-    && !!activeWristband
-    && ["active", "smartphone"].includes(activeWristband.status);
-  const myQrButtonLabel = isWristbandStatusLoading
-    ? "入場情報を確認中…"
-    : isWristbandStatusError
-      ? "入場情報を確認できません"
-      : canDisplayMyQr
-        ? "マイQRを表示"
-        : "入場登録をおこなってください";
 
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
   const [selectedCircleId, setSelectedCircleId] = useState<string | null>(
@@ -412,11 +402,34 @@ function MenuPageContent() {
   }, [draftKey, draftsLoaded, savedDrafts, menus, hydratedDraftKey, selectedCircleId]);
 
   // サークルが属するイベントのテーマ (配色/ロゴ) を取得して画面に反映
-  const { data: circleEvent } = useQuery({
+  const {
+    data: circleEvent,
+    isLoading: isCircleEventLoading,
+    isError: isCircleEventError,
+  } = useQuery({
     queryKey: ["event", circleData?.eventId],
     queryFn: () => eventApi.get(circleData!.eventId),
     enabled: !!circleData?.eventId,
   });
+  // 2026-10-20: 来場案内と同じイベント設定を使い、物理バンド必須のイベントではスマホQRを出さない。
+  const mustPresentPhysicalWristband = Boolean(
+    circleEvent?.hasPhysicalWristband && !circleEvent.allowSelfIssue
+  );
+  const canDisplayMyQr = !!circleEvent
+    && !isCircleEventError
+    && !mustPresentPhysicalWristband
+    && !!wristbandStatus?.user.onboardedAt
+    && !!activeWristband
+    && ["active", "smartphone"].includes(activeWristband.status);
+  const myQrButtonLabel = isWristbandStatusLoading || isCircleEventLoading
+    ? "入場情報を確認中…"
+    : isWristbandStatusError || isCircleEventError
+      ? "入場情報を確認できません"
+      : mustPresentPhysicalWristband
+        ? "物理リストバンドを提示してください"
+        : canDisplayMyQr
+          ? "マイQRを表示"
+          : "入場登録をおこなってください";
 
   useEffect(() => {
     if (circleIdParam) {
@@ -1000,11 +1013,13 @@ function MenuPageContent() {
                 </Button>
               )}
             </div>
-            {!canDisplayMyQr && !isWristbandStatusLoading && (
+            {!canDisplayMyQr && !isWristbandStatusLoading && !isCircleEventLoading && (
               <p className="text-[10px] text-primary-foreground/80 font-mono" role="status">
-                {isWristbandStatusError
+                {isWristbandStatusError || isCircleEventError
                   ? "入場情報を確認できません。通信を確認して画面を再読み込みしてください。"
-                  : "受付・本部で入場登録すると、注文の受取や店頭会計で使うQRを表示できます。"}
+                  : mustPresentPhysicalWristband
+                    ? "このイベントではスマートフォンQRを発行していません。物理リストバンドを提示してください。"
+                    : "受付・本部で入場登録すると、注文の受取や店頭会計で使うQRを表示できます。"}
               </p>
             )}
           </div>
