@@ -17,7 +17,7 @@ import Loader from "@/components/loader";
 // - イベント主催: 無料枠(1サークル)のイベントを作成し event_manager になる → イベント管理へ。
 // - サークル出店: イベントの招待コード/リンクを要求し、
 //   - circle_host 招待 → そのイベント配下にサークルを新規作成して circle_manager に。
-//   - circle_member / event_manager 招待 → その場で受諾して適切な権限で参加。
+//   - circle_member / event 管理・当日スタッフ招待 → その場で受諾して適切な権限で参加。
 // URL ?inviteToken= が付いていれば join モードで自動照会する(招待リンク着地時に使う)。
 type Mode = "choose" | "host" | "join";
 
@@ -307,7 +307,7 @@ export default function StaffOnboarding() {
 									<strong className="text-foreground">
 										{lookup.circleName || lookup.eventName || "スペース"}
 									</strong>{" "}
-									への招待です({roleLabel(lookup.kind)}として参加)。
+									への招待です({roleLabel(lookup.kind, lookup.role)}として参加)。
 								</div>
 								<div className="flex gap-2">
 									<Button variant="outline" onClick={() => setLookup(null)}>
@@ -344,12 +344,18 @@ export default function StaffOnboarding() {
 	);
 }
 
-function roleLabel(kind: string): string {
-	switch (kind) {
+// 2026-10-20: 受諾フローの種別は event_manager に集約されるため、招待に保存された実ロールを表示する。
+function roleLabel(kind: string, role: string): string {
+	if (kind === "circle_member") return "サークルスタッフ";
+	switch (role) {
 		case "event_manager":
 			return "イベント管理者";
-		case "circle_member":
-			return "サークルスタッフ";
+		case "event_staff":
+			return "当日スタッフ（紛失バンド交換・スタンプラリー）";
+		case "event_wristband_staff":
+			return "当日スタッフ（紛失バンド交換）";
+		case "event_stamp_staff":
+			return "当日スタッフ（スタンプラリー）";
 		default:
 			return "メンバー";
 	}

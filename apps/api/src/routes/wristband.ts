@@ -49,10 +49,15 @@ wristbandRoutes.get(
     const db = c.get("db");
     const { eventId, query, bandType, accountStatus, profileStatus, offset, limit, sortBy, sortDirection } = c.req.valid("query");
 
-    // 権限チェック (イベントスタッフ権限 member:read が必要)
-    const allowed = await hasPermission(c, null, "member:read", eventId);
-    if (!allowed) {
+    const canReadMembers = await hasPermission(c, null, "member:read", eventId);
+    const canReplaceWristbands = await hasPermission(c, null, "wristband:replace", eventId);
+    if (!canReadMembers && !canReplaceWristbands) {
       apiError("FORBIDDEN", "この操作にはスタッフ権限が必要です");
+    }
+    // 2026-10-20: 交換担当には紛失対応に必要な物理バンド検索だけを許可し、来場者一覧APIの詳細情報を返さない。
+    const replacementOnly = !canReadMembers && canReplaceWristbands;
+    if (replacementOnly && (bandType !== "physical" || limit > 50 || !query.trim())) {
+      apiError("FORBIDDEN", "紛失バンド交換では検索語を指定して物理バンドだけを検索してください");
     }
 
     const conditions = [eq(eventUser.eventId, eventId)];
@@ -146,12 +151,21 @@ wristbandRoutes.get(
     }
 
     return c.json({
-      items: rows.map((r) => ({
-        user: r.user,
-        wristband: r.wristband,
-        familyWristbands: familyWristbands.filter((band) => band.userId === r.user.id),
-        familyBandCount: familyWristbands.filter((band) => band.userId === r.user.id).length,
-      })),
+      items: rows.map((r) => {
+        const visitorBands = familyWristbands.filter((band) => band.userId === r.user.id);
+        return {
+          user: replacementOnly
+            ? { id: r.user.id, displayId: r.user.displayId, nickname: r.user.nickname, status: r.user.status }
+            : r.user,
+          wristband: replacementOnly && r.wristband
+            ? { id: r.wristband.id, userId: r.wristband.userId, status: r.wristband.status, nickname: r.wristband.nickname, assignedAt: r.wristband.assignedAt }
+            : r.wristband,
+          familyWristbands: replacementOnly
+            ? visitorBands.map(({ id, userId, status, nickname, assignedAt }) => ({ id, userId, status, nickname, assignedAt }))
+            : visitorBands,
+          familyBandCount: visitorBands.length,
+        };
+      }),
       total: totalRows[0]?.total ?? 0,
       offset,
       limit,
@@ -732,6 +746,7 @@ wristbandRoutes.post(
     const bandOwner = bandExists
       ? await db.select().from(eventUser).where(eq(eventUser.id, bandNow[0]!.userId))
       : [];
+    let replacementSource: typeof wristband.$inferSelect | undefined;
 
     // 2026-10-08: 来場登録QRは同一イベント内で既発行バンドを紐付ける導線。
     // 既存バンドの所属イベントと対象ユーザーのイベントが異なる場合は、管理者権限があっても移管させない。
@@ -743,19 +758,47 @@ wristbandRoutes.post(
 
     if (replacesWristbandId) {
       if (replacesWristbandId === wristbandId) {
-        apiError("BAD_REQUEST", "紛失したバンドと別のIDを指定してください");
+        apiError("BAD_REQUEST", "交換対象とは別のIDを指定してください");
       }
-      const [lostBand] = await db.select().from(wristband).where(and(
+      const [sourceBand] = await db.select().from(wristband).where(and(
         eq(wristband.id, replacesWristbandId),
         eq(wristband.userId, userId),
-        eq(wristband.status, "lost"),
+        eq(wristband.status, "active"),
       ));
-      if (!lostBand || !targetEventId) {
-        apiError("NOT_FOUND", "置き換える紛失リストバンドが見つかりません");
+      if (!sourceBand || !targetEventId) {
+        apiError("NOT_FOUND", "交換対象の有効な物理リストバンドが見つかりません");
       }
-      if (!(await hasPermission(c, null, "member:write", targetEventId))) {
-        apiError("FORBIDDEN", "紛失リストバンドの再発行にはスタッフ権限が必要です");
+      if (!bandExists) {
+        apiError("BAD_REQUEST", "先に発行済みの物理リストバンドIDを指定してください");
       }
+      const replacementBand = bandNow[0]!;
+      const replacementBandOwner = bandOwner[0];
+      const replacementBandOwnerBands = replacementBandOwner
+        ? await db.select({ id: wristband.id }).from(wristband).where(and(
+            eq(wristband.userId, replacementBandOwner.id),
+            eq(wristband.status, "active"),
+          ))
+        : [];
+      // 2026-10-20: 交換担当が別来場者のバンドを奪えないよう、交換先は未使用の発行済みバンドに限定する。
+      if (
+        replacementBand.status !== "active" ||
+        !replacementBandOwner ||
+        replacementBandOwner.eventId !== targetEventId ||
+        replacementBandOwner.status !== "available" ||
+        replacementBandOwner.nickname ||
+        replacementBandOwner.favoriteDate ||
+        replacementBandOwner.onboardedAt ||
+        replacementBand.nickname ||
+        replacementBand.birthdayMonthDay ||
+        replacementBand.onboardedAt ||
+        replacementBandOwnerBands.length !== 1
+      ) {
+        apiError("BAD_REQUEST", "未使用の発行済み物理リストバンドIDを指定してください");
+      }
+      if (!(await hasPermission(c, null, "wristband:replace", targetEventId))) {
+        apiError("FORBIDDEN", "物理リストバンドの交換にはスタッフ権限が必要です");
+      }
+      replacementSource = sourceBand;
     }
 
     // 2026-07-11: 権限ゲート。以下はいずれも本部(スタッフ member:write)権限を要求する:
@@ -770,7 +813,7 @@ wristbandRoutes.post(
       bandExists &&
       bandNow[0]!.userId !== userId;
     const creatingNewBand = !bandExists;
-    if (replacingUsersActiveBand || bandOwnedByOther || creatingNewBand) {
+    if (!replacementSource && (replacingUsersActiveBand || bandOwnedByOther || creatingNewBand)) {
       let evId: string | undefined = targetEventId ?? bandEventId;
       if (!evId && creatingNewBand) {
         // 2026-07-11: 新規バンド発行時は eventId 未解決のまま権限判定しない。
@@ -804,22 +847,36 @@ wristbandRoutes.post(
       });
     }
 
-    // 既存のアクティブなリストバンドがあれば無効化 (replaced)
-    await db
-      .update(wristband)
-      .set({ status: "replaced", deactivatedAt: new Date() })
-      .where(and(eq(wristband.userId, userId), eq(wristband.status, "active")));
+    // 2026-10-20: 物理バンド交換は通常一覧から選んだ有効IDだけを差し替え、家族の別バンドは停止しない。
+    if (!replacementSource) {
+      await db
+        .update(wristband)
+        .set({ status: "replaced", deactivatedAt: new Date() })
+        .where(and(eq(wristband.userId, userId), eq(wristband.status, "active")));
+    }
 
     if (bandExists) {
       // 既に登録されているリストバンド (本部発行済み) を本人に紐付けてアクティブ化
       await db
         .update(wristband)
-        .set({
-          userId,
-          status: "active",
-          assignedAt: new Date(),
-          deactivatedAt: null,
-        })
+        .set(replacementSource
+          ? {
+              // 物理IDの交換後も、紛失バンドに付いていた家族プロフィールを引き継ぐ。
+              userId,
+              status: "active",
+              nickname: replacementSource.nickname,
+              birthdayMonthDay: replacementSource.birthdayMonthDay,
+              age: replacementSource.age,
+              onboardedAt: replacementSource.onboardedAt,
+              assignedAt: new Date(),
+              deactivatedAt: null,
+            }
+          : {
+              userId,
+              status: "active",
+              assignedAt: new Date(),
+              deactivatedAt: null,
+            })
         .where(eq(wristband.id, wristbandId));
     } else {
       // ここに来るのはスタッフ権限で新規バンドを発行する場合のみ (上のゲートを通過済み)
@@ -831,11 +888,11 @@ wristbandRoutes.post(
       });
     }
 
-    // 2026-10-19: 紛失画面から対象バンドを指定した再発行では、古いIDを対応済みに移す。
+    // 2026-10-20: 交換元に選ばれた有効バンドを履歴に残し、新IDに紐づけを移す。
     if (replacesWristbandId) {
       await db.update(wristband)
-        .set({ status: "replaced" })
-        .where(and(eq(wristband.id, replacesWristbandId), eq(wristband.status, "lost")));
+        .set({ status: "replaced", deactivatedAt: new Date() })
+        .where(and(eq(wristband.id, replacesWristbandId), eq(wristband.status, "active")));
     }
 
     return c.json({ success: true, wristbandId });

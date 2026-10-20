@@ -19,7 +19,7 @@ const genInviteCode = customAlphabet("ABCDEFGHJKMNPQRSTUVWXYZ23456789", 8);
 /**
  * inviteToken の種別を circleId/eventId/role から導出する。
  * - circle_member: 既存サークルに参加 (circleId 有り)
- * - event_manager: イベント共同管理者 (eventId 有り, role=event_manager)
+ * - event_manager / event_*: イベント管理者または当日スタッフ (eventId 有り)
  * - circle_host:   その event 配下にサークルを新規作成する権利 (eventId 有り, role=circle_manager, circleId 無し)
  */
 function inviteKind(t: { circleId: string | null; eventId: string | null; role: string }):
@@ -28,7 +28,7 @@ function inviteKind(t: { circleId: string | null; eventId: string | null; role: 
   | "circle_host"
   | "unknown" {
   if (t.circleId) return "circle_member";
-  if (t.eventId && t.role === "event_manager") return "event_manager";
+  if (t.eventId && isEventRole(t.role)) return "event_manager";
   if (t.eventId && t.role === "circle_manager") return "circle_host";
   return "unknown";
 }
@@ -44,12 +44,18 @@ membershipRoutes.use("*", requireAuth);
 const ROLES = [
   "super_admin",
   "event_manager",
+  "event_staff",
+  "event_wristband_staff",
+  "event_stamp_staff",
   "circle_manager",
   "circle_admin",
   "circle_staff",
 ] as const;
 
 type Role = (typeof ROLES)[number];
+
+const EVENT_ROLES = new Set<Role>(["event_manager", "event_staff", "event_wristband_staff", "event_stamp_staff"]);
+const isEventRole = (role: string): boolean => EVENT_ROLES.has(role as Role);
 
 // ロールの権限マッピング (SaaS簡素化)
 const ROLE_PERMISSIONS: Record<Role, string[]> = {
@@ -75,7 +81,13 @@ const ROLE_PERMISSIONS: Record<Role, string[]> = {
     "member:read",
     "member:write",
     "member:delete",
+    "wristband:replace",
+    "stamp-rally:operate",
   ],
+  // 2026-10-20: 当日スタッフ用のロールは担当機能だけを許可し、イベント管理権限は渡さない。
+  event_staff: ["event:read", "wristband:replace", "stamp-rally:operate"],
+  event_wristband_staff: ["event:read", "wristband:replace"],
+  event_stamp_staff: ["event:read", "stamp-rally:operate"],
   circle_manager: [
     "circle:read",
     "circle:write",
@@ -148,6 +160,37 @@ async function isLastActiveCircleManager(
   return managers.every((m) => m.id === target.id);
 }
 
+async function isLastActiveEventManager(
+  db: Context<AppEnv>["var"]["db"],
+  target: { id: string; eventId: string | null; role: string; isActive: boolean }
+): Promise<boolean> {
+  if (target.role !== "event_manager" || !target.eventId || !target.isActive) return false;
+  const managers = await db.select().from(membership).where(and(
+    eq(membership.eventId, target.eventId),
+    eq(membership.role, "event_manager"),
+    eq(membership.isActive, true)
+  ));
+  return managers.every((manager) => manager.id === target.id);
+}
+
+function assertRoleMatchesScope(role: string, circleId?: string | null, eventId?: string | null) {
+  // 2026-10-20: イベント当日ロールをサークルメンバーとして保存するとイベント単位の認可範囲を誤るため、イベント所属に限定する。
+  if (isEventRole(role) && (circleId || !eventId)) {
+    apiError("BAD_REQUEST", "イベントスタッフのロールにはイベントIDのみを指定してください");
+  }
+}
+
+function assertRoleMatchesMemberScope(
+  role: string,
+  target: { circleId: string | null; eventId: string | null },
+) {
+  assertRoleMatchesScope(role, target.circleId, target.eventId);
+  // 2026-10-20: role 更新でイベント所属をサークル権限に変え、イベント単位の所属が不整合になるのを防ぐ。
+  if (!target.circleId && target.eventId && !isEventRole(role)) {
+    apiError("BAD_REQUEST", "イベント所属のロールにはイベントスタッフ権限を指定してください");
+  }
+}
+
 // 管理者権限チェック（権限の序列チェック - 2026-07-04 SaaS対応）
 // 2026-07-07 (Phase 3a): membershipRoutes.use("*", requireAuth) により、この関数が
 // 呼ばれる時点でセッションは既に確立済みなので c.get("session") から取得する
@@ -198,7 +241,6 @@ async function checkMemberWritePermission(
   }
 
   // 3. イベントレベル (event_manager) の操作は、そのイベントの event_manager のみ可能
-  const isEventRole = (role: string) => role === "event_manager";
   if (!targetCircleId || isEventRole(targetCurrentRole) || (targetNewRole && isEventRole(targetNewRole))) {
     let checkEventId = targetEventId;
     if (!checkEventId && targetCircleId) {
@@ -519,6 +561,8 @@ membershipRoutes.post(
     const input = c.req.valid("json");
     const id = ulid();
 
+    assertRoleMatchesScope(input.role, input.circleId, input.eventId);
+
     const err = await checkMemberWritePermission(c, input.circleId || null, "viewer", input.role, input.eventId);
     if (err) apiError(err.code, err.error, { status: err.status });
 
@@ -553,10 +597,14 @@ membershipRoutes.patch(
     if (targets.length === 0) apiError("NOT_FOUND", "メンバーが見つかりません");
 
     const target = targets[0]!;
+    assertRoleMatchesMemberScope(input.role, target);
     const err = await checkMemberWritePermission(c, target.circleId, target.role, input.role, target.eventId);
     if (err) apiError(err.code, err.error, { status: err.status });
     if (input.role !== "circle_manager" && (await isLastActiveCircleManager(db, target))) {
       apiError("BAD_REQUEST", "最後の管理者のロールは変更できません");
+    }
+    if (input.role !== "event_manager" && (await isLastActiveEventManager(db, target))) {
+      apiError("BAD_REQUEST", "最後のイベント管理者のロールは変更できません");
     }
 
     await db
@@ -581,6 +629,9 @@ membershipRoutes.patch("/:id/deactivate", async (c) => {
   if (err) apiError(err.code, err.error, { status: err.status });
   if (await isLastActiveCircleManager(db, target)) {
     apiError("BAD_REQUEST", "最後の管理者は停止できません");
+  }
+  if (await isLastActiveEventManager(db, target)) {
+    apiError("BAD_REQUEST", "最後のイベント管理者は停止できません");
   }
 
   await db
@@ -627,6 +678,9 @@ membershipRoutes.delete("/:id", async (c) => {
   if (await isLastActiveCircleManager(db, target)) {
     apiError("BAD_REQUEST", "最後の管理者は除名できません");
   }
+  if (await isLastActiveEventManager(db, target)) {
+    apiError("BAD_REQUEST", "最後のイベント管理者は除名できません");
+  }
 
   await db.delete(membership).where(eq(membership.id, id));
 
@@ -657,6 +711,8 @@ membershipRoutes.post(
     // 2026-07-15: セッションから作成者のメールアドレスを安全に取得し、不正な値の指定を防ぐ設計に変更
     const session = c.get("session")!;
     const userEmail = session.user.email;
+
+    assertRoleMatchesScope(input.role, input.circleId, input.eventId);
 
     const err = await checkMemberWritePermission(c, input.circleId || null, "viewer", input.role, input.eventId);
     if (err) apiError(err.code, err.error, { status: err.status });
@@ -694,7 +750,14 @@ membershipRoutes.post(
       }
 
       const spaceName = circleName || eventName || "新しいスペース";
-      const displayRole = input.role === "circle_manager" ? "オーナー" : input.role === "circle_admin" ? "管理者" : input.role === "circle_staff" ? "スタッフ" : input.role === "event_manager" ? "イベントマネージャー" : "メンバー";
+      const displayRole = input.role === "circle_manager" ? "オーナー"
+        : input.role === "circle_admin" ? "管理者"
+        : input.role === "circle_staff" ? "スタッフ"
+        : input.role === "event_manager" ? "イベント管理者"
+        : input.role === "event_staff" ? "当日スタッフ"
+        : input.role === "event_wristband_staff" ? "紛失バンド交換スタッフ"
+        : input.role === "event_stamp_staff" ? "スタンプラリースタッフ"
+        : "メンバー";
 
       await db.insert(notification).values({
         id: ulid(),

@@ -11,13 +11,14 @@ import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { QrCode, X, CheckCircle2, Search, Camera } from "lucide-react";
 
+// 2026-10-20: 来場者QRと物理バンドを取り違えないよう、スキャン結果にバンド状態も渡す。
 interface QrScannerModalProps {
   circleId: string;
   isOpen: boolean;
   onClose: () => void;
   onOrderClaimed?: (orderNumber: string) => void;
   mode?: "pre_order" | "customer";
-  onCustomerScanned?: (userId: string, wristbandId: string | null, familyBandCount: number, allergies: string | null) => void;
+  onCustomerScanned?: (userId: string, wristbandId: string | null, familyBandCount: number, allergies: string | null, wristbandStatus?: string | null) => void;
 }
 
 export function QrScannerModal({
@@ -266,7 +267,7 @@ export function QrScannerModal({
       if (data.user) {
         toast.success(`顧客を特定しました: ${data.wristband?.id || data.user.id}`);
         if (onCustomerScanned) {
-          onCustomerScanned(data.user.id, data.wristband?.id || null, data.familyBandCount ?? 0, data.user.allergies ?? null);
+          onCustomerScanned(data.user.id, data.wristband?.id || null, data.familyBandCount ?? 0, data.user.allergies ?? null, data.wristband?.status ?? null);
         }
         onClose();
       } else {
@@ -335,7 +336,8 @@ export function QrScannerModal({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/80 p-4 backdrop-blur-sm">
+    // 2026-10-20: 新しい登録フォームからも使うため、スキャナーを読み上げ可能なモーダルとして明示する。
+    <div role="dialog" aria-modal="true" aria-labelledby="qr-scanner-title" className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/80 p-4 backdrop-blur-sm">
       {/* RawBlock モーダルコンテナ */}
       <div className="relative w-full max-w-2xl border-heavy border-border bg-background p-4 sm:p-6 shadow-none">
         {/* ヘッダー */}
@@ -344,15 +346,16 @@ export function QrScannerModal({
             <div className="bg-primary p-2 text-primary-foreground">
               <QrCode className="h-5 w-5 sm:h-6 sm:w-6" />
             </div>
-            <h2 className="font-mono text-lg sm:text-2xl font-black uppercase tracking-wider">
+            <h2 id="qr-scanner-title" className="font-mono text-lg sm:text-2xl font-black uppercase tracking-wider">
               {mode === "customer" ? "[顧客特定 - QR / リストバンド]" : "[QR / リストバンド照会]"}
             </h2>
           </div>
           <button
             onClick={onClose}
+            aria-label="QRスキャナーを閉じる"
             className="border-thick border-border bg-background p-1 hover:bg-primary hover:text-primary-foreground transition-colors"
           >
-            <X className="h-6 w-6" />
+            <X className="h-6 w-6" aria-hidden="true" />
           </button>
         </div>
 

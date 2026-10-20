@@ -226,6 +226,60 @@ describe("オーナーによる権限付与 (issue #99)", () => {
 	});
 });
 
+describe("イベント当日スタッフ権限", () => {
+	async function seedEventManager() {
+		const email = `${uid("event-manager")}@example.com`;
+		const res = await postJson("/api/auth/sign-up/email", {
+			email,
+			password: "correct-horse-battery-staple",
+			name: "イベント管理者",
+		});
+		expect(res.status).toBeLessThan(400);
+		const cookie = extractCookieHeader(res);
+		const eventId = uid("ev");
+		const membershipId = uid("mb");
+		await testDb().insert(event).values({ id: eventId, eventName: uid("当日スタッフ権限テスト") });
+		await testDb().insert(membership).values({
+			id: membershipId,
+			userEmail: email.toLowerCase(),
+			userName: "イベント管理者",
+			eventId,
+			role: "event_manager",
+			isActive: true,
+		});
+		return { cookie, eventId, membershipId };
+	}
+
+	// 2026-10-20: 登録済みスタッフの担当権限をイベント管理者だけが変更できることを API で確認する。
+	it("イベント管理者は当日スタッフのロールを変更できる", async () => {
+		const manager = await seedEventManager();
+		const staffId = uid("mb");
+		await testDb().insert(membership).values({
+			id: staffId,
+			userEmail: `${uid("staff")}@example.com`,
+			userName: "当日スタッフ",
+			eventId: manager.eventId,
+			role: "event_wristband_staff",
+			isActive: true,
+		});
+
+		const response = await request(`/api/memberships/${staffId}/role`, {
+			method: "PATCH",
+			headers: { "Content-Type": "application/json", ...headers(manager) },
+			body: JSON.stringify({ role: "event_stamp_staff" }),
+		});
+		expect(response.status).toBe(200);
+		const invalidScopeResponse = await request(`/api/memberships/${staffId}/role`, {
+			method: "PATCH",
+			headers: { "Content-Type": "application/json", ...headers(manager) },
+			body: JSON.stringify({ role: "circle_manager" }),
+		});
+		expect(invalidScopeResponse.status).toBe(400);
+		const rows = await testDb().select().from(membership).where(eq(membership.id, staffId));
+		expect(rows[0]!.role).toBe("event_stamp_staff");
+	});
+});
+
 describe("管理者 (circle_admin) ロール", () => {
 	it("オーナーは一般スタッフを管理者にできる", async () => {
 		const owner = await seedStaff(true, "circle_manager");

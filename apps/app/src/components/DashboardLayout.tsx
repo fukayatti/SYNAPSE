@@ -30,7 +30,6 @@ import {
   CalendarCheck,
   Ticket,
   Tag,
-  ChevronDown,
   Download,
   IdCard,
   Activity,
@@ -39,6 +38,7 @@ import {
   X,
   MapPinned,
   Gauge,
+  ShieldAlert,
 } from "lucide-react";
 
 interface MenuItem {
@@ -96,6 +96,50 @@ export default function DashboardLayout({
   // ドロワー(オーバーレイ)に変更し、開閉でページ本体の長さが変わらないようにする。
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
+  const publishMobileMenuState = (open: boolean) => {
+    window.dispatchEvent(new CustomEvent("fesflow:dashboard-menu-state", { detail: open }));
+  };
+  const closeMobileMenu = () => {
+    setIsMobileMenuOpen(false);
+    publishMobileMenuState(false);
+  };
+
+  // 2026-10-20: ロゴ横のトリガーから開き、ドロワー内の操作から閉じた時も同じ状態へ同期する。
+  useEffect(() => {
+    const open = () => {
+      setIsMobileMenuOpen(true);
+      window.dispatchEvent(new CustomEvent("fesflow:dashboard-menu-state", { detail: true }));
+    };
+    const close = () => {
+      setIsMobileMenuOpen(false);
+      window.dispatchEvent(new CustomEvent("fesflow:dashboard-menu-state", { detail: false }));
+    };
+    window.addEventListener("fesflow:dashboard-menu-open", open);
+    window.addEventListener("fesflow:dashboard-menu-close", close);
+    window.dispatchEvent(new CustomEvent("fesflow:dashboard-menu-state", { detail: false }));
+    return () => {
+      window.removeEventListener("fesflow:dashboard-menu-open", open);
+      window.removeEventListener("fesflow:dashboard-menu-close", close);
+    };
+  }, []);
+
+  // 2026-10-20: サイドバーの上下を固定ヘッダーの実寸に追従させ、画面の高さに合わせて内側だけスクロールする。
+  useEffect(() => {
+    const header = document.querySelector<HTMLElement>("[data-app-header]");
+    if (!header || typeof ResizeObserver === "undefined") return;
+    const root = document.documentElement;
+    const previousHeight = root.style.getPropertyValue("--app-header-height");
+    const updateHeight = () => root.style.setProperty("--app-header-height", `${header.getBoundingClientRect().height}px`);
+    const observer = new ResizeObserver(updateHeight);
+    observer.observe(header);
+    updateHeight();
+    return () => {
+      observer.disconnect();
+      if (previousHeight) root.style.setProperty("--app-header-height", previousHeight);
+      else root.style.removeProperty("--app-header-height");
+    };
+  }, []);
+
   // 背景スクロールロック (Modal.tsx と同じパターン)。アンマウント/クローズ時に必ず元へ戻す。
   useEffect(() => {
     if (!isMobileMenuOpen) return;
@@ -108,7 +152,7 @@ export default function DashboardLayout({
 
   // Escape 閉じ・フォーカストラップは Modal.tsx と同じ共通フックを再利用する。
   const drawerFocusTrapRef = useFocusTrap<HTMLDivElement>(isMobileMenuOpen, {
-    onEscape: () => setIsMobileMenuOpen(false),
+    onEscape: closeMobileMenu,
   });
   // 2026-07-16: 従来は useState + useEffect(依存配列 []) で mount 時に一度だけ
   // localStorage の circleId を読んでいたため、同一パス上でヘッダーからスペースを
@@ -192,46 +236,47 @@ export default function DashboardLayout({
     {
       label: "運営",
       items: [
-        { title: "開催中の混雑・人員配置", tab: "behavior", icon: Activity },
-        { title: "混雑モニター", tab: "congestion", icon: Gauge },
-        { title: "注文モニタ", tab: "order-monitor", icon: MonitorCheck },
-        { title: "在庫・売り切れ", tab: "inventory", icon: Boxes },
-        { title: "一斉アナウンス", tab: "announce", icon: Megaphone },
-        { title: "リストバンド管理", tab: "wristbands", icon: IdCard },
-        { title: "景品交換受付", tab: "stamp-redemptions", icon: Ticket, permission: "event:write" },
-        { title: "スタンプラリー", tab: "stamp-rally", icon: Ticket },
+        { title: "開催中の混雑・人員配置", tab: "behavior", icon: Activity, permission: "event:write" },
+        { title: "混雑モニター", tab: "congestion", icon: Gauge, permission: "event:write" },
+        { title: "注文モニタ", tab: "order-monitor", icon: MonitorCheck, permission: "order:read" },
+        { title: "在庫・売り切れ", tab: "inventory", icon: Boxes, permission: "stock:read" },
+        { title: "一斉アナウンス", tab: "announce", icon: Megaphone, permission: "member:write" },
+        { title: "リストバンド管理", tab: "wristbands", icon: IdCard, permission: "member:write" },
+        { title: "紛失バンド交換", tab: "wristband-loss", icon: ShieldAlert, permission: "wristband:replace" },
+        { title: "景品交換受付", tab: "stamp-redemptions", icon: Ticket, permission: "stamp-rally:operate" },
+        { title: "スタンプラリー", tab: "stamp-rally", icon: Ticket, permission: "event:write" },
       ],
     },
     {
       label: "開催後の振り返り",
       items: [
-        { title: "イベント全体レポート", tab: "analytics", icon: BarChart3 },
+        { title: "イベント全体レポート", tab: "analytics", icon: BarChart3, permission: "sales:read" },
       ],
     },
     {
       label: "売上・分析",
       items: [
-        { title: "レビュー", tab: "reviews", icon: Star },
-        { title: "全体売上管理", tab: "sales", icon: TrendingUp },
-        { title: "精算", tab: "settlement", icon: Calculator },
-        { title: "日次締め", tab: "daily-close", icon: CalendarCheck },
-        { title: "データエクスポート", tab: "export", icon: Download },
+        { title: "レビュー", tab: "reviews", icon: Star, permission: "sales:read" },
+        { title: "全体売上管理", tab: "sales", icon: TrendingUp, permission: "sales:read" },
+        { title: "精算", tab: "settlement", icon: Calculator, permission: "sales:read" },
+        { title: "日次締め", tab: "daily-close", icon: CalendarCheck, permission: "sales:read" },
+        { title: "データエクスポート", tab: "export", icon: Download, permission: "sales:read" },
       ],
     },
     {
       label: "管理",
       items: [
-        { title: "サークル管理", tab: "circles", icon: Grid },
-        { title: "店舗エリア", tab: "store-areas", icon: MapPinned },
-        { title: "スタッフ管理", tab: "staff", icon: Users },
-        { title: "イベント設定", tab: "settings", icon: Settings },
-        { title: "契約状況", tab: "contract", icon: CreditCard },
+        { title: "サークル管理", tab: "circles", icon: Grid, permission: "circle:read" },
+        { title: "店舗エリア", tab: "store-areas", icon: MapPinned, permission: "event:write" },
+        { title: "スタッフ管理", tab: "staff", icon: Users, permission: "staff:read" },
+        { title: "イベント設定", tab: "settings", icon: Settings, permission: "event:write" },
+        { title: "契約状況", tab: "contract", icon: CreditCard, permission: "event:write" },
       ],
     },
     {
       label: "拡張",
       items: [
-        ...(lotteryEnabled ? [{ title: "抽選", tab: "lottery", icon: Ticket }] : []),
+        ...(lotteryEnabled ? [{ title: "抽選", tab: "lottery", icon: Ticket, permission: "event:write" }] : []),
       ],
     },
   ];
@@ -269,7 +314,7 @@ export default function DashboardLayout({
       : systemGroups;
 
   // 空グループ (抽選OFFなど拡張機能が全て無効な場合) は見出しごと出さない
-  // 権限のない項目は出さない (permission 指定のあるサークル項目のみ。権限の読み込み中は全項目を出して
+  // 権限のない項目は出さない (permission 指定項目。権限の読み込み中は全項目を出して
   // 一瞬メニューが空になるのを避ける)。可否の最終判定は各ページのガードと API が行う。
   const visibleMenuGroups = menuGroups
     .map((group) => ({
@@ -288,6 +333,62 @@ export default function DashboardLayout({
       return location.pathname === item.href;
     }
     return activeTab === item.tab;
+  });
+  const firstVisibleTab = menuItems.find((item) => item.tab)?.tab;
+
+  useEffect(() => {
+    if (type !== "event" || authLoading || activeItem || !firstVisibleTab || !onTabChange) return;
+    // 2026-10-20: URL直入力でも権限外のタブを描画せず、そのスタッフが使える最初の画面へ移す。
+    onTabChange(firstVisibleTab);
+  }, [type, authLoading, activeItem?.tab, firstVisibleTab, onTabChange]);
+  // 2026-10-20: 管理メニューのカテゴリは常時表示し、画面高を超える分だけサイドバー内でスクロールする。
+  const renderMenuGroups = (isMobile: boolean) => visibleMenuGroups.map((group) => {
+    return (
+      <div key={group.label} className={cn("pt-3 first:pt-0", !isMobile && "md:w-full")}>
+        <p className="px-3 pb-1 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+          {group.label}
+        </p>
+        <div className="ml-2 space-y-0.5 border-l border-border pl-2">
+          {group.items.map((item, itemIndex) => {
+            const Icon = item.icon;
+            const isCircleActive = type === "circle" && location.pathname === item.href;
+            const isTabActive = type !== "circle" && activeTab === item.tab;
+            const isActive = isCircleActive || isTabActive;
+            const itemClass = cn(
+              "flex min-h-11 w-full items-center gap-2 px-3 py-2 text-left text-[12px] font-bold uppercase transition-all border border-transparent select-none cursor-pointer",
+              isActive
+                ? "bg-primary text-primary-foreground border-primary"
+                : "text-muted-foreground hover:bg-muted hover:text-foreground",
+              !isMobile && "md:min-h-10",
+            );
+            const handleItemClick = () => {
+              if (isMobile) closeMobileMenu();
+              if (type !== "circle" && item.tab && onTabChange) {
+                // 2026-10-16: システム/イベントのタブ切り替えも未保存確認を通す。
+                requestGuardedNavigation(() => onTabChange(item.tab!));
+              }
+            };
+
+            return type === "circle" && item.href ? (
+              <Link
+                key={item.href}
+                to={item.href}
+                onClick={() => isMobile && closeMobileMenu()}
+                className={itemClass}
+              >
+                <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
+                <span className="truncate">{item.title}</span>
+              </Link>
+            ) : (
+              <button key={item.tab ?? itemIndex} type="button" onClick={handleItemClick} className={itemClass}>
+                <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
+                <span className="truncate">{item.title}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    );
   });
 
   return (
@@ -330,24 +431,6 @@ export default function DashboardLayout({
         </div>
       )}
 
-      {/* モバイルメニュー トリガー (md未満)。押すと下のドロワーが画面左からスライドインする。
-          トリガー自体はページ内に留まる (差し込み型ではない) のでページの高さは変わらない。 */}
-      <div className="md:hidden w-full border-thick border-border bg-background mb-4">
-        <button
-          onClick={() => setIsMobileMenuOpen(true)}
-          aria-expanded={isMobileMenuOpen}
-          aria-haspopup="dialog"
-          aria-label="メニューを開く"
-          className="flex items-center justify-between w-full px-4 py-3 text-xs font-bold uppercase cursor-pointer"
-        >
-          <span className="flex items-center gap-2">
-            {activeItem ? <activeItem.icon className="h-4 w-4 shrink-0 text-muted-foreground" /> : null}
-            {activeItem ? activeItem.title : "メニューを選択"}
-          </span>
-          <ChevronDown className="h-4 w-4" />
-        </button>
-      </div>
-
       {/* モバイルメニュー ドロワー (md未満)。トリガーとは別要素として常にマウントしておき、
           開閉は translate-x の CSS transition のみで行う (アンマウント方式だと閉じるアニメーションが
           出せないため)。閉じている間は `inert` で背景要素としてフォーカス/操作を無効化し、
@@ -363,11 +446,12 @@ export default function DashboardLayout({
         {/* オーバーレイ: タップで閉じる。背景はスクロールロック済み (useEffect 参照)。 */}
         <div
           className="absolute inset-0 bg-foreground/80 backdrop-blur-sm"
-          onClick={() => setIsMobileMenuOpen(false)}
+          onClick={closeMobileMenu}
         />
 
         <div
           ref={drawerFocusTrapRef}
+          id="dashboard-mobile-menu"
           inert={!isMobileMenuOpen}
           tabIndex={-1}
           role="dialog"
@@ -378,125 +462,33 @@ export default function DashboardLayout({
             isMobileMenuOpen ? "translate-x-0" : "-translate-x-full",
           )}
         >
-          <div className="flex items-center justify-between px-4 py-3 border-b-thick border-border shrink-0">
-            <span className="text-xs font-bold uppercase">メニュー</span>
+          <div className="relative flex items-center px-4 py-3 border-b-thick border-border shrink-0">
+            <span className="pl-12 text-xs font-bold uppercase">メニュー</span>
             <button
-              onClick={() => setIsMobileMenuOpen(false)}
+              onClick={closeMobileMenu}
               aria-label="閉じる"
-              className="p-1 hover:bg-muted border-thick border-transparent hover:border-border transition-all shrink-0"
+              className="absolute left-2 top-2 z-[70] inline-flex h-9 w-9 items-center justify-center border-thick border-border bg-background p-1 transition-all hover:bg-muted"
             >
               <X className="h-4 w-4" />
             </button>
           </div>
 
-          {/* カテゴリ見出し付きで描画。ドロワー内で完結してスクロールできるようにする。 */}
+          {/* 2026-10-20: モバイルのドロワーでも全カテゴリを見せ、項目探しのための開閉操作をなくす。 */}
           <nav className="p-1.5 space-y-0.5 overflow-y-auto flex-1">
-            {visibleMenuGroups.map((group, gIdx) => (
-              <div key={group.label} className={gIdx === 0 ? "" : "pt-2"}>
-                <p className="px-3 pb-1 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-                  {group.label}
-                </p>
-                <div className="space-y-0.5">
-                  {group.items.map((item, idx) => {
-                    const Icon = item.icon;
-                    const isCircleActive = type === "circle" && location.pathname === item.href;
-                    const isTabActive = type !== "circle" && activeTab === item.tab;
-                    const isActive = isCircleActive || isTabActive;
-
-                    const baseClass = cn(
-                      "flex items-center gap-2 px-3 py-2 text-[12px] font-bold uppercase rounded-none transition-all border border-transparent w-full select-none cursor-pointer text-left",
-                      isActive
-                        ? "bg-primary text-primary-foreground border-primary"
-                        : "hover:bg-muted text-muted-foreground hover:text-foreground"
-                    );
-
-                    const handleItemClick = () => {
-                      setIsMobileMenuOpen(false);
-                      if (type !== "circle" && item.tab && onTabChange) {
-                        // 2026-10-16: システム/イベントのタブ切り替えも未保存確認を通す。
-                        requestGuardedNavigation(() => onTabChange(item.tab!));
-                      }
-                    };
-
-                    if (type === "circle" && item.href) {
-                      return (
-                        <Link
-                          key={idx}
-                          to={item.href}
-                          className="block w-full"
-                          onClick={() => setIsMobileMenuOpen(false)}
-                        >
-                          <span className={baseClass}>
-                            <Icon className="h-4 w-4 shrink-0" />
-                            {item.title}
-                          </span>
-                        </Link>
-                      );
-                    } else {
-                      return (
-                        <button key={idx} onClick={handleItemClick} className={baseClass}>
-                          <Icon className="h-4 w-4 shrink-0" />
-                          {item.title}
-                        </button>
-                      );
-                    }
-                  })}
-                </div>
-              </div>
-            ))}
+            {renderMenuGroups(true)}
           </nav>
         </div>
       </div>
 
       {/* 2カラムレイアウト */}
       <div className="flex flex-col md:flex-row gap-6 items-start">
-        {/* 左サイドバー: PCでは縦並び、モバイルでは非表示 (アコーディオンがカバーするため) */}
-        <aside className="hidden md:block w-full md:w-64 shrink-0 border-thick border-border bg-background p-2 rounded-none shadow-none md:sticky md:top-4">
+        {/* 左サイドバー: 全カテゴリを表示し、画面高に収まらない項目は内側でスクロールする。 */}
+        <aside
+          className="hidden w-full shrink-0 overscroll-contain border-thick border-border bg-background p-2 shadow-none md:sticky md:block md:w-64 md:self-start md:overflow-y-auto"
+          style={{ top: "calc(var(--app-header-height, 0px) + 1rem)", height: "calc(100dvh - var(--app-header-height, 0px) - 2rem)" }}
+        >
           <nav className="flex md:flex-col gap-1">
-            {visibleMenuGroups.map((group, gIdx) => (
-              <div key={group.label} className={cn("md:w-full", gIdx === 0 ? "" : "md:mt-2")}>
-                {/* カテゴリ見出し: RawBlockの太字uppercaseなメイン項目と区別するため、
-                    小さく控えめな muted テキストにする */}
-                <p className="px-3 pb-1 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-                  {group.label}
-                </p>
-                {group.items.map((item, idx) => {
-                  const Icon = item.icon;
-                  const isCircleActive = type === "circle" && location.pathname === item.href;
-                  const isTabActive = type !== "circle" && activeTab === item.tab;
-                  const isActive = isCircleActive || isTabActive;
-
-                  const baseClass = cn(
-                    "flex items-center gap-2 px-3 py-2 text-[12px] font-bold uppercase rounded-none transition-all border border-transparent whitespace-nowrap md:w-full select-none cursor-pointer",
-                    isActive
-                      ? "bg-primary text-primary-foreground border-primary"
-                      : "hover:bg-muted text-muted-foreground hover:text-foreground hover:border-border"
-                  );
-
-                  if (type === "circle" && item.href) {
-                    return (
-                      <Link key={idx} to={item.href} className="block md:w-full">
-                        <span className={baseClass}>
-                          <Icon className="h-4 w-4 shrink-0" />
-                          {item.title}
-                        </span>
-                      </Link>
-                    );
-                  } else {
-                    return (
-                      <button
-                        key={idx}
-                        onClick={() => item.tab && onTabChange && requestGuardedNavigation(() => onTabChange(item.tab!))}
-                        className={baseClass}
-                      >
-                        <Icon className="h-4 w-4 shrink-0" />
-                        {item.title}
-                      </button>
-                    );
-                  }
-                })}
-              </div>
-            ))}
+            {renderMenuGroups(false)}
           </nav>
         </aside>
 
@@ -504,7 +496,11 @@ export default function DashboardLayout({
         {/* min-w-0: flex 子要素の既定 min-width:auto により中身が広いと縮まず、
             ビューポートを超えて横スクロール(モバイルの横幅ズレ)が発生するのを防ぐ。 */}
         <main className="flex-1 w-full min-w-0 border-thick border-border p-4 md:p-6 bg-background rounded-none shadow-none min-h-[500px]">
-          {children}
+          {type === "event" && !authLoading && !activeItem ? (
+            <p className="border-thick border-warning bg-warning/10 p-4 text-sm" role="status">
+              この画面を利用する権限がありません。利用できる管理画面へ移動しています。
+            </p>
+          ) : children}
         </main>
       </div>
     </div>

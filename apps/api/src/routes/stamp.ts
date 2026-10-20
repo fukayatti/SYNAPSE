@@ -452,11 +452,12 @@ stampRoutes.get("/visitor/:code", async (c) => {
   return c.json(await getVisitorRally(db, visitor));
 });
 
+// 2026-10-20: 景品受付の専用権限を設け、イベント編集権限がなくても当日担当者が受付できるようにする。
 // イベントスタッフ向け来場者照会。入力は eventUser ID または有効なリストバンドID。
 stampRoutes.get("/event/:eventId/lookup/:code", async (c) => {
   const db = c.get("db");
   const eventId = c.req.param("eventId");
-  if (!(await hasPermission(c, null, "event:write", eventId))) {
+  if (!(await hasPermission(c, null, "stamp-rally:operate", eventId))) {
     apiError("FORBIDDEN", "このイベントの景品交換を扱う権限がありません");
   }
   const visitor = await resolveVisitor(db, eventId, c.req.param("code"));
@@ -475,7 +476,7 @@ stampRoutes.post(
   async (c) => {
     const db = c.get("db");
     const eventId = c.req.param("eventId");
-    if (!(await hasPermission(c, null, "event:write", eventId))) {
+    if (!(await hasPermission(c, null, "stamp-rally:operate", eventId))) {
       apiError("FORBIDDEN", "このイベントの景品交換を記録する権限がありません");
     }
     const visitor = await resolveVisitor(db, eventId, c.req.valid("json").code);
@@ -492,7 +493,7 @@ stampRoutes.post(
 stampRoutes.get("/event/:eventId/redemptions", async (c) => {
   const db = c.get("db");
   const eventId = c.req.param("eventId");
-  if (!(await hasPermission(c, null, "event:write", eventId))) {
+  if (!(await hasPermission(c, null, "stamp-rally:operate", eventId))) {
     apiError("FORBIDDEN", "このイベントの景品交換記録を閲覧する権限がありません");
   }
   const settingsRows = await db.select({ stampRallySettings: event.stampRallySettings }).from(event)

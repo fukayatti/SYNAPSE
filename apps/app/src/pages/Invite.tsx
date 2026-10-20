@@ -18,7 +18,7 @@ import { CheckCircle, XCircle, UserPlus, LogIn } from "lucide-react";
 // 招待受諾ページ (/circle/invite/:token, /event/invite/:token 共通)。
 // 2026-07-12 (SaaS): 招待種別を lookup で判定して分岐する。
 // - circle_host 招待 → サークル作成が必要なのでオンボーディングへ委譲。
-// - circle_member / event_manager 招待 → その場で受諾し、所属を解決して適切なスペースへ。
+// - circle_member / event 管理・当日スタッフ招待 → その場で受諾し、所属を解決して適切なスペースへ。
 // 未ログインなら better-auth ログインへ誘導し、callbackUrl でこのページに戻す
 // (Google ログインは callbackUrl をそのまま OAuth の戻り先にするため招待が引き継がれる)。
 export default function InvitePage() {

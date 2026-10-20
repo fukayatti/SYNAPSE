@@ -18,7 +18,6 @@ import {
   ChevronRight,
   Edit,
   FileUp,
-  ShieldAlert,
 } from "lucide-react";
 import { toast } from "sonner";
 import { QrScannerModal } from "@/components/pos/qr-scanner-modal";
@@ -28,7 +27,6 @@ import { digitalQrIssueUrl } from "@/lib/digital-qr-url";
 import { visitorUrl } from "@/lib/visitor-url";
 import { generateWristbandIds } from "@/lib/wristband-id-generator";
 import { WristbandBatchHistory } from "@/components/event/WristbandBatchHistory";
-import { LostWristbandsTab } from "@/components/event/LostWristbandsTab";
 import { VisitorRecordEditor } from "@/components/event/VisitorRecordEditor";
 
 interface WristbandsTabProps {
@@ -60,7 +58,6 @@ const VISITOR_SORT_COLUMNS: { label: string; field: Exclude<VisitorSortField, "c
 
 export function WristbandsTab({ eventId, hasPhysicalWristband = true, allowSelfIssue = true }: WristbandsTabProps) {
   const queryClient = useQueryClient();
-  const [activeView, setActiveView] = useState<"management" | "lost">("management");
 
   // 検索・表示関連の状態
   const [searchInput, setSearchInput] = useState("");
@@ -185,23 +182,6 @@ export function WristbandsTab({ eventId, hasPhysicalWristband = true, allowSelfI
     },
   });
 
-  // リストバンド状態更新 API
-  const updateWristbandMutation = useMutation({
-    mutationFn: (input: { id: string; status: any; userId?: string }) =>
-      wristbandApi.update(input.id, { status: input.status, userId: input.userId }),
-    onSuccess: () => {
-      toast.success("リストバンド情報を更新しました");
-      queryClient.invalidateQueries({ queryKey: ["eventVisitors"] });
-      queryClient.invalidateQueries({ queryKey: ["lostWristbands", eventId] });
-      if (selectedUser?.user?.id) {
-        lookupMutation.mutate(selectedUser.user.id);
-      }
-    },
-    onError: (err: any) => {
-      toast.error(err.message || "リストバンド状態の更新に失敗しました");
-    },
-  });
-
   // スマホ用デジタルQR新規発行 API
   const issueUserMutation = useMutation({
     mutationFn: () => wristbandApi.issue(eventId),
@@ -311,12 +291,6 @@ export function WristbandsTab({ eventId, hasPhysicalWristband = true, allowSelfI
     }
   };
 
-  // 紛失ロックの簡易実行
-  const handleReportLost = (wbId: string) => {
-    if (!window.confirm("このリストバンドを紛失としてロックしますか？")) return;
-    updateWristbandMutation.mutate({ id: wbId, status: "lost" });
-  };
-
   const handleScannerScan = (userId: string, wristbandId: string | null) => {
     const code = wristbandId || userId;
     if (scannerTarget === "lookup") {
@@ -372,10 +346,6 @@ export function WristbandsTab({ eventId, hasPhysicalWristband = true, allowSelfI
     }));
   };
 
-  if (activeView === "lost") {
-    return <LostWristbandsTab eventId={eventId} onBack={() => setActiveView("management")} />;
-  }
-
   return (
     <div className="space-y-6 font-mono text-foreground">
       {/* 画面ヘッダー部 */}
@@ -386,18 +356,11 @@ export function WristbandsTab({ eventId, hasPhysicalWristband = true, allowSelfI
             来場者・リストバンド管理
           </h2>
           <p className="text-[10px] text-muted-foreground mt-1">
-            来場者アカウント情報の変更、紛失リストバンドのロック・再発行、スマホデジタルIDの発行などを一括管理します。
+            来場者アカウント情報とバンド登録を管理します。
           </p>
         </div>
         <div className="flex w-full max-w-full flex-col gap-2 sm:w-auto sm:flex-row">
-          <Button
-            onClick={() => setActiveView("lost")}
-            variant="outline"
-            className="w-full sm:w-auto border-thick border-error h-9 text-xs font-bold rounded-none shadow-none px-3"
-          >
-            <ShieldAlert className="h-4 w-4 mr-1.5" />
-            紛失対応
-          </Button>
+          {/* 2026-10-20: 紛失交換は独立画面へ分離したため、一覧に重複導線を置かない。 */}
           <Button
             onClick={() => {
               setLookupCode("");
@@ -475,7 +438,8 @@ export function WristbandsTab({ eventId, hasPhysicalWristband = true, allowSelfI
                 </>
               ) : (
                 <p role="status" className="border-thin border-border bg-muted/20 p-3 text-xs leading-relaxed text-muted-foreground">
-                  来場者によるスマートフォンQRのセルフ発行はイベント設定で無効です。物理バンドを使わない個別対応は、来場者の詳細からスタッフ権限で行ってください。
+                  {/* 2026-10-20: OFFの理由に加え、利用再開に必要な設定場所と操作をその場で案内する。 */}
+                  来場者のQRセルフ発行はOFFです。利用する場合はイベント設定で「来場者のQRセルフ発行を許可する」をONにしてください。
                 </p>
               )}
             </CardContent>
@@ -732,25 +696,34 @@ export function WristbandsTab({ eventId, hasPhysicalWristband = true, allowSelfI
       </Card>
 
       {/* 2026-09-27: 来場者の行が画面を押し下げないよう、検索と編集操作を表モーダルにまとめる。 */}
-      <Modal isOpen={isVisitorTableOpen} onClose={() => setIsVisitorTableOpen(false)} title="登録済み来場者" subtitle={`全${visitorTotal}件`} maxWidth="full">
+      <Modal
+        isOpen={isVisitorTableOpen}
+        onClose={() => setIsVisitorTableOpen(false)}
+        title="登録済み来場者"
+        subtitle={`全${visitorTotal}件`}
+        maxWidth="full"
+        contentClassName="min-h-0 flex flex-col overflow-y-auto"
+      >
+      {/* 2026-10-20: 検索・絞り込みの下に画面高の一覧を置く。先に条件を指定し、その後一覧領域へ移動して行を探せるようにする。 */}
+      <div className="flex shrink-0 flex-col gap-4">
       {/* 検索バー */}
-      <Card className="rounded-none bg-background shadow-none border-thick border-border">
-        <CardContent className="p-4">
+      <Card className="shrink-0 gap-0 rounded-none bg-background shadow-none border-thick border-border p-0">
+        <CardContent className="p-2 sm:p-4">
           {/* 2026-09-27: 狭い画面では検索欄を独立行へ折り返し、操作ボタンの幅を確保する。 */}
-          <form onSubmit={handleSearchSubmit} className="flex min-w-0 flex-wrap gap-2">
+          <form onSubmit={handleSearchSubmit} className="flex min-w-0 flex-wrap gap-1.5 sm:gap-2">
             <div className="relative min-w-0 basis-full sm:basis-0 sm:flex-1">
               <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
               <Input
                 placeholder="ニックネーム、呼出ID（数字のみ）、またはお好きな日付（YYYY-MM-DD）で検索..."
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
-                className="min-w-0 w-full pl-9 border-thick border-border rounded-none focus-visible:ring-0 h-10 text-xs bg-background font-mono"
+                className="min-w-0 w-full pl-9 border-thick border-border rounded-none focus-visible:ring-0 h-9 sm:h-10 text-xs bg-background font-mono"
               />
             </div>
             <Button
               type="submit"
               disabled={isLoading}
-              className="border-thick border-primary bg-primary text-primary-foreground hover:bg-background hover:text-foreground h-10 text-xs font-bold rounded-none shadow-none px-5"
+              className="border-thick border-primary bg-primary text-primary-foreground hover:bg-background hover:text-foreground h-9 sm:h-10 text-xs font-bold rounded-none shadow-none px-5"
             >
               検索
             </Button>
@@ -759,7 +732,7 @@ export function WristbandsTab({ eventId, hasPhysicalWristband = true, allowSelfI
                 type="button"
                 onClick={handleResetSearch}
                 variant="outline"
-                className="border-thick border-border h-10 text-xs font-bold rounded-none shadow-none px-3"
+                className="border-thick border-border h-9 sm:h-10 text-xs font-bold rounded-none shadow-none px-3"
               >
                 クリア
               </Button>
@@ -769,7 +742,7 @@ export function WristbandsTab({ eventId, hasPhysicalWristband = true, allowSelfI
               onClick={() => refetch()}
               variant="outline"
               disabled={isLoading}
-              className="border-thick border-border h-10 px-3 rounded-none"
+              className="border-thick border-border h-9 sm:h-10 px-3 rounded-none"
             >
               <RefreshCw className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`} />
             </Button>
@@ -777,8 +750,8 @@ export function WristbandsTab({ eventId, hasPhysicalWristband = true, allowSelfI
         </CardContent>
       </Card>
 
-      <Card className="rounded-none bg-background shadow-none border-thick border-border">
-        <CardContent className="space-y-3 p-4">
+      <Card className="shrink-0 gap-0 rounded-none bg-background shadow-none border-thick border-border p-0">
+        <CardContent className="space-y-1.5 p-2 sm:space-y-3 sm:p-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <p className="text-xs font-bold uppercase">一覧を絞り込む</p>
             <Button
@@ -786,13 +759,13 @@ export function WristbandsTab({ eventId, hasPhysicalWristband = true, allowSelfI
               variant="outline"
               onClick={handleResetFilters}
               disabled={filters.bandType === "all" && filters.accountStatus === "all" && filters.profileStatus === "all"}
-              className="h-8 border-thick border-border px-3 text-[10px] font-bold"
+              className="h-7 sm:h-8 border-thick border-border px-3 text-[10px] font-bold"
             >
               フィルターをクリア
             </Button>
           </div>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <label className="space-y-1 text-[10px] font-bold">
+          <div className="grid grid-cols-2 gap-1 sm:grid-cols-3 sm:gap-3">
+            <label className="space-y-0.5 text-[10px] font-bold sm:space-y-1">
               <span className="block">登録方法</span>
               <select
                 aria-label="登録方法で絞り込む"
@@ -800,7 +773,7 @@ export function WristbandsTab({ eventId, hasPhysicalWristband = true, allowSelfI
                 onChange={(event) => {
                   setFilters((current) => ({ ...current, bandType: event.target.value as VisitorFilters["bandType"] }));
                 }}
-                className="h-10 w-full border-thick border-border bg-background px-2 text-xs font-mono focus-visible:outline-2 focus-visible:outline-offset-2"
+                className="h-9 sm:h-10 w-full border-thick border-border bg-background px-2 text-xs font-mono focus-visible:outline-2 focus-visible:outline-offset-2"
               >
                 <option value="all">すべて</option>
                 <option value="physical">物理リストバンド</option>
@@ -808,7 +781,7 @@ export function WristbandsTab({ eventId, hasPhysicalWristband = true, allowSelfI
                 <option value="unlinked">有効なIDなし</option>
               </select>
             </label>
-            <label className="space-y-1 text-[10px] font-bold">
+            <label className="space-y-0.5 text-[10px] font-bold sm:space-y-1">
               <span className="block">アカウント状態</span>
               <select
                 aria-label="アカウント状態で絞り込む"
@@ -816,14 +789,14 @@ export function WristbandsTab({ eventId, hasPhysicalWristband = true, allowSelfI
                 onChange={(event) => {
                   setFilters((current) => ({ ...current, accountStatus: event.target.value as VisitorFilters["accountStatus"] }));
                 }}
-                className="h-10 w-full border-thick border-border bg-background px-2 text-xs font-mono focus-visible:outline-2 focus-visible:outline-offset-2"
+                className="h-9 sm:h-10 w-full border-thick border-border bg-background px-2 text-xs font-mono focus-visible:outline-2 focus-visible:outline-offset-2"
               >
                 <option value="all">すべて</option>
                 <option value="available">利用可能</option>
                 <option value="banned">利用停止</option>
               </select>
             </label>
-            <label className="space-y-1 text-[10px] font-bold">
+            <label className="space-y-0.5 text-[10px] font-bold sm:space-y-1">
               <span className="block">プロフィール登録</span>
               <select
                 aria-label="プロフィール登録状態で絞り込む"
@@ -831,7 +804,7 @@ export function WristbandsTab({ eventId, hasPhysicalWristband = true, allowSelfI
                 onChange={(event) => {
                   setFilters((current) => ({ ...current, profileStatus: event.target.value as VisitorFilters["profileStatus"] }));
                 }}
-                className="h-10 w-full border-thick border-border bg-background px-2 text-xs font-mono focus-visible:outline-2 focus-visible:outline-offset-2"
+                className="h-9 sm:h-10 w-full border-thick border-border bg-background px-2 text-xs font-mono focus-visible:outline-2 focus-visible:outline-offset-2"
               >
                 <option value="all">すべて</option>
                 <option value="complete">登録済み</option>
@@ -843,8 +816,8 @@ export function WristbandsTab({ eventId, hasPhysicalWristband = true, allowSelfI
       </Card>
 
       {/* 来場者一覧テーブル */}
-      <Card className="rounded-none bg-background shadow-none border-thick border-border">
-        <CardHeader className="p-4 pb-2 border-b-thin border-border bg-muted/20 flex flex-col items-start gap-2 sm:flex-row sm:items-center sm:justify-between">
+      <Card className="flex h-[calc(100dvh-7rem)] min-h-[calc(100dvh-7rem)] shrink-0 flex-col gap-0 rounded-none bg-background shadow-none border-thick border-border p-0">
+        <CardHeader className="p-2 pb-1 border-b-thin border-border bg-muted/20 flex flex-col items-start gap-2 sm:p-4 sm:pb-2 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <CardTitle className="text-xs uppercase font-bold">登録済み来場者</CardTitle>
             <CardDescription className="text-[10px]">
@@ -858,8 +831,9 @@ export function WristbandsTab({ eventId, hasPhysicalWristband = true, allowSelfI
             {visitorTotal} 件
           </Badge>
         </CardHeader>
-        <CardContent className="p-0">
-          <div ref={visitorScrollContainerRef} className="max-h-[55vh] overflow-auto">
+        <CardContent className="flex min-h-0 flex-1 flex-col p-0">
+          {/* 2026-10-20: 一覧カードを画面高に近い固定領域にし、多数の来場者を一覧内で探せるようにする。 */}
+          <div ref={visitorScrollContainerRef} className="min-h-0 flex-1 overflow-auto">
             {isLoading ? (
               <div className="p-8 text-center text-xs text-muted-foreground flex items-center justify-center gap-2">
                 <Loader2 className="h-4 w-4 animate-spin" />
@@ -897,7 +871,6 @@ export function WristbandsTab({ eventId, hasPhysicalWristband = true, allowSelfI
                         </button>
                       </th>
                     ))}
-                    <th className="p-3 text-right">バンド操作</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -974,22 +947,6 @@ export function WristbandsTab({ eventId, hasPhysicalWristband = true, allowSelfI
                           <span className="text-muted-foreground text-[10px]">未紐付け</span>
                         )}
                       </td>
-                      <td className="p-3 text-right flex justify-end gap-1.5">
-                        {res.wristband && (res.wristband.status === "active" || res.wristband.status === "smartphone") && (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => {
-                              // 2026-09-27: 確認操作の前に一覧モーダルを閉じ、Escape の対象を一つに保つ。
-                              setIsVisitorTableOpen(false);
-                              handleReportLost(res.wristband.id);
-                            }}
-                            className="h-7 text-[10px] rounded-none border-thick border-border bg-background hover:bg-destructive hover:text-white"
-                          >
-                            ロック
-                          </Button>
-                        )}
-                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -1021,6 +978,7 @@ export function WristbandsTab({ eventId, hasPhysicalWristband = true, allowSelfI
           </div>
         </CardContent>
       </Card>
+      </div>
       </Modal>
 
       {/* ==========================================

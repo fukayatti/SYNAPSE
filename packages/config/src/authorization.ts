@@ -3,6 +3,9 @@
 export const ROLES = {
   SUPER_ADMIN: "super_admin",
   EVENT_MANAGER: "event_manager",
+  EVENT_STAFF: "event_staff",
+  EVENT_WRISTBAND_STAFF: "event_wristband_staff",
+  EVENT_STAMP_STAFF: "event_stamp_staff",
   CIRCLE_MANAGER: "circle_manager",
   // 管理者 (2026-10-05): オーナー (circle_manager) が個別に付与する。メニュー編集・売上・クーポンなど
   // サークルの運営権限はオーナーと同じだが、メンバー管理・オーナー譲渡・基本情報の変更は持たない
@@ -20,13 +23,19 @@ export const ROLE_PERMISSIONS = {
     "order:read", "order:write", "order:delete", "staff:read", "staff:write", "staff:delete",
     "stock:read", "stock:write", "sales:read", "member:read", "member:write", "member:delete",
     "coupon:read", "coupon:write", "discount:read", "discount:write",
+    "wristband:replace", "stamp-rally:operate",
   ],
   [ROLES.EVENT_MANAGER]: [
     "event:read", "event:write", "circle:read", "circle:write", "circle:delete",
     "menu:read", "menu:write", "menu:delete", "order:read", "order:write", "order:delete",
     "staff:read", "staff:write", "staff:delete", "stock:read", "stock:write", "sales:read",
     "member:read", "member:write", "member:delete", "coupon:read", "coupon:write", "discount:read", "discount:write",
+    "wristband:replace", "stamp-rally:operate",
   ],
+  // 2026-10-20: 当日スタッフは機能単位のロールに分け、イベント管理者が担当範囲だけを付与できるようにする。
+  [ROLES.EVENT_STAFF]: ["event:read", "wristband:replace", "stamp-rally:operate"],
+  [ROLES.EVENT_WRISTBAND_STAFF]: ["event:read", "wristband:replace"],
+  [ROLES.EVENT_STAMP_STAFF]: ["event:read", "stamp-rally:operate"],
   [ROLES.CIRCLE_MANAGER]: [
     "circle:read", "circle:write", "menu:read", "menu:write", "menu:delete",
     "order:read", "order:write", "staff:read", "staff:write", "staff:delete",
@@ -74,6 +83,8 @@ export const PERMISSION_NAMES: Record<string, string> = {
   "coupon:write": "クーポン編集",
   "discount:read": "割引閲覧",
   "discount:write": "割引編集",
+  "wristband:replace": "紛失リストバンドのID交換",
+  "stamp-rally:operate": "スタンプラリー景品交換受付",
 };
 
 // super_admin のテナント操作は実ロール/なりすましがサーバーで別途評価する。

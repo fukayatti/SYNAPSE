@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useRef } from "react";
+import { useState, useMemo, useEffect, useLayoutEffect, useRef } from "react";
 import { Link, useNavigate, useLocation } from "react-router-dom";
 import { Button } from "./ui/button";
 import { toast } from "sonner";
@@ -7,7 +7,6 @@ import {
   X,
   ChevronDown,
   ChevronRight,
-  ChevronLeft,
   User,
   Bell,
   Shield,
@@ -49,16 +48,11 @@ import { authClient } from "@/lib/auth-client";
 //   - 外側クリックは document 全体の mousedown 監視で判定する (フルスクリーンの透明backdrop
 //     を使うと、以前のhover判定にも干渉したため廃止した)
 //
-// 2026-07-16 (追記) モバイルは「3本線 → 通知/組織切り替え/アカウント → 中身」の2段階層に変更。
-// スマホでは通知/スペース切替/アカウントの3トリガーが横並びだと窮屈な上、それぞれ独立して
-// 開閉する作りは「今どれが開いているか」を見失いやすい。トップレベルのトリガーを3本線1つに
-// 集約し、その中を「通知/組織切り替え/アカウント」を並べた1段目 → タップした項目の中身を
-// 表示する2段目、という構造にする。デスクトップは今までどおり個別トリガーを維持する
-// (lg:hidden / hidden lg:block で出し分け)。メニュー展開はクリック/タップに統一する (#70, 2026-10-07)。
-// 開閉の最上位は引き続き activeMenu (nav = 3本線) で1つだけ開く制御を継続し、3本線の中の
-// 「今どの項目を掘り下げているか」だけを別 state (mobileSection) で管理する。
+// モバイルでは通知/組織切り替え/アカウントを1つのメニュートリガーへまとめる。
+// 2026-10-20: 親メニューを残して選択行から横へ子ウィンドウを開き、OSメニューと同じ階層を示す。
+// 画面幅が足りない場合だけ一覧を詳細ウィンドウに置き換えて、横はみ出しを防ぐ。
 type MenuKey = "notif" | "space" | "account" | "nav" | null;
-// 3本線メニュー内の2段目 (null = 1段目の一覧表示)
+// 3本線メニューで開いている個別ウィンドウ (null = メニュー項目一覧)
 type MobileSection = "notif" | "space" | "account" | null;
 
 export default function Header() {
@@ -79,6 +73,7 @@ export default function Header() {
   );
 
   const [profileModalOpen, setProfileModalOpen] = useState(false);
+  const [dashboardMenuOpen, setDashboardMenuOpen] = useState(false);
   // 通知/スペース切替/アカウント/モバイルナビの4つのメニューは常に1つしか開かない (2026-07-16)
   const [activeMenu, setActiveMenu] = useState<MenuKey>(null);
   const notifOpen = activeMenu === "notif";
@@ -86,12 +81,31 @@ export default function Header() {
   const accountOpen = activeMenu === "account";
   const mobileNavOpen = activeMenu === "nav";
 
-  // モバイル3本線メニューの2段目 (通知/組織切り替え/アカウントのどれを掘り下げているか)。
-  // 一度に開く2段目は1つだけにするため単一 state にし、3本線自体が閉じたら
-  // 下の useEffect で自動的にリセットして「開くたびに1段目から」を保証する (2026-07-16)
-  const [mobileSection, setMobileSection] = useState<MobileSection>(null);
+  // 2026-10-20: モバイルの管理画面切替をFesFlowロゴ横に置くため、ヘッダーと管理メニューの開閉状態を同期する。
   useEffect(() => {
-    if (activeMenu !== "nav") setMobileSection(null);
+    const syncDashboardMenu = (event: Event) => {
+      setDashboardMenuOpen((event as CustomEvent<boolean>).detail);
+    };
+    window.addEventListener("fesflow:dashboard-menu-state", syncDashboardMenu);
+    return () => window.removeEventListener("fesflow:dashboard-menu-state", syncDashboardMenu);
+  }, []);
+
+  // 2026-10-20: サブメニューの位置を選択行へ結び付け、親を残せる幅があるかを保持する。
+  const [mobileSection, setMobileSection] = useState<MobileSection>(null);
+  const [mobileCascadeMode, setMobileCascadeMode] = useState(false);
+  const [mobileSubmenuTop, setMobileSubmenuTop] = useState(0);
+  const [mobileSubmenuLeft, setMobileSubmenuLeft] = useState(0);
+  const [mobileSubmenuWidth, setMobileSubmenuWidth] = useState(0);
+  const [mobileSubmenuRowOffset, setMobileSubmenuRowOffset] = useState(0);
+  const [mobileSubmenuKeyboardFocus, setMobileSubmenuKeyboardFocus] = useState(false);
+  const [mobileFocusReturnSection, setMobileFocusReturnSection] = useState<MobileSection>(null);
+  useEffect(() => {
+    if (activeMenu !== "nav") {
+      setMobileSection(null);
+      setMobileCascadeMode(false);
+      setMobileSubmenuKeyboardFocus(false);
+      setMobileFocusReturnSection(null);
+    }
   }, [activeMenu]);
 
   const isSpaceMenuOpen = spaceOpen || (mobileNavOpen && mobileSection === "space");
@@ -105,11 +119,96 @@ export default function Header() {
   const spaceRef = useRef<HTMLDivElement>(null);
   const accountRef = useRef<HTMLDivElement>(null);
   const navRef = useRef<HTMLDivElement>(null);
+  const mobileMenuRef = useRef<HTMLDivElement>(null);
+  const mobileSubmenuRef = useRef<HTMLElement>(null);
 
   // クリック(タップ)でのトグル。開閉の基本操作はこれで、タッチ環境ではこれが唯一の操作手段になる。
   const toggleMenu = (key: Exclude<MenuKey, null>) => {
     setActiveMenu((prev) => (prev === key ? null : key));
   };
+
+  const openMobileSection = (
+    section: Exclude<MobileSection, null>,
+    button: HTMLButtonElement,
+    moveFocusToSubmenu = false,
+  ) => {
+    const menuRect = mobileMenuRef.current?.getBoundingClientRect();
+    const navRect = navRef.current?.getBoundingClientRect();
+    const rowRect = button.getBoundingClientRect();
+    const panelWidth = section === "notif" ? 416 : section === "space" ? 448 : 336;
+    const gap = 4;
+    const spaceRight = menuRect ? window.innerWidth - menuRect.right : 0;
+    const spaceLeft = menuRect?.left ?? 0;
+    const opensRight = spaceRight >= panelWidth + gap;
+    const canCascade = opensRight || spaceLeft >= panelWidth + gap;
+
+    // 2026-10-20: 十分な幅があれば余裕のある側へ選択行から開き、実際の高さに合わせて上下を収める。
+    setMobileSubmenuLeft(menuRect ? (opensRight ? menuRect.right + gap : menuRect.left - panelWidth - gap) : 0);
+    setMobileSubmenuWidth(panelWidth);
+    setMobileSubmenuTop(rowRect.top);
+    setMobileSubmenuRowOffset(menuRect ? rowRect.top - menuRect.top : 0);
+    setMobileSubmenuKeyboardFocus(moveFocusToSubmenu);
+    setMobileCascadeMode(canCascade);
+    setMobileSection(section);
+  };
+
+  useEffect(() => {
+    if (!mobileNavOpen || !mobileSection) return;
+    const repositionSubmenu = () => {
+      const navRect = navRef.current?.getBoundingClientRect();
+      if (!navRect) return;
+
+      const panelWidth = mobileSection === "notif" ? 416 : mobileSection === "space" ? 448 : 336;
+      const rootWidth = Math.min(256, Math.max(0, window.innerWidth - 16));
+      const rootRight = navRect.right;
+      const rootLeft = rootRight - rootWidth;
+      const gap = 4;
+      const opensRight = window.innerWidth - rootRight >= panelWidth + gap;
+      const canCascade = opensRight || rootLeft >= panelWidth + gap;
+      const rootRow = mobileMenuRef.current?.querySelector<HTMLElement>(
+        `[data-mobile-menu-section="${mobileSection}"]`,
+      );
+
+      setMobileCascadeMode(canCascade);
+      if (!canCascade) return;
+
+      // 2026-10-20: 画面回転やリサイズ後も、親項目と子ウィンドウの相対位置を保つ。
+      setMobileSubmenuLeft(opensRight ? rootRight + gap : rootLeft - panelWidth - gap);
+      setMobileSubmenuWidth(panelWidth);
+      const requestedTop = rootRow?.getBoundingClientRect().top ?? navRect.bottom + 8 + mobileSubmenuRowOffset;
+      const panelHeight = mobileSubmenuRef.current?.getBoundingClientRect().height ?? 400;
+      const maxTop = Math.max(8, window.innerHeight - panelHeight - 8);
+      setMobileSubmenuTop(Math.min(Math.max(8, requestedTop), maxTop));
+    };
+
+    window.addEventListener("resize", repositionSubmenu);
+    return () => window.removeEventListener("resize", repositionSubmenu);
+  }, [mobileNavOpen, mobileSection, mobileSubmenuRowOffset]);
+
+  useLayoutEffect(() => {
+    if (!mobileNavOpen || !mobileSection || !mobileCascadeMode) return;
+    const panelHeight = mobileSubmenuRef.current?.getBoundingClientRect().height;
+    if (!panelHeight) return;
+    const maxTop = Math.max(8, window.innerHeight - panelHeight - 8);
+    setMobileSubmenuTop((current) => Math.min(Math.max(8, current), maxTop));
+  }, [mobileNavOpen, mobileSection, mobileCascadeMode]);
+
+  useLayoutEffect(() => {
+    if (!mobileNavOpen || !mobileSubmenuKeyboardFocus || !mobileSection) return;
+    const firstAction = mobileSubmenuRef.current?.querySelector<HTMLElement>(
+      'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    );
+    firstAction?.focus();
+    setMobileSubmenuKeyboardFocus(false);
+  }, [mobileNavOpen, mobileSection, mobileSubmenuKeyboardFocus]);
+
+  useLayoutEffect(() => {
+    if (!mobileNavOpen || mobileSection || !mobileFocusReturnSection) return;
+    mobileMenuRef.current
+      ?.querySelector<HTMLButtonElement>(`[data-mobile-menu-section="${mobileFocusReturnSection}"]`)
+      ?.focus();
+    setMobileFocusReturnSection(null);
+  }, [mobileNavOpen, mobileSection, mobileFocusReturnSection]);
 
   // 2026-10-07: ヘッダーメニューは誤展開を防ぎ、マウスとタッチで同じ操作にするためクリックでのみ開閉する。
 
@@ -156,7 +255,7 @@ export default function Header() {
     if (role === "super_admin") {
       return "システム管理";
     }
-    if (role === "event_manager") {
+    if (role === "event_manager" || role === "event_staff" || role === "event_wristband_staff" || role === "event_stamp_staff") {
       const space = (spaces ?? []).find((m: any) => m.eventId === eventId && !m.circleId);
       return space?.event?.eventName || localStorage.getItem("eventName") || "イベント管理";
     }
@@ -418,7 +517,7 @@ export default function Header() {
     links = [
       { to: "/sys/dashboard", label: "システム管理" },
     ];
-  } else if (isEventView && (role === "event_manager" || role === "super_admin")) {
+  } else if (isEventView && (role === "event_manager" || role === "event_staff" || role === "event_wristband_staff" || role === "event_stamp_staff" || role === "super_admin")) {
     links = [
       { to: "/event/dashboard", label: "イベント管理" },
     ];
@@ -448,7 +547,7 @@ export default function Header() {
         : notifications.length
       : "!";
 
-  // 通知パネルの中身 (デスクトップのクリックパネル / モバイル3本線の2段目で共用) (2026-10-07 #70)
+  // 通知パネルの中身 (デスクトップのクリックパネル / モバイル階層メニューで共用) (2026-10-07 #70)
   const notifPanelBody = (
     <div className="max-h-72 overflow-y-auto space-y-3">
       {/* システムお知らせ (公開分) */}
@@ -600,7 +699,7 @@ export default function Header() {
     </>
   );
 
-  // アカウントパネルの中身 (デスクトップのクリックパネル / モバイル3本線の2段目で共用) (2026-10-07 #70)
+  // アカウントパネルの中身 (デスクトップのクリックパネル / モバイル階層メニューで共用) (2026-10-07 #70)
   const accountPanelBody = (
     <>
       <div className="flex items-center gap-2 mb-3 pb-3 border-b border-border/20">
@@ -640,22 +739,39 @@ export default function Header() {
   );
 
   return (
-    <header className="sticky top-0 z-50 bg-background border-b-thick border-border text-foreground font-mono">
+    <header data-app-header className="sticky top-0 z-50 bg-background border-b-thick border-border text-foreground font-mono">
       <div className="flex items-center justify-between px-2 sm:px-4 py-2 max-w-7xl mx-auto gap-2 sm:gap-4">
-        {/* ロゴ / ブランド */}
-        <Link
-          to="/"
-          className="font-headline text-base sm:text-lg lg:text-xl uppercase tracking-[2px] leading-none select-none hover:opacity-80 flex items-center gap-2 shrink-0"
-        >
-          <span className="font-black border-thin border-border px-2 py-1 bg-primary text-primary-foreground text-sm sm:text-base">
-            {PRODUCT_NAME.toUpperCase()}
-            <span className="hidden lg:inline">
-              {isCircleView && " // BOOTH"}
-              {isEventView && " // EVENT"}
-              {isAdminView && " // SYSTEM"}
+        <div className="flex min-w-0 shrink-0 items-center gap-1.5">
+          {pathname.startsWith("/event/dashboard") && (
+            <button
+              type="button"
+              aria-label={dashboardMenuOpen ? "管理画面メニューを閉じる" : "管理画面メニューを開く"}
+              aria-expanded={dashboardMenuOpen}
+              aria-controls="dashboard-mobile-menu"
+              onClick={() => {
+                const eventName = dashboardMenuOpen ? "fesflow:dashboard-menu-close" : "fesflow:dashboard-menu-open";
+                window.dispatchEvent(new Event(eventName));
+              }}
+              className="inline-flex h-9 w-9 shrink-0 items-center justify-center border-thick border-border bg-background text-foreground transition-colors hover:bg-primary hover:text-primary-foreground md:hidden"
+            >
+              {dashboardMenuOpen ? <X className="h-4 w-4" aria-hidden="true" /> : <Menu className="h-4 w-4" aria-hidden="true" />}
+            </button>
+          )}
+          {/* ロゴ / ブランド */}
+          <Link
+            to="/"
+            className="font-headline text-base sm:text-lg lg:text-xl uppercase tracking-[2px] leading-none select-none hover:opacity-80 flex items-center gap-2 shrink-0"
+          >
+            <span className="font-black border-thin border-border px-2 py-1 bg-primary text-primary-foreground text-sm sm:text-base">
+              {PRODUCT_NAME.toUpperCase()}
+              <span className="hidden lg:inline">
+                {isCircleView && " // BOOTH"}
+                {isEventView && " // EVENT"}
+                {isAdminView && " // SYSTEM"}
+              </span>
             </span>
-          </span>
-        </Link>
+          </Link>
+        </div>
 
         {/* デスクトップナビゲーション (常時ラベル表示のためページリンクなのでそのまま維持) */}
         <nav className="hidden lg:flex items-center gap-1 font-headline text-[13px] uppercase tracking-[1px]">
@@ -832,22 +948,12 @@ export default function Header() {
                 )}
               </div>
 
-              {/* 3本線メニュー (1024px未満のみ)。「3本線 → 通知/組織切り替え/アカウント →
-                  中身」の2段階層に集約する (2026-07-16 要望対応)。
-                  デスクトップの各トリガー横並びはスマホだと窮屈な上、それぞれ独立して開閉する
-                  作りは今どれが開いているか見失いやすいため、トップレベルを3本線1つにし、
-                  1段目に「通知/組織切り替え/アカウント/ナビゲーションリンク」を縦に並べ、
-                  1段目の項目をタップすると2段目 (中身) を表示する構成にした。
-                  2段目の中身は notifPanelBody/spacePanelBody/accountPanelBody を再利用し、
-                  デスクトップのクリックパネルと実装・挙動 (既読化・招待応答・スペース切替・
-                  ログアウト等) を完全に共有する。開閉の最上位は既存の activeMenu ("nav") を
-                  そのまま使うため、外側クリック/Esc/1つしか開かない制御はそのまま効く。
-                  「一度に開く2段目は1つだけ」は mobileSection (単一 state) で保証し、
-                  3本線が閉じるたびに useEffect (mobileSection のリセット) で1段目に戻す。 */}
+              {/* 3本線メニュー (1024px未満のみ)。2026-10-20: 親項目を残したカスケード表示で階層を示し、
+                  横幅が足りない時は詳細だけのウィンドウへ切り替えて画面内に収める。 */}
               <div ref={navRef} className="relative lg:hidden">
                 <button
                   onClick={() => toggleMenu("nav")}
-                  aria-haspopup="menu"
+                  aria-haspopup="dialog"
                   aria-expanded={mobileNavOpen}
                   aria-label={mobileNavOpen ? "メニューを閉じる" : "メニューを開く"}
                   className="flex items-center justify-center gap-1.5 h-8 px-2 border-thick border-border bg-background text-foreground hover:bg-primary hover:text-primary-foreground transition-all rounded-none"
@@ -866,118 +972,174 @@ export default function Header() {
                 </button>
 
                 {mobileNavOpen && (
-                  <div className="absolute right-0 top-full pt-2 z-50 w-72 max-w-[90vw]">
-                    <div className="border-thick border-border bg-background shadow-none rounded-none text-left max-h-[calc(100vh-5rem)] overflow-y-auto">
-                      {mobileSection === null ? (
-                        <>
-                          {/* 1段目: 通知/組織切り替え/アカウント + ナビゲーションリンク */}
-                          <div className="flex items-center justify-between border-b-thin border-border px-4 py-2.5">
-                            <span className="text-[11px] font-black uppercase tracking-wider">[メニュー]</span>
-                            <button
-                              onClick={() => setActiveMenu(null)}
-                              className="text-[10px] underline hover:text-primary cursor-pointer"
-                            >
-                              閉じる
-                            </button>
-                          </div>
-                          <nav className="flex flex-col">
-                            <button
-                              onClick={() => setMobileSection("notif")}
-                              className="flex items-center justify-between gap-2 px-4 py-3 border-b-thin border-border font-headline text-[13px] uppercase tracking-[1px] hover:bg-muted transition-all"
-                            >
-                              <span className="flex items-center gap-2">
-                                <span className="relative flex items-center justify-center shrink-0">
-                                  <Bell className="h-3.5 w-3.5" />
-                                  {hasUnreadNotif && (
-                                    <span className="absolute -top-1.5 -right-1.5 min-w-[14px] h-3.5 px-1 flex items-center justify-center bg-destructive text-destructive-foreground text-[8px] font-black leading-none rounded-none border border-background">
-                                      {notifBadgeLabel}
-                                    </span>
-                                  )}
-                                </span>
-                                通知
-                              </span>
-                              <ChevronRight className="h-3.5 w-3.5 shrink-0" />
-                            </button>
-
-                            <button
-                              onClick={() => setMobileSection("space")}
-                              className="flex items-center justify-between gap-2 px-4 py-3 border-b-thin border-border font-headline text-[13px] uppercase tracking-[1px] hover:bg-muted transition-all"
-                            >
-                              <span className="flex items-center gap-2">
-                                {pathname.startsWith("/sys") ? <Shield className="h-3.5 w-3.5 shrink-0" /> :
-                                 pathname.startsWith("/event") ? <Calendar className="h-3.5 w-3.5 shrink-0" /> :
-                                 <Building2 className="h-3.5 w-3.5 shrink-0" />}
-                                組織切り替え
-                              </span>
-                              <ChevronRight className="h-3.5 w-3.5 shrink-0" />
-                            </button>
-
-                            <button
-                              onClick={() => setMobileSection("account")}
-                              className="flex items-center justify-between gap-2 px-4 py-3 border-b-thin border-border font-headline text-[13px] uppercase tracking-[1px] hover:bg-muted transition-all"
-                            >
-                              <span className="flex items-center gap-2">
-                                {me?.image ? (
-                                  <img src={resolveAssetUrl(me.image)} alt="Avatar" className="w-4 h-4 rounded-none border border-border object-cover shrink-0" />
-                                ) : (
-                                  <User className="h-3.5 w-3.5 shrink-0" />
+                  <div
+                    className={`absolute right-0 top-full z-50 pt-2 ${
+                      mobileSection && !mobileCascadeMode
+                        ? mobileSection === "notif"
+                          ? "w-[min(26rem,calc(100vw-1rem))]"
+                          : mobileSection === "space"
+                            ? "w-[min(28rem,calc(100vw-1rem))]"
+                            : "w-[min(21rem,calc(100vw-1rem))]"
+                        : "w-[min(16rem,calc(100vw-1rem))]"
+                    }`}
+                  >
+                    {(!mobileSection || mobileCascadeMode) && (
+                      <div ref={mobileMenuRef} role="dialog" aria-label="管理画面メニュー" className="max-h-[calc(100dvh-5rem)] overflow-y-auto border-thick border-border bg-background text-left shadow-none">
+                        <div className="flex items-center justify-between gap-2 border-b-thin border-border px-3 py-2.5">
+                          <span className="text-[11px] font-black uppercase tracking-wider">[メニュー]</span>
+                          <button
+                            type="button"
+                            onClick={() => setActiveMenu(null)}
+                            className="shrink-0 text-[10px] underline hover:text-primary cursor-pointer"
+                          >
+                            閉じる
+                          </button>
+                        </div>
+                        <nav aria-label="メニュー項目" className="flex min-w-0 flex-col">
+                          <button
+                            type="button"
+                            aria-haspopup="dialog"
+                            aria-expanded={mobileSection === "notif"}
+                            data-mobile-menu-section="notif"
+                            onClick={(event) => openMobileSection("notif", event.currentTarget)}
+                            onKeyDown={(event) => {
+                              if (event.key === "ArrowRight") {
+                                event.preventDefault();
+                                openMobileSection("notif", event.currentTarget, true);
+                              }
+                            }}
+                            className={`flex min-h-12 min-w-0 items-center justify-between gap-2 border-b-thin border-border px-3 py-3 text-left font-headline text-[11px] uppercase tracking-wide transition-all sm:text-[13px] ${mobileCascadeMode && mobileSection === "notif" ? "bg-muted" : "hover:bg-muted"}`}
+                          >
+                            <span className="flex min-w-0 items-center gap-2">
+                              <span className="relative flex shrink-0 items-center justify-center">
+                                <Bell className="h-3.5 w-3.5" />
+                                {hasUnreadNotif && (
+                                  <span className="absolute -top-1.5 -right-1.5 flex h-3.5 min-w-[14px] items-center justify-center rounded-none border border-background bg-destructive px-1 text-[8px] font-black leading-none text-destructive-foreground">
+                                    {notifBadgeLabel}
+                                  </span>
                                 )}
-                                アカウント
                               </span>
-                              <ChevronRight className="h-3.5 w-3.5 shrink-0" />
-                            </button>
-
-                            {/* ナビゲーションリンクはその場で画面遷移するだけなので2段目を持たない */}
-                            {links.map(({ to, label }) => (
-                              <Link
-                                key={to}
-                                to={to}
-                                onClick={() => setActiveMenu(null)}
-                                className={`flex items-center gap-2 px-4 py-3 border-b-thin border-border last:border-b-0 font-headline text-[13px] uppercase tracking-[1px] transition-all ${
-                                  isActive(to)
-                                    ? "bg-primary text-primary-foreground font-bold"
-                                    : "bg-background text-foreground hover:bg-muted"
-                                }`}
-                              >
-                                <Compass className="h-3.5 w-3.5 shrink-0" />
-                                {label}
-                              </Link>
-                            ))}
-                          </nav>
-                        </>
-                      ) : (
-                        <>
-                          {/* 2段目: 1段目でタップした項目の中身。「戻る」で1段目へ、「閉じる」で
-                              3本線メニュー全体を閉じる、の2導線を常設する (2026-07-16) */}
-                          <div className="flex items-center justify-between border-b-thin border-border px-3 py-2.5 gap-2">
-                            <button
-                              onClick={() => setMobileSection(null)}
-                              className="flex items-center gap-0.5 text-[10px] underline hover:text-primary cursor-pointer shrink-0"
-                            >
-                              <ChevronLeft className="h-3 w-3" />
-                              戻る
-                            </button>
-                            <span className="text-[11px] font-black uppercase tracking-wider truncate">
-                              {mobileSection === "notif" && "[お知らせ・通知]"}
-                              {mobileSection === "space" && "[組織切り替え]"}
-                              {mobileSection === "account" && "[アカウント]"}
+                              <span className="min-w-0 break-words">通知</span>
                             </span>
-                            <button
+                            <ChevronRight className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                          </button>
+
+                          <button
+                            type="button"
+                            aria-haspopup="dialog"
+                            aria-expanded={mobileSection === "space"}
+                            data-mobile-menu-section="space"
+                            onClick={(event) => openMobileSection("space", event.currentTarget)}
+                            onKeyDown={(event) => {
+                              if (event.key === "ArrowRight") {
+                                event.preventDefault();
+                                openMobileSection("space", event.currentTarget, true);
+                              }
+                            }}
+                            className={`flex min-h-12 min-w-0 items-center justify-between gap-2 border-b-thin border-border px-3 py-3 text-left font-headline text-[11px] uppercase tracking-wide transition-all sm:text-[13px] ${mobileCascadeMode && mobileSection === "space" ? "bg-muted" : "hover:bg-muted"}`}
+                          >
+                            <span className="flex min-w-0 items-center gap-2">
+                              {pathname.startsWith("/sys") ? <Shield className="h-3.5 w-3.5 shrink-0" /> :
+                               pathname.startsWith("/event") ? <Calendar className="h-3.5 w-3.5 shrink-0" /> :
+                               <Building2 className="h-3.5 w-3.5 shrink-0" />}
+                              <span className="min-w-0 break-words">組織切り替え</span>
+                            </span>
+                            <ChevronRight className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                          </button>
+
+                          <button
+                            type="button"
+                            aria-haspopup="dialog"
+                            aria-expanded={mobileSection === "account"}
+                            data-mobile-menu-section="account"
+                            onClick={(event) => openMobileSection("account", event.currentTarget)}
+                            onKeyDown={(event) => {
+                              if (event.key === "ArrowRight") {
+                                event.preventDefault();
+                                openMobileSection("account", event.currentTarget, true);
+                              }
+                            }}
+                            className={`flex min-h-12 min-w-0 items-center justify-between gap-2 border-b-thin border-border px-3 py-3 text-left font-headline text-[11px] uppercase tracking-wide transition-all sm:text-[13px] ${mobileCascadeMode && mobileSection === "account" ? "bg-muted" : "hover:bg-muted"}`}
+                          >
+                            <span className="flex min-w-0 items-center gap-2">
+                              {me?.image ? (
+                                <img src={resolveAssetUrl(me.image)} alt="" className="h-4 w-4 shrink-0 border border-border object-cover" />
+                              ) : (
+                                <User className="h-3.5 w-3.5 shrink-0" />
+                              )}
+                              <span className="min-w-0 break-words">アカウント</span>
+                            </span>
+                            <ChevronRight className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                          </button>
+
+                          {links.map(({ to, label }) => (
+                            <Link
+                              key={to}
+                              to={to}
                               onClick={() => setActiveMenu(null)}
-                              className="text-[10px] underline hover:text-primary cursor-pointer shrink-0"
+                              className={`flex min-h-12 min-w-0 items-center gap-2 border-b-thin border-border px-3 py-3 font-headline text-[11px] uppercase tracking-wide transition-all sm:text-[13px] ${
+                                isActive(to)
+                                  ? "bg-primary text-primary-foreground font-bold"
+                                  : "bg-background text-foreground hover:bg-muted"
+                              }`}
                             >
-                              閉じる
-                            </button>
-                          </div>
-                          <div className="p-4">
-                            {mobileSection === "notif" && notifPanelBody}
-                            {mobileSection === "space" && spacePanelBody}
-                            {mobileSection === "account" && accountPanelBody}
-                          </div>
-                        </>
-                      )}
-                    </div>
+                              <Compass className="h-3.5 w-3.5 shrink-0" />
+                              <span className="min-w-0 break-words">{label}</span>
+                            </Link>
+                          ))}
+                        </nav>
+                      </div>
+                    )}
                   </div>
+                )}
+                {mobileNavOpen && mobileSection && (
+                  <section
+                    ref={mobileSubmenuRef}
+                    role="dialog"
+                    aria-modal="false"
+                    aria-label={mobileSection === "notif" ? "お知らせ・通知" : mobileSection === "space" ? "組織切り替え" : "アカウント"}
+                    style={mobileCascadeMode ? { top: mobileSubmenuTop, left: mobileSubmenuLeft, width: mobileSubmenuWidth } : undefined}
+                    onKeyDown={(event) => {
+                      if (event.key === "ArrowLeft") {
+                        event.preventDefault();
+                        setMobileFocusReturnSection(mobileSection);
+                        setMobileSection(null);
+                        setMobileCascadeMode(false);
+                      }
+                    }}
+                    className={`${mobileCascadeMode ? "fixed z-[60] max-h-[calc(100dvh-1rem)]" : "absolute right-0 top-full z-50 mt-2 max-h-[calc(100dvh-5rem)] w-[min(26rem,calc(100vw-1rem))]"} overflow-y-auto border-thick border-border bg-background text-left shadow-none ${!mobileCascadeMode && mobileSection === "space" ? "w-[min(28rem,calc(100vw-1rem))]" : ""} ${!mobileCascadeMode && mobileSection === "account" ? "w-[min(21rem,calc(100vw-1rem))]" : ""}`}
+                  >
+                    <div className="sticky top-0 z-10 flex items-center justify-between gap-2 border-b-thin border-border bg-background px-2 py-2.5 sm:px-3">
+                      {!mobileCascadeMode && (
+                        <button
+                          type="button"
+                          onClick={() => { setMobileFocusReturnSection(mobileSection); setMobileSection(null); setMobileCascadeMode(false); }}
+                          aria-label="メニュー一覧に戻る"
+                          className="shrink-0 px-1 text-[10px] font-bold underline hover:text-primary"
+                        >
+                          ‹ メニュー
+                        </button>
+                      )}
+                      <span className="min-w-0 truncate text-center text-[10px] font-black uppercase tracking-wider sm:text-[11px]">
+                        {mobileSection === "notif" && "[お知らせ・通知]"}
+                        {mobileSection === "space" && "[組織切り替え]"}
+                        {mobileSection === "account" && "[アカウント]"}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setActiveMenu(null)}
+                        aria-label="メニューを閉じる"
+                        className="shrink-0 px-1 text-[10px] underline hover:text-primary"
+                      >
+                        閉じる
+                      </button>
+                    </div>
+                    <div className="min-w-0 max-w-full overflow-x-hidden p-2 sm:p-3">
+                      {mobileSection === "notif" && notifPanelBody}
+                      {mobileSection === "space" && spacePanelBody}
+                      {mobileSection === "account" && accountPanelBody}
+                    </div>
+                  </section>
                 )}
               </div>
             </div>
