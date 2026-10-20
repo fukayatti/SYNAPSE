@@ -1,7 +1,8 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { Package, Save, Store } from "lucide-react";
-import { toppingApi, circleApi, parseCircleSettings, type Topping } from "@/lib/api";
+import { toppingApi, circleApi, parseCircleSettings, type CreateToppingInput, type MenuWithToppings, type Topping, type UpdateToppingInput } from "@/lib/api";
+import { updateCachedLists } from "@/lib/optimistic-query";
 import { cn } from "@/lib/utils";
 import { ImageUpload } from "@/components/image-upload";
 import { Modal } from "@/components/ui/Modal";
@@ -58,6 +59,32 @@ export function ToppingFormModal({ circleId, isOpen, onClose, topping, onDelete 
   const stockManaged = parseCircleSettings(circleData?.settings).extensions.stock;
 
   const queryClient = useQueryClient();
+  const createInput = (data: ToppingForm): CreateToppingInput => {
+    if (data.allergens === null) throw new Error("トッピングを登録する前にアレルゲンを選択してください。");
+    return {
+      circleId,
+      name: data.name,
+      category: data.category.trim(),
+      price: data.price,
+      imagePath: data.imagePath || undefined,
+      description: data.description || undefined,
+      allergens: data.allergens,
+      soldOut: data.soldOut,
+    };
+  };
+  const updateInput = (data: ToppingForm): UpdateToppingInput => {
+    if (data.allergens === null) throw new Error("トッピングを保存する前にアレルゲンを選択してください。");
+    return {
+      name: data.name,
+      category: data.category.trim(),
+      price: data.price,
+      // 2026-10-07 Issue #48: 空文字は画像削除の明示値として PUT に渡す。
+      imagePath: data.imagePath,
+      description: data.description || null,
+      allergens: data.allergens,
+      soldOut: data.soldOut,
+    };
+  };
   const {
     form, setForm, isEdit, isConfirmOpen, setIsConfirmOpen, isCreating, saveStatus,
     triggerAutoSave, saveNow, handleOverlayClose, handleSaveAndClose, handleDiscardAndClose,
@@ -77,31 +104,75 @@ export function ToppingFormModal({ circleId, isOpen, onClose, topping, onDelete 
     onClose,
     toastId: "topping-auto-save",
     invalidateKeys: [["toppings", circleId]],
-    create: (data) => {
-      if (data.allergens === null) throw new Error("トッピングを登録する前にアレルゲンを選択してください。");
-      return toppingApi.create({
+    create: (data) => toppingApi.create(createInput(data)),
+    // 2026-10-21: 追加操作の直後に一覧へ仮表示し、サーバーIDが返ったら仮IDを置き換える。
+    onOptimisticCreate: async (data) => {
+      const input = createInput(data);
+      const optimisticId = `optimistic-topping-${crypto.randomUUID()}`;
+      const cachedToppings = queryClient.getQueriesData<Topping[]>({ queryKey: ["toppings", circleId] });
+      const sortOrder = Math.max(-1, ...cachedToppings.flatMap(([, items]) => items?.map((item) => item.sortOrder) ?? [])) + 1;
+      const optimisticTopping: Topping = {
+        id: optimisticId,
         circleId,
-        name: data.name,
-        category: data.category.trim(),
-        price: data.price,
-        imagePath: data.imagePath || undefined,
-        description: data.description || undefined,
-        allergens: data.allergens,
-        soldOut: data.soldOut,
-      });
+        name: input.name,
+        category: input.category ?? "",
+        price: input.price,
+        description: input.description ?? null,
+        allergens: JSON.stringify(input.allergens),
+        imagePath: input.imagePath ?? null,
+        soldOut: input.soldOut ?? false,
+        stockQuantity: 0,
+        sortOrder,
+        isArchived: false,
+      };
+      const transaction = await updateCachedLists<Topping>(
+        queryClient,
+        ["toppings", circleId],
+        (current) => [...current, optimisticTopping],
+      );
+      return {
+        rollback: transaction.rollback,
+        commit: (result) => {
+          const id = (result as { id?: string } | null)?.id;
+          if (id) transaction.commit((current) => current.map((item) => item.id === optimisticId ? { ...item, id } : item));
+        },
+      };
     },
     update: async (t, data) => {
-      if (data.allergens === null) throw new Error("トッピングを保存する前にアレルゲンを選択してください。");
-      await toppingApi.update(t.id, {
-        name: data.name,
-        category: data.category.trim(),
-        price: data.price,
-        // 2026-10-07 Issue #48: 空文字は画像削除の明示値として PUT に渡す。
-        imagePath: data.imagePath,
-        description: data.description || null,
-        allergens: data.allergens,
-        soldOut: data.soldOut,
-      });
+      await toppingApi.update(t.id, updateInput(data));
+    },
+    // 2026-10-21: トッピング行とメニュー内の同じ表示を同時に先行更新する。
+    onOptimisticUpdate: async (topping, data) => {
+      const input = updateInput(data);
+      const updatedTopping: Topping = {
+        ...topping,
+        name: input.name ?? topping.name,
+        category: input.category ?? topping.category,
+        price: input.price ?? topping.price,
+        imagePath: input.imagePath || null,
+        description: input.description ?? null,
+        allergens: JSON.stringify(input.allergens),
+        soldOut: input.soldOut ?? topping.soldOut,
+      };
+      const toppingTransaction = await updateCachedLists<Topping>(
+        queryClient,
+        ["toppings", circleId],
+        (current) => current.map((item) => item.id === topping.id ? updatedTopping : item),
+      );
+      const menuTransaction = await updateCachedLists<MenuWithToppings>(
+        queryClient,
+        ["menus", circleId],
+        (current) => current.map((menu) => ({
+          ...menu,
+          toppings: menu.toppings.map((item) => item.id === topping.id ? updatedTopping : item),
+        })),
+      );
+      return {
+        rollback: () => {
+          toppingTransaction.rollback();
+          menuTransaction.rollback();
+        },
+      };
     },
     validate: (data) => !data.name
       ? "トッピング名を入力してください"

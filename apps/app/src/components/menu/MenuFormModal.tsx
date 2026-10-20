@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { menuApi, toppingApi, type MenuWithToppings } from "@/lib/api";
+import { menuApi, toppingApi, type CreateMenuInput, type MenuWithToppings, type Topping, type UpdateMenuInput } from "@/lib/api";
+import { updateCachedLists } from "@/lib/optimistic-query";
 import { cn } from "@/lib/utils";
 import { ImageUpload } from "@/components/image-upload";
 import { Modal } from "@/components/ui/Modal";
@@ -82,6 +83,49 @@ export function MenuFormModal({ circleId, isOpen, onClose, menu, onDelete }: Men
   });
 
   const queryClient = useQueryClient();
+
+  const createInput = (data: MenuForm): CreateMenuInput => {
+    if (data.allergens === null) throw new Error("メニューを登録する前にアレルゲンを選択してください。");
+    return {
+      circleId,
+      name: data.name,
+      category: data.category.trim(),
+      price: data.price,
+      imagePath: data.imagePath || undefined,
+      description: data.description || undefined,
+      allergens: data.allergens,
+      // 2026-09-27: 在庫管理は商品ごとに選び、新規商品の既定はOFF。
+      inventoryEnabled: data.inventoryEnabled,
+      stockQuantity: data.stockQuantity,
+      soldOut: data.soldOut,
+      toppingIds: data.toppingIds,
+      defaultToppingIds: data.defaultToppingIds,
+      toppingWizardEnabled: data.toppingWizardEnabled,
+      toppingCategoryMinimums: data.toppingCategoryMinimums,
+      toppingCategoryMaximums: data.toppingCategoryMaximums,
+    };
+  };
+  const updateInput = (data: MenuForm): UpdateMenuInput => {
+    if (data.allergens === null) throw new Error("メニューを保存する前にアレルゲンを選択してください。");
+    return {
+      name: data.name,
+      category: data.category.trim(),
+      price: data.price,
+      // 2026-10-07 Issue #48: 空文字は画像削除の明示値として PUT に渡す。
+      imagePath: data.imagePath,
+      description: data.description || undefined,
+      allergens: data.allergens,
+      soldOut: data.soldOut,
+      toppingIds: data.toppingIds,
+      inventoryEnabled: data.inventoryEnabled,
+      stockQuantity: data.stockQuantity,
+      defaultToppingIds: data.defaultToppingIds,
+      toppingWizardEnabled: data.toppingWizardEnabled,
+      toppingCategoryMinimums: data.toppingCategoryMinimums,
+      toppingCategoryMaximums: data.toppingCategoryMaximums,
+    };
+  };
+
   const {
     form, setForm, isEdit, isConfirmOpen, setIsConfirmOpen, isCreating, saveStatus,
     triggerAutoSave, saveNow, handleOverlayClose, handleSaveAndClose, handleDiscardAndClose,
@@ -109,46 +153,80 @@ export function MenuFormModal({ circleId, isOpen, onClose, menu, onDelete }: Men
     onClose,
     toastId: "menu-auto-save",
     invalidateKeys: [["menus", circleId]],
-    create: (data) => {
-      if (data.allergens === null) throw new Error("メニューを登録する前にアレルゲンを選択してください。");
-      return menuApi.create({
+    create: (data) => menuApi.create(createInput(data)),
+    // 2026-10-21: 追加操作の直後に一覧へ仮表示し、サーバーIDが返ったら仮IDを置き換える。
+    onOptimisticCreate: async (data) => {
+      const input = createInput(data);
+      const optimisticId = `optimistic-menu-${crypto.randomUUID()}`;
+      const selectedToppings = input.toppingIds?.flatMap((id) => {
+        const selected = toppings?.find((item) => item.id === id);
+        return selected ? [selected] : [];
+      }) ?? [];
+      const optimisticMenu: MenuWithToppings = {
+        id: optimisticId,
         circleId,
-        name: data.name,
-        category: data.category.trim(),
-        price: data.price,
-        imagePath: data.imagePath || undefined,
-        description: data.description || undefined,
-        allergens: data.allergens,
-        // 2026-09-27: 在庫管理は商品ごとに選び、新規商品の既定はOFF。
-        inventoryEnabled: data.inventoryEnabled,
-        stockQuantity: data.stockQuantity,
-        soldOut: data.soldOut,
-        toppingIds: data.toppingIds,
-        defaultToppingIds: data.defaultToppingIds,
-        toppingWizardEnabled: data.toppingWizardEnabled,
-        toppingCategoryMinimums: data.toppingCategoryMinimums,
-        toppingCategoryMaximums: data.toppingCategoryMaximums,
-      });
+        name: input.name,
+        category: input.category ?? "",
+        price: input.price,
+        description: input.description ?? null,
+        allergens: JSON.stringify(input.allergens),
+        imagePath: input.imagePath ?? null,
+        stockQuantity: input.stockQuantity ?? 0,
+        inventoryEnabled: input.inventoryEnabled ?? false,
+        soldOut: input.soldOut ?? false,
+        isArchived: false,
+        defaultToppingIds: JSON.stringify(input.defaultToppingIds ?? []),
+        toppingWizardEnabled: input.toppingWizardEnabled ?? false,
+        toppingCategoryMinimums: JSON.stringify(input.toppingCategoryMinimums ?? {}),
+        toppingCategoryMaximums: JSON.stringify(input.toppingCategoryMaximums ?? {}),
+        toppings: selectedToppings,
+      };
+      const transaction = await updateCachedLists<MenuWithToppings>(
+        queryClient,
+        ["menus", circleId],
+        (current) => [...current, optimisticMenu],
+      );
+      return {
+        rollback: transaction.rollback,
+        commit: (result) => {
+          const id = (result as { id?: string } | null)?.id;
+          if (id) transaction.commit((current) => current.map((item) => item.id === optimisticId ? { ...item, id } : item));
+        },
+      };
     },
     update: async (m, data) => {
-      if (data.allergens === null) throw new Error("メニューを保存する前にアレルゲンを選択してください。");
-      await menuApi.update(m.id, {
-        name: data.name,
-        category: data.category.trim(),
-        price: data.price,
-        // 2026-10-07 Issue #48: 空文字は画像削除の明示値として PUT に渡す。
-        imagePath: data.imagePath,
-        description: data.description || undefined,
-        allergens: data.allergens,
-        soldOut: data.soldOut,
-        toppingIds: data.toppingIds,
-        inventoryEnabled: data.inventoryEnabled,
-        stockQuantity: data.stockQuantity,
-        defaultToppingIds: data.defaultToppingIds,
-        toppingWizardEnabled: data.toppingWizardEnabled,
-        toppingCategoryMinimums: data.toppingCategoryMinimums,
-        toppingCategoryMaximums: data.toppingCategoryMaximums,
-      });
+      await menuApi.update(m.id, updateInput(data));
+    },
+    // 2026-10-21: 編集フォームの変更を管理一覧へ先行反映し、通信失敗時は直前の値へ戻す。
+    onOptimisticUpdate: async (menu, data) => {
+      const input = updateInput(data);
+      const selectedToppings = input.toppingIds?.flatMap((id) => {
+        const selected = toppings?.find((item) => item.id === id) ?? menu.toppings.find((item) => item.id === id);
+        return selected ? [selected] : [];
+      }) ?? menu.toppings;
+      const updatedMenu: MenuWithToppings = {
+        ...menu,
+        name: input.name ?? menu.name,
+        category: input.category ?? menu.category,
+        price: input.price ?? menu.price,
+        imagePath: input.imagePath || null,
+        description: input.description ?? menu.description,
+        allergens: JSON.stringify(input.allergens),
+        soldOut: input.soldOut ?? menu.soldOut,
+        inventoryEnabled: input.inventoryEnabled ?? menu.inventoryEnabled,
+        stockQuantity: input.stockQuantity ?? menu.stockQuantity,
+        defaultToppingIds: JSON.stringify(input.defaultToppingIds ?? []),
+        toppingWizardEnabled: input.toppingWizardEnabled ?? menu.toppingWizardEnabled,
+        toppingCategoryMinimums: JSON.stringify(input.toppingCategoryMinimums ?? {}),
+        toppingCategoryMaximums: JSON.stringify(input.toppingCategoryMaximums ?? {}),
+        toppings: selectedToppings,
+      };
+      const transaction = await updateCachedLists<MenuWithToppings>(
+        queryClient,
+        ["menus", circleId],
+        (current) => current.map((item) => item.id === menu.id ? updatedMenu : item),
+      );
+      return { rollback: transaction.rollback };
     },
     validate: (data) => !data.name
       ? "メニュー名を入力してください"
