@@ -10,6 +10,7 @@ import { resolveAssetUrl } from "@/lib/asset-url";
 import { AllergenSelector } from "@/components/menu/AllergenSelector";
 import { QrScannerModal } from "@/components/pos/qr-scanner-modal";
 import { parseJapaneseAllergens, type JapaneseAllergen } from "@fesflow/config/allergens";
+import { VisitorDataUseNoticeButton } from "@/components/visitor/VisitorDataUseNotice";
 
 /**
  * 来場者オンボーディング / プロフィール編集 (2026-07-04, 2026-07-15 編集モード追加)。
@@ -306,6 +307,7 @@ export default function Onboarding() {
 
               <div className="space-y-2">
                 <label className="text-[11px] font-black uppercase tracking-wider text-muted-foreground">誕生日（月日） <span className="text-destructive">*</span></label>
+                {/* 2026-10-20: ラベルと月/日の選択欄で入力形式を示すため、補足文は表示しない。 */}
                 <div className="flex items-center gap-3">
                   <select
                     aria-label="家族の誕生日の月"
@@ -327,7 +329,6 @@ export default function Onboarding() {
                     {Array.from({ length: familyBirthdayMonth ? new Date(Date.UTC(2000, Number(familyBirthdayMonth), 0)).getUTCDate() : 0 }, (_, index) => String(index + 1)).map((day) => <option key={day} value={day}>{day}日</option>)}
                   </select>
                 </div>
-                <p className="text-[10px] text-muted-foreground">誕生日は月日だけ入力してください。</p>
               </div>
 
               <div className="space-y-2">
@@ -374,7 +375,7 @@ export default function Onboarding() {
               ? requiresAdmissionDetails
                 ? "ニックネーム・誕生日・年齢を登録してください。"
                 : "ニックネーム・誕生日・年齢を編集できます。"
-              : "ニックネーム・誕生日・年齢を登録してください。誕生日は月日だけで入力できます。"}
+              : "ニックネーム・誕生日・年齢を登録してください。"}
           </p>
         </div>
 
@@ -382,6 +383,7 @@ export default function Onboarding() {
           <label htmlFor="visitor-birthday-month" className="text-[11px] font-black uppercase tracking-wider text-muted-foreground">
             誕生日（月日） {requiresAdmissionDetails && <span className="text-destructive">*</span>}
           </label>
+          {/* 2026-10-20: ラベルと月/日の選択欄で入力形式を示すため、補足文は表示しない。 */}
           <div className="flex items-center gap-3">
             <select
               id="visitor-birthday-month"
@@ -417,7 +419,6 @@ export default function Onboarding() {
               ))}
             </select>
           </div>
-          <p className="text-[10px] text-muted-foreground">誕生日は月日だけ入力してください。</p>
         </div>
 
         <div className="space-y-2">
@@ -455,6 +456,15 @@ export default function Onboarding() {
             className="rounded-none border-[2px] h-11"
           />
         </div>
+
+        {isAdmissionWizard && (
+          <>
+            <VisitorDataUseNoticeButton />
+            <p className="text-[11px] leading-relaxed text-muted-foreground">
+              「はじめる」を押すと、取得情報の利用目的と取扱いに同意したものとみなします。
+            </p>
+          </>
+        )}
 
         <Button
           type="button"
