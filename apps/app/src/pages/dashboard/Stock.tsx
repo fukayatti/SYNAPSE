@@ -294,12 +294,14 @@ function StockManagementContent() {
           <div className="flex items-center gap-1.5 border-thick border-border px-2 h-9 shrink-0">
             <AlertTriangle className="h-3.5 w-3.5 text-warning" />
             <span className="text-[10px] uppercase text-muted-foreground">僅少≤</span>
-            <input
+            {/* 2026-10-21: しきい値も共通数値欄に揃え、空欄のまま値を打ち直せるようにする。 */}
+            <Input
               type="number"
+              inputMode="numeric"
               min={0}
               value={lowThreshold}
               onChange={(e) => updateThreshold(Number(e.target.value))}
-              className="w-12 bg-transparent text-xs text-center focus:outline-none tabular-nums"
+              className="w-12 border-0 bg-transparent px-0 py-0 text-xs text-center focus-visible:border-0 focus:outline-none tabular-nums"
             />
           </div>
         </div>
