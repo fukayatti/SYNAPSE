@@ -572,7 +572,8 @@ function RegisterPageContent() {
     // 2026-10-07 (#9): レジ担当にも報告後30分の期限切れを画面上で反映する。
     refetchInterval: 60_000,
   });
-  const [waitMinutes, setWaitMinutes] = useState("10");
+  // 2026-10-21: レジを離れて厨房へ移動しても、報告前の待ち時間入力を同じサークル内で保つ。
+  const [waitMinutes, setWaitMinutes] = useSessionState<string>(`${registerStateKey}:wait-minutes`, "10");
   const waitTimeReport = activeWaitTimeReport(circle?.settings);
   const reportWaitTime = useMutation({
     mutationFn: () => circleApi.reportWaitTime(circleId, Number(waitMinutes)),

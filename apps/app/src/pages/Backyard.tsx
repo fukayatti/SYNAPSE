@@ -254,6 +254,7 @@ function BackyardPageContent() {
       <SwipeableOrderStack
         orders={visibleOrders}
         view={view}
+        scrollStateKey={`fesflow:backyard:${circleId || "unselected"}:horizontal-scroll`}
         openAtLatest={selectedStatus === undefined}
         onViewChange={setView}
         onStart={handleStartPreparing}

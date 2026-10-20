@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   Card,
   CardContent,
@@ -11,6 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, CheckCircle, Clock, List, Rows3, Users, XCircle } from "lucide-react";
 import { displayOrderNumber } from "@/lib/order-number";
+import { useSessionState } from "@/hooks/useSessionState";
 
 export interface SwipeableOrder {
   id: string;
@@ -41,6 +42,7 @@ export type KitchenOrderView = "horizontal" | "list";
 interface SwipeableOrderStackProps {
   orders: SwipeableOrder[];
   view: KitchenOrderView;
+  scrollStateKey: string;
   openAtLatest?: boolean;
   onViewChange: (view: KitchenOrderView) => void;
   onStart: (id: string) => Promise<unknown>;
@@ -321,6 +323,7 @@ function KitchenOrderCard({
 export function SwipeableOrderStack({
   orders,
   view,
+  scrollStateKey,
   openAtLatest = false,
   onViewChange,
   onStart,
@@ -331,9 +334,14 @@ export function SwipeableOrderStack({
   isUpdating = false,
 }: SwipeableOrderStackProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const scrollSaveTimer = useRef<number | null>(null);
+  const hasProcessedOrders = useRef(false);
   const previousOrderIds = useRef("");
   const previousView = useRef<KitchenOrderView>("list");
   const previousOpenAtLatest = useRef(false);
+  const [savedScrollLeft, setSavedScrollLeft] = useSessionState<number | null>(scrollStateKey, null);
+  const savedScrollLeftRef = useRef(savedScrollLeft);
+  savedScrollLeftRef.current = savedScrollLeft;
   const ordered = useMemo(() => [...orders].sort((a, b) => {
     const at = a.createdAt ? new Date(a.createdAt).getTime() : 0;
     const bt = b.createdAt ? new Date(b.createdAt).getTime() : 0;
@@ -344,6 +352,37 @@ export function SwipeableOrderStack({
     ? undefined
     : ordered.find((order) => order.status === "pending" || order.status === "preparing");
 
+  // 2026-10-21: 厨房を離れて戻った時は横並び注文の見ていた位置を先に復元する。
+  useLayoutEffect(() => {
+    const position = savedScrollLeftRef.current;
+    if (view !== "horizontal" || position === null) return;
+    const frame = window.requestAnimationFrame(() => {
+      if (scrollRef.current) scrollRef.current.scrollLeft = position;
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [scrollStateKey, view]);
+
+  useEffect(() => {
+    if (view !== "horizontal") return;
+    const element = scrollRef.current;
+    if (!element) return;
+    const saveScroll = () => {
+      if (scrollSaveTimer.current !== null) window.clearTimeout(scrollSaveTimer.current);
+      scrollSaveTimer.current = window.setTimeout(() => {
+        setSavedScrollLeft(element.scrollLeft);
+        scrollSaveTimer.current = null;
+      }, 120);
+    };
+    element.addEventListener("scroll", saveScroll, { passive: true });
+    return () => {
+      element.removeEventListener("scroll", saveScroll);
+      if (scrollSaveTimer.current !== null) window.clearTimeout(scrollSaveTimer.current);
+      // 画面切替直前にも同期保存し、debounce の待ち時間で位置が失われないようにする。
+      try { window.sessionStorage.setItem(scrollStateKey, JSON.stringify(element.scrollLeft)); } catch { /* 保存不可でも通常操作を続ける */ }
+      scrollSaveTimer.current = null;
+    };
+  }, [scrollStateKey, setSavedScrollLeft, view]);
+
   // 2026-10-17: 作業キューでは最古の対応中注文を中央に置き、全件表示では最新注文から履歴を確認する。
   useEffect(() => {
     if (
@@ -351,10 +390,15 @@ export function SwipeableOrderStack({
       previousView.current === view &&
       previousOpenAtLatest.current === openAtLatest
     ) return;
+    const firstOrderRender = !hasProcessedOrders.current;
+    const viewChanged = previousView.current !== view;
     previousOrderIds.current = orderIds;
     previousView.current = view;
     previousOpenAtLatest.current = openAtLatest;
+    hasProcessedOrders.current = true;
     if (view !== "horizontal") return;
+    // 保存位置がある初回表示やリスト表示からの復帰では、下の自動フォーカス移動を止める。
+    if ((firstOrderRender || viewChanged) && savedScrollLeft !== null) return;
     const frame = window.requestAnimationFrame(() => {
       const element = scrollRef.current;
       if (!element) return;
@@ -374,7 +418,7 @@ export function SwipeableOrderStack({
       });
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [currentOrder?.id, openAtLatest, orderIds, view]);
+  }, [currentOrder?.id, openAtLatest, orderIds, savedScrollLeft, view]);
 
   return (
     <section className="space-y-3" aria-label="厨房の注文一覧">
