@@ -22,6 +22,7 @@ const router = createBrowserRouter([
 
 createRoot(document.getElementById("root")!).render(
 	<StrictMode>
-		<RouterProvider router={router} />
+		{/* 2026-10-21: リンク遷移中も現在の画面を保ち、遅延読込による白抜けを避ける。 */}
+		<RouterProvider router={router} useTransitions />
 	</StrictMode>,
 );
