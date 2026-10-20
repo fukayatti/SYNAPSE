@@ -7,6 +7,10 @@ import { effectiveCircleRole } from "@fesflow/config";
 import type { AppEnv } from "../types";
 import { getImpersonation, betterAuthSessionId } from "./sudo";
 
+const isEventRole = (role: string) =>
+  role === "event_manager" || role === "event_staff" ||
+  role === "event_wristband_staff" || role === "event_stamp_staff";
+
 // 2026-07-08 (Phase5): db/auth はモジュール Proxy ではなく、index.ts の middleware で
 // c.set("db"/"auth", ...) された実体を c.get() で明示的に受け取る (ALS+Proxy 撤去)。
 // このファイルの関数は全て Context を受け取るので、c.get("db") / c.get("auth") /
@@ -260,6 +264,13 @@ export async function hasPermission(
       const perms = ROLE_PERMISSIONS["event_manager"] as readonly string[];
       if (perms.includes(requiredPermission)) return true;
     }
+    const eventStaff = !circleId && legit.find(
+      (m) => isEventRole(m.role) && m.role !== "event_manager" && m.eventId && m.eventId === resolvedEventId
+    );
+    if (eventStaff) {
+      const perms = ROLE_PERMISSIONS[eventStaff.role as keyof typeof ROLE_PERMISSIONS] as readonly string[];
+      if (perms.includes(requiredPermission)) return true;
+    }
     if (circleId) {
       const cm = legit.find(
         (m) => m.circleId === circleId && (m.role === "circle_manager" || m.role === "circle_admin" || m.role === "circle_staff")
@@ -273,10 +284,12 @@ export async function hasPermission(
     return false;
   }
 
-  const eventM = memberships.find((m) => m.role === "event_manager");
+  const eventM = memberships.find(
+    (m) => isEventRole(m.role) && m.eventId && (!resolvedEventId || m.eventId === resolvedEventId)
+  );
   if (eventM && eventM.eventId) {
-    if (!resolvedEventId || eventM.eventId === resolvedEventId) {
-      const permissions = ROLE_PERMISSIONS["event_manager"];
+    if (eventM.role === "event_manager" || !circleId) {
+      const permissions = ROLE_PERMISSIONS[eventM.role as keyof typeof ROLE_PERMISSIONS];
       if (permissions && (permissions as readonly string[]).includes(requiredPermission)) {
         return true;
       }

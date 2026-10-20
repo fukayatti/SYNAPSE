@@ -12,15 +12,13 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import Loader from "@/components/loader";
 import { CheckCircle, XCircle, UserPlus, LogIn } from "lucide-react";
 
 // 招待受諾ページ (/circle/invite/:token, /event/invite/:token 共通)。
 // 2026-07-12 (SaaS): 招待種別を lookup で判定して分岐する。
 // - circle_host 招待 → サークル作成が必要なのでオンボーディングへ委譲。
-// - circle_member / event_manager 招待 → その場で受諾し、所属を解決して適切なスペースへ。
+// - circle_member / event 管理・当日スタッフ招待 → その場で受諾し、所属を解決して適切なスペースへ。
 // 未ログインなら better-auth ログインへ誘導し、callbackUrl でこのページに戻す
 // (Google ログインは callbackUrl をそのまま OAuth の戻り先にするため招待が引き継がれる)。
 export default function InvitePage() {
@@ -29,12 +27,6 @@ export default function InvitePage() {
   const { data: session, isPending: sessionPending } = authClient.useSession();
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
-  const [userName, setUserName] = useState("");
-
-  useEffect(() => {
-    if (session?.user?.name) setUserName((prev) => prev || session.user.name);
-  }, [session]);
-
   // ログイン済みなら招待を照会して種別を判定する
   const lookup = useQuery({
     queryKey: ["invite-lookup", token],
@@ -51,14 +43,15 @@ export default function InvitePage() {
   }, [lookup.data?.kind, navigate, token]);
 
   const acceptInviteMutation = useMutation({
-    mutationFn: () => membershipApi.acceptInvite({ token, userName: userName.trim() }),
+    // 2026-10-19: 表示名は認証セッションからサーバーが取得するため、入力・送信しない。
+    mutationFn: () => membershipApi.acceptInvite({ token }),
     onSuccess: async () => {
       setSuccess(true);
       // 実際の所属を解決してスペースへ (旧: /circle/dashboard 固定)
       try {
         const email = session?.user?.email;
         if (email) {
-          const resolved = await resolveActiveSpaceAfterAuth(email);
+          const resolved = await resolveActiveSpaceAfterAuth();
           setTimeout(() => navigate(resolved.path, { replace: true }), 1200);
           return;
         }
@@ -172,17 +165,6 @@ export default function InvitePage() {
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="name">お名前（表示名）</Label>
-              <Input
-                id="name"
-                placeholder="山田太郎"
-                required
-                value={userName}
-                onChange={(e) => setUserName(e.target.value)}
-              />
-            </div>
-
             {error && (
               <div className="flex items-center gap-2 p-3 rounded-lg bg-destructive/10 text-destructive">
                 <XCircle className="h-4 w-4" />
@@ -193,7 +175,7 @@ export default function InvitePage() {
             <Button
               type="submit"
               className="w-full"
-              disabled={acceptInviteMutation.isPending || !userName.trim()}
+              disabled={acceptInviteMutation.isPending}
             >
               {acceptInviteMutation.isPending ? "参加中..." : "参加する"}
             </Button>

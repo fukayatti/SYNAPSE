@@ -128,21 +128,39 @@ export function ExportTab({ eventId }: { eventId: string }) {
         "支払い方法",
         "ステータス",
         "人数",
+        "メニュー内容",
+        "トッピング内容",
         "注文日時",
         "調理完了日時",
       ];
 
-      const rows = flatOrders.map((o) => [
-        o.circleName,
-        o.id,
-        o.orderNumber,
-        o.totalPrice,
-        o.paymentMethod || "未設定",
-        o.status,
-        o.peopleCount,
-        o.createdAt ? new Date(o.createdAt).toLocaleString("ja-JP") : "",
-        o.completedAt ? new Date(o.completedAt).toLocaleString("ja-JP") : "",
-      ]);
+      // 2026-10-20: 注文履歴CSVは注文単位の行を保ち、明細はセル内にまとめて追跡しやすくする。
+      const rows = flatOrders.map((o) => {
+        const menuDetails = o.items
+          .map((item) => `${item.menuName} × ${item.quantity}`)
+          .join(" / ");
+        const toppingDetails = o.items
+          .flatMap((item) =>
+            (item.toppings ?? []).map(
+              (topping) => `${item.menuName}: ${topping.toppingName} × ${item.quantity}`
+            )
+          )
+          .join(" / ");
+
+        return [
+          o.circleName,
+          o.id,
+          o.orderNumber,
+          o.totalPrice,
+          o.paymentMethod || "未設定",
+          o.status,
+          o.peopleCount,
+          menuDetails,
+          toppingDetails,
+          o.createdAt ? new Date(o.createdAt).toLocaleString("ja-JP") : "",
+          o.completedAt ? new Date(o.completedAt).toLocaleString("ja-JP") : "",
+        ];
+      });
 
       downloadCsvFile("全注文履歴一覧", headers, rows);
       toast.success("全注文履歴一覧をエクスポートしました");

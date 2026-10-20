@@ -47,13 +47,19 @@ describe("スタンプラリーのエリア別利用条件", () => {
     ]);
     const areas = [{ id: areaA, name: "エリアA" }, { id: areaB, name: "エリアB" }];
     const requiredCountByArea = { [areaA]: 2, [areaB]: 1 };
+    const qualification = {
+      minQualifiedAreaCount: 2,
+      minDistinctCirclesPerArea: { default: 1, byArea: requiredCountByArea },
+      requiredAreaIds: [areaA, areaB],
+      minTotalDistinctCircles: null,
+    };
     await db.update(event).set({
       storeAreas: JSON.stringify(areas),
       stampRallySettings: JSON.stringify({
         enabled: true,
         targetAreaIds: [areaA, areaB],
-        requiredCount: 3,
-        requiredCountByArea,
+        // 2026-10-20: 旧トップレベル条件は廃止したため、現行の qualification 形式でエリア条件を指定する。
+        qualification,
         redemptionLocation: "本部",
       }),
     }).where(eq(event.id, eventId));
@@ -78,11 +84,11 @@ describe("スタンプラリーのエリア別利用条件", () => {
     const visitorUrl = `/api/stamps/visitor/${visitorId}`;
     const progressBefore = (await (await request(visitorUrl)).json()) as {
       eligible: boolean;
-      requiredCount: number;
+      qualification: { qualifiedAreaCount: number };
       areas: Array<{ id: string; requiredCount: number | null }>;
     };
     expect(progressBefore.eligible).toBe(false);
-    expect(progressBefore.requiredCount).toBe(3);
+    expect(progressBefore.qualification.qualifiedAreaCount).toBe(1);
     expect(progressBefore.areas.map((area) => [area.id, area.requiredCount])).toEqual([[areaA, 2], [areaB, 1]]);
 
     await addCompletedOrder(areaAStores[1]!);
@@ -95,10 +101,10 @@ describe("スタンプラリーのエリア別利用条件", () => {
     expect(usageResponse.status).toBe(200);
     const usage = (await usageResponse.json()) as {
       qualifiedAccountCount: number;
-      requiredCountByArea: Record<string, number>;
+      qualification: typeof qualification;
     };
     expect(usage.qualifiedAccountCount).toBe(1);
-    expect(usage.requiredCountByArea).toEqual(requiredCountByArea);
+    expect(usage.qualification).toEqual(qualification);
   });
 
   it("対象5エリアのうち異なる3エリアで利用した場合に来場者と実績の両方で達成する", async () => {

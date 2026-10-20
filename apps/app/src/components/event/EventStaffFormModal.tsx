@@ -21,7 +21,7 @@ interface EventStaffFormModalProps {
 // - circle_manager (circleId 無し) = circle_host: サークル出店の招待。
 //   出店代表者がこのコード/リンクでサークルを新規作成し circle_manager になる。
 //   複数サークルに配るため email 任意・maxUses 複数可。
-type InvitePurpose = "event_manager" | "circle_host";
+type InvitePurpose = "event_manager" | "event_staff" | "event_wristband_staff" | "event_stamp_staff" | "circle_host";
 // 2026-07-15: 期限付き・人数制限付きの招待リンク機能向上のため、expiresInDays から expiresInHours (時間指定) に変更
 type InviteForm = { email: string; purpose: InvitePurpose; maxUses: number; expiresInHours: number };
 
@@ -39,8 +39,8 @@ export function EventStaffFormModal({ eventId, isOpen, onClose }: EventStaffForm
     create: (data) =>
       membershipApi.createInvite({
         eventId,
-        // circle_host はイベント配下にサークルを作る権利 (role=circle_manager, circleId 無し)。
-        role: data.purpose === "event_manager" ? "event_manager" : "circle_manager",
+        // circle_host はイベント配下にサークルを作る権利 (role=circle_manager, circleId 無し)。当日スタッフは担当範囲のロールで招待する。
+        role: data.purpose === "circle_host" ? "circle_manager" : data.purpose,
         // 2026-07-15: 共同管理者でも直接リンク共有可能にするためメールアドレスは任意。
         targetEmail: data.email.trim() ? data.email.toLowerCase() : undefined,
         // 2026-10-15 Issue #122: 0回は1回制限ではなく無制限として保存する。
@@ -77,6 +77,9 @@ export function EventStaffFormModal({ eventId, isOpen, onClose }: EventStaffForm
         >
           <option value="circle_host">サークル出店 (代表者がサークルを作成)</option>
           <option value="event_manager">イベント共同管理者 (フルアクセス)</option>
+          <option value="event_staff">当日スタッフ (紛失バンド交換・スタンプラリー)</option>
+          <option value="event_wristband_staff">当日スタッフ (紛失バンド交換)</option>
+          <option value="event_stamp_staff">当日スタッフ (スタンプラリー)</option>
         </FormSelect>
 
         <FormField
@@ -91,7 +94,7 @@ export function EventStaffFormModal({ eventId, isOpen, onClose }: EventStaffForm
 
         <FormField
           id="inviteMaxUses"
-          label={`${form.purpose === "event_manager" ? "最大使用回数 (人数)" : "使用可能回数 (何サークル分)"}${form.maxUses === 0 ? "（無制限）" : ""}`}
+          label={`${form.purpose !== "circle_host" ? "最大使用回数 (人数)" : "使用可能回数 (何サークル分)"}${form.maxUses === 0 ? "（無制限）" : ""}`}
           type="number"
           min={0}
           max={100}

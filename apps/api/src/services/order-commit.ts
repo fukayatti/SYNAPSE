@@ -68,7 +68,6 @@ export async function commitOrder(db: D1, command: OrderCommand, input: CommitOr
   const scope = `${input.circleId}:${day}`;
   const shortCirclePrefix = input.circleId.slice(0, 4);
   const orderNumberPrefix = `${shortCirclePrefix}-${day}-`;
-  const legacyOrderNumberPrefix = `${shortCirclePrefix}-${day.slice(4)}-`;
   const items = input.items.map((item) => ({ ...item, id: ulid() }));
   const menuQuantities = new Map<string, number>();
   const inventoryQuantities = new Map<string, number>();
@@ -108,17 +107,13 @@ export async function commitOrder(db: D1, command: OrderCommand, input: CommitOr
         toppings, input.circleId, input.preOrderId ?? null, input.preOrderId ?? null, input.circleId, input.userId,
         input.expectedPreOrderUpdatedAt ?? null, registerCoupon?.id ?? null, registerCoupon?.id ?? null,
         input.circleId, now, input.discount?.id ?? null, input.discount?.id ?? null, input.circleId),
-    // 2026-10-03 (#81): 表示番号は店舗内の連番で十分なため、共有グローバル連番の競合書込みをなくす。
-    // 年を表示に含めて店舗内の番号検索を一意に保ち、初回実行時は同じJST営業日の旧形式番号から続ける。
+    // 2026-10-20: 旧年なし番号の継続採番を終了し、現在の年付きJST営業日形式だけを採番対象にする。
     db.prepare(`INSERT INTO order_sequence (scope,value)
-      VALUES (?, COALESCE((SELECT MAX(CASE WHEN order_number>=? AND order_number<?
-        THEN CAST(substr(order_number,length(?)+1) AS INTEGER)
-        ELSE CAST(substr(order_number,length(?)+1) AS INTEGER) END)
-        FROM orders WHERE circle_id=? AND ((order_number>=? AND order_number<?)
-          OR (order_number>=? AND order_number<?)) AND created_at>=? AND created_at<?),0) + 1)
+      VALUES (?, COALESCE((SELECT MAX(CAST(substr(order_number,length(?)+1) AS INTEGER))
+        FROM orders WHERE circle_id=? AND order_number>=? AND order_number<?
+          AND created_at>=? AND created_at<?),0) + 1)
       ON CONFLICT(scope) DO UPDATE SET value=value+1`)
-      .bind(scope, orderNumberPrefix, `${orderNumberPrefix}:`, orderNumberPrefix, legacyOrderNumberPrefix,
-        input.circleId, orderNumberPrefix, `${orderNumberPrefix}:`, legacyOrderNumberPrefix, `${legacyOrderNumberPrefix}:`,
+      .bind(scope, orderNumberPrefix, input.circleId, orderNumberPrefix, `${orderNumberPrefix}:`,
         dayStart, dayStart + 24 * 60 * 60 * 1000),
     db.prepare(`INSERT INTO orders (id,circle_id,user_id,cashier_id,source,order_number,people_count,total_price,status,payment_method,completed,completed_at)
       SELECT ?,?,?,?,?,? || printf('%03d',daily.value),?,?,?,?,?,?

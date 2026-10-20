@@ -73,20 +73,21 @@ export function AnnounceTab({ eventId }: { eventId: string }) {
   };
 
   return (
-    <div className="space-y-4 max-w-2xl">
-      <div className="flex items-start justify-between gap-2 border-b-thick border-border pb-3">
-        <div>
+    <div className="w-full min-w-0 max-w-2xl space-y-4">
+      {/* 2026-10-20: 説明文が長い画面では見出しと操作ボタンを縦に分け、本文を狭い幅でも折り返す。 */}
+      <div className="flex min-w-0 flex-col gap-3 border-b-thick border-border pb-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0 flex-1">
           <h2 className="text-sm font-bold flex items-center gap-2 uppercase tracking-wider">
             <Megaphone className="h-4 w-4" /> 一斉アナウンス
           </h2>
-          <p className="text-[11px] text-muted-foreground font-mono mt-1 leading-[1.6]">
+          <p className="mt-1 break-words text-[11px] leading-[1.6] text-muted-foreground font-mono">
             イベント配下の<strong className="text-foreground">全スタッフ</strong>(イベントスタッフ + 各サークルのスタッフ)へ
             通知を送ります。受信者はヘッダーの通知(ベル)で確認・既読にできます。
           </p>
         </div>
         <Button
           onClick={() => setIsModalOpen(true)}
-          className="rounded-none border-thick border-primary bg-primary text-primary-foreground hover:bg-background hover:text-foreground h-8 text-[11px] uppercase font-bold shadow-none px-3 shrink-0"
+          className="h-8 w-fit shrink-0 rounded-none border-thick border-primary bg-primary px-3 text-[11px] font-bold uppercase text-primary-foreground shadow-none hover:bg-background hover:text-foreground"
         >
           <Plus className="mr-1.5 h-3.5 w-3.5" />
           新規作成

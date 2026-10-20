@@ -371,8 +371,8 @@ export const reviewApi = {
 // Membership API
 export const membershipApi = {
   getRoles: () => fetchApi<RoleInfo[]>("/api/memberships/roles"),
-  myMemberships: (userId: string) =>
-    fetchApi<MembershipWithRelations[]>(`/api/memberships/my?userId=${userId}`),
+  // 2026-10-19: /my はセッションから本人を特定するため、識別子をクエリへ含めない。
+  myMemberships: () => fetchApi<MembershipWithRelations[]>("/api/memberships/my"),
   listByCircle: (circleId: string) =>
     fetchApi<MembershipWithUser[]>(`/api/memberships/circle/${circleId}`),
   listByEvent: (eventId: string) =>
@@ -445,8 +445,8 @@ export const membershipApi = {
     fetchApi<{ success: boolean }>(`/api/memberships/invite/${id}`, {
       method: "DELETE",
     }),
-  listMy: (userEmail: string) =>
-    fetchApi<any[]>(`/api/memberships/my?userEmail=${encodeURIComponent(userEmail)}`),
+  // 2026-10-19: /my はセッション本人の所属だけを返すため、メールをURLへ重複送信しない。
+  listMy: () => fetchApi<any[]>("/api/memberships/my"),
 };
 
 // アカウント管理 (2026-07-04 セルフサービス: 名前/アイコン/メール変更・退出・削除)
@@ -600,9 +600,7 @@ export interface StampRallyArea {
 export interface StampRallySettings {
   enabled: boolean;
   targetAreaIds: string[];
-  requiredCount: number;
-  requiredCountByArea?: Record<string, number>;
-  qualification?: StampRallyQualificationRule;
+  qualification: StampRallyQualificationRule;
   rewardTitle: string;
   rewards?: StampRallyReward[];
   redemptionLocation: string;
@@ -654,12 +652,9 @@ export interface StampRallyOrder {
 
 export interface VisitorStampRally {
   enabled: boolean;
-  legacy: boolean;
   stampedCircleIds: string[];
   stampedCount: number;
   targetCircleCount: number;
-  requiredCount: number;
-  requiredCountByArea: Record<string, number>;
   qualification: VisitorStampRallyQualification;
   eligible: boolean;
   rewardTitle: string;
@@ -715,8 +710,6 @@ export interface StampRallyUsageSummary {
   enabled: boolean;
   targetAreaIds: string[];
   targetStoreCount: number;
-  requiredCount: number;
-  requiredCountByArea: Record<string, number>;
   qualification: StampRallyQualificationRule;
   participantAccountCount: number;
   qualifiedAccountCount: number;
@@ -744,12 +737,6 @@ export interface StampRallyStoreVisitorsPage {
 }
 
 export interface VisitorStampRallyArea extends StampRallyArea {}
-
-export interface LegacyVisitorStampRally {
-  enabled: boolean;
-  stampedCircleIds: string[];
-  areas: VisitorStampRallyArea[];
-}
 
 export const stampRallyApi = {
   visitor: (code: string) =>
@@ -1338,7 +1325,6 @@ export interface UpdateStaffInput {
 }
 
 export interface CheckPermissionInput {
-  userId: string;
   circleId?: string;
   eventId?: string;
   permission: string;
@@ -1363,8 +1349,6 @@ export interface CreateInviteInput {
   role: Role;
   expiresInHours?: number;
   maxUses?: number | null;
-  // 2026-07-15: バックエンドでセッションから自動設定されるようになったためオプショナルに変更
-  createdBy?: string;
   targetEmail?: string;
 }
 
@@ -1374,7 +1358,6 @@ export interface CreateInviteInput {
 export interface AcceptInviteInput {
   token?: string;
   code?: string;
-  userName: string;
 }
 
 // 招待種別 (2026-07-12 SaaS)
@@ -1443,6 +1426,94 @@ export interface WristbandLookupResult {
   familyBandCount: number;
 }
 
+export type WristbandStatus = "active" | "lost" | "replaced" | "revoked" | "smartphone";
+export type VisitorAccountStatus = "available" | "banned";
+
+export interface VisitorAdminEditorData {
+  user: {
+    id: string;
+    eventId: string;
+    displayId: number;
+    status: VisitorAccountStatus;
+    nickname: string | null;
+    favoriteDate: string | null;
+    birthdayMonthDay: string | null;
+    age: number | null;
+    allergies: string | null;
+    onboardedAt: string | null;
+    createdAt: string;
+    updatedAt: string;
+  };
+  wristbands: Array<{
+    id: string;
+    userId: string;
+    status: WristbandStatus;
+    nickname: string | null;
+    birthdayMonthDay: string | null;
+    age: number | null;
+    onboardedAt: string | null;
+    assignedAt: string;
+    deactivatedAt: string | null;
+  }>;
+  circleVisits: Array<{
+    id: string;
+    circleId: string;
+    circleName: string;
+    staffId: string | null;
+    createdAt: string;
+  }>;
+  circles: Array<{ id: string; name: string }>;
+}
+
+export interface VisitorAdminEditorUpdate {
+  profile: {
+    displayId: number;
+    status: VisitorAccountStatus;
+    nickname: string | null;
+    favoriteDate: string | null;
+    birthdayMonthDay: string | null;
+    age: number | null;
+    allergies: JapaneseAllergen[] | null;
+    onboardedAt: string | null;
+  };
+  wristbands: Array<{
+    id: string;
+    isNew?: boolean;
+    status: WristbandStatus;
+    nickname: string | null;
+    birthdayMonthDay: string | null;
+    age: number | null;
+    onboardedAt: string | null;
+    assignedAt: string;
+    deactivatedAt: string | null;
+  }>;
+  circleVisits: Array<{
+    id?: string;
+    isNew?: boolean;
+    isDeleted?: boolean;
+    circleId: string;
+    staffId: string | null;
+    createdAt: string;
+  }>;
+}
+
+export interface LostWristbandItem {
+  user: {
+    id: string;
+    displayId: number;
+    nickname: string | null;
+    status: string;
+  };
+  wristband: {
+    id: string;
+    userId: string;
+    status: "lost";
+    nickname: string | null;
+    assignedAt: string;
+    deactivatedAt: string | null;
+  };
+}
+
 export type WristbandBatchSource = "generated" | "csv";
 export type WristbandBatchStatus = "pending" | "processing" | "completed" | "conflict";
 export interface WristbandBatch {
@@ -1468,6 +1539,16 @@ export const wristbandApi = {
   // 呼び出し側 (Entry の入場エラー / MyPage の ErrorState) で扱う。
   lookup: (code: string) =>
     fetchApi<WristbandLookupResult>(`/api/wristbands/lookup/${encodeURIComponent(code)}`),
+  // 2026-10-20: 来場者情報の管理はスキャン用lookupと分離し、イベント単位で権限確認された全関連データを編集する。
+  adminEditor: (eventId: string, userId: string) =>
+    fetchApi<VisitorAdminEditorData>(
+      `/api/wristbands/event/${encodeURIComponent(eventId)}/admin/${encodeURIComponent(userId)}`,
+    ),
+  updateAdminEditor: (eventId: string, userId: string, data: VisitorAdminEditorUpdate) =>
+    fetchApi<{ success: boolean }>(
+      `/api/wristbands/event/${encodeURIComponent(eventId)}/admin/${encodeURIComponent(userId)}`,
+      { method: "PUT", body: data },
+    ),
   search: (
     eventId: string,
     query: string,
@@ -1493,10 +1574,15 @@ export const wristbandApi = {
         `&offset=${pagination.offset}&limit=${pagination.limit}` +
         `&sortBy=${sorting.sortBy}&sortDirection=${sorting.sortDirection}`
     ),
-  register: (userId: string, wristbandId: string) =>
+  listLost: (eventId: string, query = "", offset = 0, limit = 50) =>
+    fetchApi<{ items: LostWristbandItem[]; total: number; offset: number; limit: number }>(
+      `/api/wristbands/lost?eventId=${encodeURIComponent(eventId)}&query=${encodeURIComponent(query)}` +
+        `&offset=${offset}&limit=${limit}`
+    ),
+  register: (userId: string, wristbandId: string, replacesWristbandId?: string) =>
     fetchApi<{ success: boolean; wristbandId: string }>("/api/wristbands/register", {
       method: "POST",
-      body: { userId, wristbandId },
+      body: { userId, wristbandId, replacesWristbandId },
     }),
   addFamilyMember: (data: {
     userId: string;
@@ -1564,11 +1650,7 @@ export const wristbandApi = {
       method: "PATCH",
       body: data,
     }),
-  updateUser: (userId: string, data: { nickname?: string | null; favoriteDate?: string | null; displayId?: number; status?: string }) =>
-    fetchApi<{ success: boolean }>(`/api/wristbands/user/${encodeURIComponent(userId)}`, {
-      method: "PATCH",
-      body: data,
-    }),
+
 };
 
 // 来場者オンボーディング API (2026-07-04)
