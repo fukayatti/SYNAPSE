@@ -1,6 +1,6 @@
-import { ReactNode, useEffect, useRef, useState } from "react";
+import { createContext, ReactNode, Suspense, useContext, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Link, useLocation } from "react-router-dom";
+import { Link, Outlet, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
 import { circleApi, eventApi, parseCircleSettings } from "@/lib/api";
@@ -43,6 +43,11 @@ import {
   Gauge,
   ShieldAlert,
 } from "lucide-react";
+import { Skeleton } from "@/components/ui/skeleton";
+
+// 2026-10-21: サークル画面の切替で共通ナビまで再生成されないよう、親ルートが描画する枠を共有する。
+// 子ページが従来どおり DashboardLayout を使っても、ここでは中身と画面固有アクションだけを渡す。
+const CircleDashboardRouteContext = createContext<{ actionsHost: HTMLDivElement | null } | null>(null);
 
 interface MenuItem {
   title: string;
@@ -80,7 +85,20 @@ interface DashboardLayoutProps {
   eventId?: string;
 }
 
-export default function DashboardLayout({
+export default function DashboardLayout(props: DashboardLayoutProps) {
+  const routeContext = useContext(CircleDashboardRouteContext);
+  if (routeContext) {
+    return (
+      <>
+        {props.children}
+        {props.actions && routeContext.actionsHost ? createPortal(props.actions, routeContext.actionsHost) : null}
+      </>
+    );
+  }
+  return <DashboardLayoutFrame {...props} />;
+}
+
+function DashboardLayoutFrame({
   children,
   title,
   subtitle,
@@ -516,5 +534,56 @@ export default function DashboardLayout({
         </main>
       </div>
     </div>
+  );
+}
+
+const circleDashboardSubtitles: Record<string, string> = {
+  "/circle/dashboard": "ダッシュボード概要",
+  "/circle/dashboard/circle": "サークル設定",
+  "/circle/dashboard/number-display": "厨房・プロジェクターに表示する番号とメディアを設定",
+  "/circle/dashboard/members": "メンバー管理",
+  "/circle/dashboard/menu": "メニュー・トッピング管理",
+  "/circle/dashboard/qr": "モバイルオーダーQR",
+  "/circle/dashboard/sales": "売上管理",
+  "/circle/dashboard/analytics": "統計・分析",
+  "/circle/dashboard/reviews": "来場者の評価・感想",
+  "/circle/dashboard/export": "データエクスポート",
+  "/circle/dashboard/staff": "スタッフ管理",
+  "/circle/dashboard/stock": "在庫管理",
+  "/circle/dashboard/coupons": "クーポン管理",
+  "/circle/dashboard/discounts": "割引管理",
+};
+
+function CircleDashboardRouteLoading() {
+  return (
+    <div role="status" aria-live="polite" className="space-y-4">
+      <p className="text-xs text-muted-foreground">画面を読み込んでいます…</p>
+      <Skeleton className="h-12 w-full" />
+      <Skeleton className="h-40 w-full" />
+    </div>
+  );
+}
+
+// 2026-10-21: ページチャンクの遅延読込は共通枠の内側で受け、白画面へ置換せず現在のナビを保つ。
+export function CircleDashboardRouteLayout() {
+  const location = useLocation();
+  const { circleName } = useAuth();
+  const [actionsHost, setActionsHost] = useState<HTMLDivElement | null>(null);
+  const path = location.pathname.replace(/\/+$/, "") || "/circle/dashboard";
+  const title = path === "/circle/dashboard/number-display" ? "番号表示" : circleName ?? "サークルダッシュボード";
+
+  return (
+    <CircleDashboardRouteContext.Provider value={{ actionsHost }}>
+      <DashboardLayoutFrame
+        title={title}
+        subtitle={circleDashboardSubtitles[path] ?? "サークル管理"}
+        type="circle"
+        actions={<div ref={setActionsHost} className="contents" />}
+      >
+        <Suspense fallback={<CircleDashboardRouteLoading />}>
+          <Outlet />
+        </Suspense>
+      </DashboardLayoutFrame>
+    </CircleDashboardRouteContext.Provider>
   );
 }

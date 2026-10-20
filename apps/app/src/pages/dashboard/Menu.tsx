@@ -16,6 +16,7 @@ import { Plus, Edit, UtensilsCrossed, ArrowUp, ArrowDown } from "lucide-react";
 import { MenuFormModal } from "@/components/menu/MenuFormModal";
 import { ToppingFormModal } from "@/components/menu/ToppingFormModal";
 import { resolveAssetUrl } from "@/lib/asset-url";
+import { queryCachePolicy } from "@/lib/query-cache-policy";
 
 function MenuManagementContent() {
   // 2026-07-16: circleId/circleName を useState+useEffect(mount時一度きり) で
@@ -38,6 +39,9 @@ function MenuManagementContent() {
 
 
   const queryClient = useQueryClient();
+  // 2026-10-21: 復元権限でアーカイブ項目の有無が変わるため、異なる一覧を同じキャッシュキーに混ぜない。
+  const menuQueryKey = ["menus", circleId, canRestoreArchived];
+  const toppingQueryKey = ["toppings", circleId, canRestoreArchived];
 
   const {
     data: menus,
@@ -46,9 +50,10 @@ function MenuManagementContent() {
     error: menusErrorObj,
     refetch: refetchMenus,
   } = useQuery({
-    queryKey: ["menus", circleId],
+    queryKey: menuQueryKey,
     queryFn: () => menuApi.list(circleId, canRestoreArchived),
     enabled: !!circleId,
+    ...queryCachePolicy.catalog,
   });
 
   const {
@@ -58,9 +63,10 @@ function MenuManagementContent() {
     error: toppingsErrorObj,
     refetch: refetchToppings,
   } = useQuery({
-    queryKey: ["toppings", circleId],
+    queryKey: toppingQueryKey,
     queryFn: () => toppingApi.list(circleId, canRestoreArchived),
     enabled: !!circleId,
+    ...queryCachePolicy.catalog,
   });
 
   // カードから売切をワンタップで切り替える (在庫管理OFF時のみ) (2026-07-14)
@@ -68,7 +74,7 @@ function MenuManagementContent() {
     mutationFn: (menu: any) => menuApi.update(menu.id, { soldOut: !menu.soldOut }),
     // 2026-10-21: 売切操作は現場で即時に確認できるよう、通信前に一覧へ反映する。
     onMutate: async (menu: any) => {
-      const queryKey = ["menus", circleId];
+      const queryKey = menuQueryKey;
       await queryClient.cancelQueries({ queryKey });
       const previousMenus = queryClient.getQueryData<any[]>(queryKey);
       queryClient.setQueryData<any[]>(queryKey, (current) => current?.map((item) =>
@@ -80,7 +86,7 @@ function MenuManagementContent() {
       toast.success(menu.soldOut ? "販売中に戻しました" : "売り切れにしました");
     },
     onError: (e: any, _menu: any, context: any) => {
-      if (context?.previousMenus) queryClient.setQueryData(["menus", circleId], context.previousMenus);
+      if (context?.previousMenus) queryClient.setQueryData(menuQueryKey, context.previousMenus);
       toast.error(e?.message || "更新に失敗しました");
     },
     onSettled: () => queryClient.invalidateQueries({ queryKey: ["menus", circleId] }),
@@ -91,8 +97,8 @@ function MenuManagementContent() {
     mutationFn: (topping: any) => toppingApi.update(topping.id, { soldOut: !topping.soldOut }),
     // 2026-10-21: トッピング本体とメニュー内の紐付け表示を同時に先行更新する。
     onMutate: async (topping: any) => {
-      const toppingKey = ["toppings", circleId];
-      const menuKey = ["menus", circleId];
+      const toppingKey = toppingQueryKey;
+      const menuKey = menuQueryKey;
       await Promise.all([
         queryClient.cancelQueries({ queryKey: toppingKey }),
         queryClient.cancelQueries({ queryKey: menuKey }),
@@ -113,8 +119,8 @@ function MenuManagementContent() {
       toast.success(topping.soldOut ? "販売中に戻しました" : "売り切れにしました");
     },
     onError: (e: any, _topping: any, context: any) => {
-      if (context?.previousToppings) queryClient.setQueryData(["toppings", circleId], context.previousToppings);
-      if (context?.previousMenus) queryClient.setQueryData(["menus", circleId], context.previousMenus);
+      if (context?.previousToppings) queryClient.setQueryData(toppingQueryKey, context.previousToppings);
+      if (context?.previousMenus) queryClient.setQueryData(menuQueryKey, context.previousMenus);
       toast.error(e?.message || "更新に失敗しました");
     },
     onSettled: async () => {
@@ -129,7 +135,7 @@ function MenuManagementContent() {
     mutationFn: (menu: any) => menuApi.restore(menu.id),
     // 2026-10-21: 販売再開も一覧から即座に消し、成功時にサーバー状態へ同期する。
     onMutate: async (menu: any) => {
-      const queryKey = ["menus", circleId];
+      const queryKey = menuQueryKey;
       await queryClient.cancelQueries({ queryKey });
       const previousMenus = queryClient.getQueryData<any[]>(queryKey);
       queryClient.setQueryData<any[]>(queryKey, (current) => current?.map((item) =>
@@ -141,7 +147,7 @@ function MenuManagementContent() {
       toast.success("メニューの販売を再開しました");
     },
     onError: (error: any, _menu: any, context: any) => {
-      if (context?.previousMenus) queryClient.setQueryData(["menus", circleId], context.previousMenus);
+      if (context?.previousMenus) queryClient.setQueryData(menuQueryKey, context.previousMenus);
       toast.error(error?.message || "メニューを再開できませんでした");
     },
     onSettled: () => queryClient.invalidateQueries({ queryKey: ["menus", circleId] }),
@@ -151,8 +157,8 @@ function MenuManagementContent() {
     mutationFn: (topping: any) => toppingApi.restore(topping.id),
     // 2026-10-21: 使用再開を両方の一覧へ先行反映し、API失敗時は元の表示へ戻す。
     onMutate: async (topping: any) => {
-      const toppingKey = ["toppings", circleId];
-      const menuKey = ["menus", circleId];
+      const toppingKey = toppingQueryKey;
+      const menuKey = menuQueryKey;
       await Promise.all([
         queryClient.cancelQueries({ queryKey: toppingKey }),
         queryClient.cancelQueries({ queryKey: menuKey }),
@@ -172,8 +178,8 @@ function MenuManagementContent() {
       toast.success("トッピングを再び選べるようにしました");
     },
     onError: (error: any, _topping: any, context: any) => {
-      if (context?.previousToppings) queryClient.setQueryData(["toppings", circleId], context.previousToppings);
-      if (context?.previousMenus) queryClient.setQueryData(["menus", circleId], context.previousMenus);
+      if (context?.previousToppings) queryClient.setQueryData(toppingQueryKey, context.previousToppings);
+      if (context?.previousMenus) queryClient.setQueryData(menuQueryKey, context.previousMenus);
       toast.error(error?.message || "トッピングを再開できませんでした");
     },
     onSettled: async () => {
@@ -193,7 +199,7 @@ function MenuManagementContent() {
   const handleDeleteMenu = (menu: any) =>
     undoableDelete({
       queryClient,
-      queryKey: ["menus", circleId],
+      queryKey: menuQueryKey,
       id: menu.id,
       // 2026-10-21: 履歴は保持する操作のため、物理削除と誤解しない販売停止表記にする。
       message: `メニュー「${menu.name}」を販売停止にしました`,
@@ -204,7 +210,7 @@ function MenuManagementContent() {
   const handleDeleteTopping = (topping: any) =>
     undoableDelete({
       queryClient,
-      queryKey: ["toppings", circleId],
+      queryKey: toppingQueryKey,
       id: topping.id,
       // 2026-10-21: 履歴は保持する操作のため、物理削除と誤解しない使用停止表記にする。
       message: `トッピング「${topping.name}」を使用停止にしました`,
@@ -243,7 +249,7 @@ function MenuManagementContent() {
     const reordered = [...categoryMenus];
     [reordered[index], reordered[target]] = [reordered[target]!, reordered[index]!];
     setIsReorderingMenus(true);
-    const queryKey = ["menus", circleId];
+    const queryKey = menuQueryKey;
     await queryClient.cancelQueries({ queryKey });
     const previousMenus = queryClient.getQueryData<any[]>(queryKey);
     if (previousMenus) {
@@ -276,7 +282,7 @@ function MenuManagementContent() {
     const reordered = [...activeToppings];
     [reordered[index], reordered[target]] = [reordered[target]!, reordered[index]!];
     setIsReorderingToppings(true);
-    const queryKey = ["toppings", circleId];
+    const queryKey = toppingQueryKey;
     await queryClient.cancelQueries({ queryKey });
     const previousToppings = queryClient.getQueryData<any[]>(queryKey);
     if (previousToppings) {
@@ -321,6 +327,9 @@ function MenuManagementContent() {
   return (
     <DashboardLayout title={circleName} subtitle="メニュー・トッピング管理" type="circle">
       <div className="space-y-8 font-mono text-foreground">
+        {(menusError && menus !== undefined) || (toppingsError && toppings !== undefined) ? (
+          <p role="status" className="border-thick border-warning bg-warning/10 p-3 text-xs">最新のメニュー・トッピング情報を取得できません。前回取得した内容を表示しています。</p>
+        ) : null}
         
         {/* メニューセクション */}
         <section aria-labelledby="menu-management-heading" className="space-y-4 border-thick border-border p-4">
@@ -338,7 +347,7 @@ function MenuManagementContent() {
           </div>
 
           {/* メニュー一覧 */}
-          {menusError ? (
+          {menusError && menus === undefined ? (
             <ErrorState error={menusErrorObj} onRetry={() => refetchMenus()} />
           ) : activeMenus.length === 0 ? (
             <EmptyState
@@ -421,7 +430,7 @@ function MenuManagementContent() {
           </div>
 
           {/* トッピング一覧 */}
-          {toppingsError ? (
+          {toppingsError && toppings === undefined ? (
             <ErrorState error={toppingsErrorObj} onRetry={() => refetchToppings()} />
           ) : activeToppings.length === 0 ? (
             <EmptyState

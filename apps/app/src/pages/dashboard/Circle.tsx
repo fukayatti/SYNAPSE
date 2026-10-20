@@ -336,7 +336,7 @@ function CircleSettingsContent() {
     );
   }
 
-  if (isError) {
+  if (isError && !circle) {
     return (
       <DashboardLayout title={circleName} subtitle="サークル設定" type="circle">
         <ErrorState error={error} onRetry={() => refetch()} />
@@ -347,6 +347,7 @@ function CircleSettingsContent() {
   return (
     <DashboardLayout title={circleName} subtitle="サークル設定" type="circle">
       <div className="space-y-6">
+        {isError && <p role="status" className="border-thick border-warning bg-warning/10 p-3 text-xs">最新のサークル設定を取得できません。前回取得した設定を表示しています。</p>}
         {/* 基本情報 (+ アイコン/背景画像)
             2026-07-16: アイコン/背景画像は circle.iconImagePath/backgroundImagePath (既存カラム) に
             保存する。circleApi.update (name/description と同じ PUT /:id) で一緒に送るため、

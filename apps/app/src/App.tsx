@@ -12,6 +12,7 @@ import SystemGate from "@/components/SystemGate";
 import VisitorHeader from "@/components/visitor-header";
 
 import { CircleAuthGuard, SystemAdminGuard, EventAdminGuard } from "@/hooks/useCircleAuth";
+import { CircleDashboardRouteLayout } from "@/components/DashboardLayout";
 import { ImpersonationBanner } from "@/components/system/ImpersonationBanner";
 import { ConnectionStatusBanner } from "@/components/ConnectionStatus";
 import { MobileOrderOutboxSync } from "@/features/orders/MobileOrderOutboxSync";
@@ -350,103 +351,26 @@ export default function App() {
 							</CircleAuthGuard>
 						}
 					/>
+					{/* 2026-10-21: サークル画面は共通レイアウトを親ルートに置き、ページ切替時の白抜けを防ぐ。 */}
 					<Route
 						path="/circle/dashboard"
-						element={
-							<CircleAuthGuard>
-								<DashboardIndex />
-							</CircleAuthGuard>
-						}
-					/>
-					<Route
-						path="/circle/dashboard/circle"
-						element={
-							<CircleAuthGuard>
-								<DashboardCircle />
-							</CircleAuthGuard>
-						}
-					/>
-					<Route
-						path="/circle/dashboard/number-display"
-						element={<CircleAuthGuard><DashboardOrderDisplay /></CircleAuthGuard>}
-					/>
-					<Route
-						path="/circle/dashboard/members"
-						element={
-							<CircleAuthGuard>
-								<DashboardMembers />
-							</CircleAuthGuard>
-						}
-					/>
-					<Route
-						path="/circle/dashboard/menu"
-						element={
-							<CircleAuthGuard>
-								<DashboardMenu />
-							</CircleAuthGuard>
-						}
-					/>
-					<Route
-						path="/circle/dashboard/qr"
-						element={
-							<CircleAuthGuard>
-								<DashboardQr />
-							</CircleAuthGuard>
-						}
-					/>
-					<Route
-						path="/circle/dashboard/sales"
-						element={
-							<CircleAuthGuard>
-								<DashboardSales />
-							</CircleAuthGuard>
-						}
-					/>
-					<Route
-						path="/circle/dashboard/analytics"
-						element={
-							<CircleAuthGuard>
-								<DashboardAnalytics />
-							</CircleAuthGuard>
-						}
-					/>
-					<Route
-						path="/circle/dashboard/reviews"
-						element={<CircleAuthGuard><DashboardReviews /></CircleAuthGuard>}
-					/>
-					<Route
-						path="/circle/dashboard/export"
-						element={
-							<CircleAuthGuard>
-								<DashboardExport />
-							</CircleAuthGuard>
-						}
-					/>
-					<Route
-						path="/circle/dashboard/staff"
-						element={
-							<CircleAuthGuard>
-								<DashboardStaff />
-							</CircleAuthGuard>
-						}
-					/>
-					<Route
-						path="/circle/dashboard/stock"
-						element={
-							<CircleAuthGuard>
-								<DashboardStock />
-							</CircleAuthGuard>
-						}
-					/>
-					<Route
-						path="/circle/dashboard/coupons"
-						element={
-							<CircleAuthGuard>
-								<DashboardCoupons />
-							</CircleAuthGuard>
-						}
-					/>
-					<Route path="/circle/dashboard/discounts" element={<CircleAuthGuard><DashboardDiscounts /></CircleAuthGuard>} />
+						element={<CircleAuthGuard><CircleDashboardRouteLayout /></CircleAuthGuard>}
+					>
+						<Route index element={<DashboardIndex />} />
+						<Route path="circle" element={<CircleAuthGuard><DashboardCircle /></CircleAuthGuard>} />
+						<Route path="number-display" element={<CircleAuthGuard><DashboardOrderDisplay /></CircleAuthGuard>} />
+						<Route path="members" element={<CircleAuthGuard><DashboardMembers /></CircleAuthGuard>} />
+						<Route path="menu" element={<CircleAuthGuard><DashboardMenu /></CircleAuthGuard>} />
+						<Route path="qr" element={<CircleAuthGuard><DashboardQr /></CircleAuthGuard>} />
+						<Route path="sales" element={<CircleAuthGuard><DashboardSales /></CircleAuthGuard>} />
+						<Route path="analytics" element={<CircleAuthGuard><DashboardAnalytics /></CircleAuthGuard>} />
+						<Route path="reviews" element={<CircleAuthGuard><DashboardReviews /></CircleAuthGuard>} />
+						<Route path="export" element={<CircleAuthGuard><DashboardExport /></CircleAuthGuard>} />
+						<Route path="staff" element={<CircleAuthGuard><DashboardStaff /></CircleAuthGuard>} />
+						<Route path="stock" element={<CircleAuthGuard><DashboardStock /></CircleAuthGuard>} />
+						<Route path="coupons" element={<CircleAuthGuard><DashboardCoupons /></CircleAuthGuard>} />
+						<Route path="discounts" element={<CircleAuthGuard><DashboardDiscounts /></CircleAuthGuard>} />
+					</Route>
 
 				</Route>
 

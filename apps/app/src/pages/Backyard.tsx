@@ -11,6 +11,7 @@ import { toast } from "sonner";
 import { Monitor } from "lucide-react";
 import { SwipeableOrderStack, type KitchenOrderView } from "@/components/pos/SwipeableOrderStack";
 import { useSessionState } from "@/hooks/useSessionState";
+import { queryCachePolicy } from "@/lib/query-cache-policy";
 
 function BackyardPageContent() {
   // 2026-07-16: circleId を useState+useEffect(mount時一度きり) で固定していると、
@@ -42,13 +43,14 @@ function BackyardPageContent() {
     queryFn: () => orderApi.list(circleId, apiStatus),
     enabled: !!circleId,
     refetchInterval: 5000, // 5秒ごとに自動更新
+    ...queryCachePolicy.live,
   });
 
   const { data: toppings } = useQuery({
-    queryKey: ["toppings", circleId],
+    queryKey: ["toppings", circleId, false],
     queryFn: () => toppingApi.list(circleId),
     enabled: !!circleId,
-    staleTime: 60_000,
+    ...queryCachePolicy.catalog,
   });
 
   const updateStatus = useMutation({

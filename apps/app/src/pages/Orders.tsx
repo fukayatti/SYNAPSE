@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { getMobileOrderOutboxEntries, retryMobileOrder, type MobileOrderOutboxEntry } from "@/features/orders/mobile-order-outbox";
 import { displayOrderNumber } from "@/lib/order-number";
 import { toast } from "sonner";
+import { queryCachePolicy } from "@/lib/query-cache-policy";
 
 type MobileOrderReceipt = {
   orderId: string;
@@ -73,6 +74,7 @@ export default function OrdersPage() {
     enabled: isLoaded && !!userId,
     networkMode: "always",
     retry: false,
+    ...queryCachePolicy.live,
   });
 
   const markReceivedMutation = useMutation({
@@ -118,6 +120,7 @@ export default function OrdersPage() {
     enabled: !!userId,
     networkMode: "always",
     retry: false,
+    ...queryCachePolicy.live,
   });
 
   // 2026-10-21: オフライン注文の同期完了後、番号が付いた注文を表示するため履歴を再取得する。
@@ -140,6 +143,7 @@ export default function OrdersPage() {
     enabled: !!userId,
     networkMode: "always",
     retry: false,
+    ...queryCachePolicy.live,
   });
 
   // 注文履歴に含まれるサークルの myOrderBodyBottom モッドフックを読み込む
@@ -247,7 +251,7 @@ export default function OrdersPage() {
         </section>
       )}
 
-      {queuedOrdersError && (
+      {queuedOrdersError && queuedOrders.length === 0 && (
         <div role="alert" className="space-y-2 border-heavy border-destructive bg-destructive/10 p-4">
           <p className="font-bold">端末に保存した注文状態を読み込めません。</p>
           <p className="text-xs">通信が戻っても、注文を再送する前に受付状態を確認してください。</p>
@@ -322,7 +326,7 @@ export default function OrdersPage() {
             [受取待ちの事前注文]
           </h2>
 
-          {preOrdersError ? (
+          {preOrdersError && preOrders === undefined ? (
             <ErrorState error={preOrdersErrorObj} onRetry={() => refetchPreOrders()} />
           ) : (
             <div className="space-y-4">
@@ -370,7 +374,7 @@ export default function OrdersPage() {
             [過去の注文]
           </h2>
 
-          {historyError ? (
+          {historyError && orderHistory === undefined ? (
             <ErrorState error={historyErrorObj} onRetry={() => refetchHistory()} />
           ) : (
             <div className="space-y-4">

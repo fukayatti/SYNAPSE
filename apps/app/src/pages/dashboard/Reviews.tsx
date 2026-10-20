@@ -9,6 +9,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { FormSelect } from "@/components/ui/FormField";
 import { Star } from "lucide-react";
 import { groupCirclesByStoreArea } from "@/lib/store-areas";
+import { queryCachePolicy } from "@/lib/query-cache-policy";
 
 type StoreAreaGroup = ReturnType<typeof groupCirclesByStoreArea<Circle>>[number];
 
@@ -52,23 +53,28 @@ function ReviewRows({ rows, isLoading, isError, error, retry, showCircle, areaGr
         <div className="grid grid-cols-2 gap-6 md:min-w-64">
           <div>
             <p className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">レビュー数</p>
-            <p className="mt-1 font-headline text-2xl tabular-nums">{isLoading || isError ? "—" : reviewCount}件</p>
+            <p className="mt-1 font-headline text-2xl tabular-nums">{isLoading || (isError && rows === undefined) ? "—" : reviewCount}件</p>
           </div>
           <div>
             <p className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">平均評価</p>
             <p className="mt-1 flex items-center gap-1 font-headline text-2xl tabular-nums">
-              {isLoading || isError ? "—" : averageRating == null ? "—" : <><Star className="h-5 w-5 fill-current text-warning" />{averageRating.toFixed(1)}</>}
+              {isLoading || (isError && rows === undefined) ? "—" : averageRating == null ? "—" : <><Star className="h-5 w-5 fill-current text-warning" />{averageRating.toFixed(1)}</>}
             </p>
           </div>
         </div>
       </header>
 
       <section aria-label="レビュー一覧" className="space-y-4">
+        {isError && rows !== undefined && (
+          <p role="status" className="border-thick border-warning bg-warning/10 p-3 text-xs">
+            最新のレビューを取得できないため、前回取得した一覧を表示しています。
+          </p>
+        )}
         <div className="flex items-center justify-between border-b-thin border-border pb-3">
           <h3 className="font-mono text-xs font-bold uppercase tracking-widest">レビュー一覧</h3>
-          {!isLoading && !isError && <span aria-live="polite" className="font-mono text-xs text-muted-foreground">{filteredRows.length}件 / {reviewCount}件</span>}
+          {!isLoading && (!isError || rows !== undefined) && <span aria-live="polite" className="font-mono text-xs text-muted-foreground">{filteredRows.length}件 / {reviewCount}件</span>}
         </div>
-        {!isLoading && !isError && reviewCount > 0 && (
+        {!isLoading && (!isError || rows !== undefined) && reviewCount > 0 && (
           <div className="space-y-4 border-b-thin border-border pb-4">
             {showCircle && areaGroups.length > 0 && (
               <fieldset className="space-y-2">
@@ -103,7 +109,7 @@ function ReviewRows({ rows, isLoading, isError, error, retry, showCircle, areaGr
         )}
         {isLoading ? (
           <div className="space-y-4"><Skeleton className="h-24 w-full" /><Skeleton className="h-24 w-full" /></div>
-        ) : isError ? (
+        ) : isError && rows === undefined ? (
           <ErrorState error={error} onRetry={retry} />
         ) : !reviewCount ? (
           <div className="space-y-3 py-4">
@@ -137,7 +143,7 @@ function ReviewRows({ rows, isLoading, isError, error, retry, showCircle, areaGr
 
 export function CircleReviewsPage() {
   const { circleId, circleName } = useAuth();
-  const query = useQuery({ queryKey: ["circle-reviews", circleId], queryFn: () => reviewApi.circle(circleId!), enabled: !!circleId });
+  const query = useQuery({ queryKey: ["circle-reviews", circleId], queryFn: () => reviewApi.circle(circleId!), enabled: !!circleId, ...queryCachePolicy.reviews });
   return <PermissionGuard permission="sales:read"><DashboardLayout title={circleName || "サークルレビュー"} subtitle="来場者の評価・感想" type="circle">
     <ReviewRows rows={query.data} isLoading={query.isLoading} isError={query.isError} error={query.error} retry={() => query.refetch()} showCircle={false} />
   </DashboardLayout></PermissionGuard>;

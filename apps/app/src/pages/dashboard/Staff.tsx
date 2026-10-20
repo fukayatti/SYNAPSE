@@ -6,6 +6,7 @@ import {
   useAuth,
 } from "@/hooks/useCircleAuth";
 import { staffApi } from "@/lib/api";
+import { queryCachePolicy } from "@/lib/query-cache-policy";
 import type { Staff } from "@/lib/api";
 import DashboardLayout from "@/components/DashboardLayout";
 import {
@@ -61,6 +62,7 @@ function StaffManagementContent() {
     queryKey: ["staff", circleId],
     queryFn: () => staffApi.list(circleId!),
     enabled: !!circleId,
+    ...queryCachePolicy.live,
   });
 
   // スタッフ削除
@@ -101,7 +103,7 @@ function StaffManagementContent() {
     );
   }
 
-  if (isError) {
+  if (isError && staffList === undefined) {
     return (
       <DashboardLayout title={circleName} subtitle="スタッフ管理" type="circle">
         <ErrorState error={error} onRetry={() => refetch()} />
@@ -125,6 +127,7 @@ function StaffManagementContent() {
       }
     >
       <div className="space-y-6 font-mono text-foreground">
+        {isError && <p role="status" className="border-thick border-warning bg-warning/10 p-3 text-xs">最新のスタッフ一覧を取得できません。前回取得した内容を表示しています。</p>}
         {/* スタッフ一覧 */}
         <Card className=" rounded-none bg-background shadow-none">
           <CardHeader className="p-4 pb-2 border-b-thick border-border flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">

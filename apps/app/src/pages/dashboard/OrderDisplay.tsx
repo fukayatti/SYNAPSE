@@ -138,7 +138,7 @@ function OrderDisplayContent() {
   const canWrite = checkPermission("circle:write");
 
   if (isLoading) return <Skeleton className="h-96 w-full" />;
-  if (isError || !circle) return <div className="space-y-3"><p role="alert">番号表示設定を読み込めませんでした。</p><Button variant="outline" onClick={() => void refetch()}>再読み込み</Button></div>;
+  if (isError && !circle) return <div className="space-y-3"><p role="alert">番号表示設定を読み込めませんでした。</p><Button variant="outline" onClick={() => void refetch()}>再読み込み</Button></div>;
 
   return (
     <DashboardLayout title="番号表示" subtitle="厨房・プロジェクターに表示する番号とメディアを設定" type="circle" actions={
@@ -146,6 +146,7 @@ function OrderDisplayContent() {
         <Save className="mr-2 h-4 w-4" />{saveMutation.isPending ? "保存中…" : "設定を保存"}
       </Button>
     }>
+      {isError && <p role="status" className="mb-4 border-thick border-warning bg-warning/10 p-3 text-xs">最新の番号表示設定を取得できません。前回取得した設定を表示しています。</p>}
       {!canWrite ? <p role="alert" className="border-thick border-warning bg-warning/10 p-4 text-sm">番号表示設定を変更する権限がありません。</p> : (
         <div className="space-y-6 font-mono">
           <Card className="rounded-none border-thick border-border shadow-none">

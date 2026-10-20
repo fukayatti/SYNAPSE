@@ -17,6 +17,7 @@ import { toast } from "sonner";
 import { AlertTriangle, Package, Search, Plus, Minus, XCircle, RotateCcw, Coins } from "lucide-react";
 import { resolveAssetUrl } from "@/lib/asset-url";
 import { useSessionState } from "@/hooks/useSessionState";
+import { queryCachePolicy } from "@/lib/query-cache-policy";
 
 const DEFAULT_LOW = 10;
 
@@ -101,16 +102,19 @@ function StockManagementContent() {
   };
 
   const { data: menus, isLoading, isError, error, refetch } = useQuery({
-    queryKey: ["menus", circleId],
+    // 2026-10-21: メニュー管理と在庫管理で同じ権限範囲のカタログだけ共有する。
+    queryKey: ["menus", circleId, false],
     queryFn: () => menuApi.list(circleId),
     enabled: !!circleId,
+    ...queryCachePolicy.catalog,
   });
 
   // トッピング在庫も同じ画面で管理する (2026-07-15)
   const { data: toppings } = useQuery({
-    queryKey: ["toppings", circleId],
+    queryKey: ["toppings", circleId, false],
     queryFn: () => toppingApi.list(circleId),
     enabled: !!circleId,
+    ...queryCachePolicy.catalog,
   });
 
   const updateToppingStock = useMutation({
@@ -244,7 +248,7 @@ function StockManagementContent() {
       </DashboardLayout>
     );
   }
-  if (isError) {
+  if (isError && menus === undefined) {
     return (
       <DashboardLayout title={circleName} subtitle="在庫管理" type="circle">
         <ErrorState error={error} onRetry={() => refetch()} />
@@ -255,6 +259,7 @@ function StockManagementContent() {
   return (
     <DashboardLayout title={circleName} subtitle="在庫管理" type="circle">
       <div className="space-y-5 font-mono text-foreground">
+        {isError && <p role="status" className="border-thick border-warning bg-warning/10 p-3 text-xs">最新の在庫を取得できません。前回取得した内容を表示しています。</p>}
         {/* サマリ */}
         <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
           {[

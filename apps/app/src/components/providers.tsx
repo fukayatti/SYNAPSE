@@ -30,6 +30,8 @@ export default function Providers({ children }: { children: React.ReactNode }) {
         defaultOptions: {
           queries: {
             networkMode: "always",
+            // 2026-10-21: 画面間の再訪ですぐ描画できるよう結果をタブ内メモリーへ保持する。
+            // 永続化プラグインは使わず、注文・個人履歴などは queryCachePolicy.live で短時間保持にする。
             gcTime: 24 * 60 * 60 * 1000,
             retry: (failureCount) => typeof navigator === "undefined" || (navigator.onLine && failureCount < 1),
           },

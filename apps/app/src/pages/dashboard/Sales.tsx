@@ -16,6 +16,7 @@ import { Modal } from "@/components/ui/Modal";
 import { ErrorState } from "@/components/ui/ErrorState";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useSessionState } from "@/hooks/useSessionState";
+import { queryCachePolicy } from "@/lib/query-cache-policy";
 
 // ローカルタイムの YYYY-MM-DD キー (日付ごとの集計・切り替えに使用)
 const dayKey = (d: Date) =>
@@ -52,6 +53,7 @@ function SalesManagementContent() {
     queryKey: ["orders", circleId],
     queryFn: () => orderApi.list(circleId),
     enabled: !!circleId,
+    ...queryCachePolicy.live,
   });
 
   // 注文が存在する日付の一覧 (新しい順)。切り替え用のセレクト・前後ナビに使う。
@@ -165,7 +167,7 @@ function SalesManagementContent() {
     );
   }
 
-  if (isError) {
+  if (isError && orders === undefined) {
     return (
       <DashboardLayout title={circleName} subtitle="売上管理" type="circle">
         <ErrorState error={error} onRetry={() => refetch()} />
@@ -176,6 +178,7 @@ function SalesManagementContent() {
   return (
     <DashboardLayout title={circleName} subtitle="売上管理" type="circle">
       <div className="space-y-8">
+        {isError && <p role="status" className="border-thick border-warning bg-warning/10 p-3 text-xs">最新の注文を取得できません。前回取得した集計を表示しています。</p>}
         {/* 日付切り替えバー (日にちごとに売上を表示) */}
         <Card className="rounded-none shadow-none">
           <CardContent className="flex flex-col justify-between gap-4 p-5 font-mono sm:flex-row sm:items-center">
