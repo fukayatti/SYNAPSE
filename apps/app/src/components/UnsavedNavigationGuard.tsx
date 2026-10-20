@@ -88,7 +88,8 @@ export function UnsavedNavigationGuard({ children }: { children: ReactNode }) {
   }, [blocker.state]);
 
   const saveAndContinue = async () => {
-    if (savingRef.current || blocker.state !== "blocked") return;
+    // 2026-10-20: URL遷移はblocker、画面内切替はpendingActionに保持されるため両方を保存対象にする。
+    if (savingRef.current || (blocker.state !== "blocked" && !pendingAction)) return;
     savingRef.current = true;
     setIsSaving(true);
     setSaveError(null);
