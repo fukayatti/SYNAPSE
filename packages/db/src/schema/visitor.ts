@@ -31,13 +31,10 @@ export const eventUser = sqliteTable(
       .references(() => event.id, { onDelete: "cascade" }),
     displayId: integer("display_id").notNull(), // 表示用呼出ID (1, 2, 3...)
     status: text("status").notNull().default("available"), // available / banned
-    // 来場者マイページの最小プロフィール (2026-07-04 追加)。
-    // リストバンド紛失時の本人確認/再紐付け用にニックネーム+誕生日のみ収集。
+    // 2026-10-20: 入場時は年代区分とニックネームのみを保持し、誕生日や実年齢は収集しない。
     nickname: text("nickname"),
     favoriteDate: text("favorite_date"), // YYYY-MM-DD (旧 birthday)
-    // 2026-10-08: 入場時点の年齢と、年を含めない誕生日（月日）を別々に保持する。
-    birthdayMonthDay: text("birthday_month_day"), // MM-DD
-    age: integer("age"),
+    ageGroup: text("age_group"),
     // 2026-10-15 (#124): 家族全員の申告をまとめたJSON配列。null=未登録、[]=該当なし。
     allergies: text("allergies"),
     onboardedAt: integer("onboarded_at", { mode: "timestamp_ms" }), // 初回入力完了時刻
@@ -67,11 +64,9 @@ export const wristband = sqliteTable(
       .notNull()
       .references(() => eventUser.id, { onDelete: "cascade" }),
     status: text("status").notNull().default("active"), // active / lost / replaced / revoked
-    // 2026-10-15 (#125): 家族の来場記録は eventUser を共有しつつ、受付表示に必要な
-    // ニックネーム・誕生日・年齢は物理/デジタルバンド単位で保持する。
+    // 2026-10-20: 家族の受付プロフィールも年代区分とニックネームだけをバンド単位で保持する。
     nickname: text("nickname"),
-    birthdayMonthDay: text("birthday_month_day"), // MM-DD
-    age: integer("age"),
+    ageGroup: text("age_group"),
     onboardedAt: integer("onboarded_at", { mode: "timestamp_ms" }),
     assignedAt: integer("assigned_at", { mode: "timestamp_ms" })
       .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)

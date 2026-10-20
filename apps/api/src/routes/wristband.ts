@@ -8,12 +8,14 @@ import { zBody, zQuery } from "../z-validator";
 import { apiError } from "../http-error";
 import type { AppEnv } from "../types";
 import { JAPANESE_ALLERGENS_28 } from "@fesflow/config/allergens";
+import { VISITOR_AGE_GROUP_VALUES } from "@fesflow/config/visitor-profile";
 
 
 const wristbandRoutes = new Hono<AppEnv>();
 const WRISTBAND_SEARCH_USER_ID_CHUNK_SIZE = 98;
 const allergyListSchema = z.array(z.enum(JAPANESE_ALLERGENS_28)).max(28)
   .refine((allergies) => new Set(allergies).size === allergies.length, "アレルギー項目の重複を解消してください");
+const visitorAgeGroupSchema = z.enum(VISITOR_AGE_GROUP_VALUES);
 
 async function getFamilyWristbands(db: DB, userId: string) {
   return db
@@ -380,8 +382,7 @@ const visitorEditorProfileSchema = z.object({
   status: z.enum(["available", "banned"]),
   nickname: z.string().trim().max(30).nullable(),
   favoriteDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable(),
-  birthdayMonthDay: z.string().regex(/^\d{2}-\d{2}$/).nullable(),
-  age: z.number().int().min(0).max(120).nullable(),
+  ageGroup: visitorAgeGroupSchema.nullable(),
   allergies: allergyListSchema.nullable(),
   onboardedAt: z.string().datetime().nullable(),
 });
@@ -391,8 +392,7 @@ const visitorEditorWristbandSchema = z.object({
   isNew: z.boolean().optional().default(false),
   status: z.enum(["active", "lost", "replaced", "revoked", "smartphone"]),
   nickname: z.string().trim().max(30).nullable(),
-  birthdayMonthDay: z.string().regex(/^\d{2}-\d{2}$/).nullable(),
-  age: z.number().int().min(0).max(120).nullable(),
+  ageGroup: visitorAgeGroupSchema.nullable(),
   onboardedAt: z.string().datetime().nullable(),
   assignedAt: z.string().datetime(),
   deactivatedAt: z.string().datetime().nullable(),
@@ -412,13 +412,6 @@ const visitorEditorUpdateSchema = z.object({
   wristbands: z.array(visitorEditorWristbandSchema).max(100),
   circleVisits: z.array(visitorEditorCircleVisitSchema).max(200),
 });
-
-function isValidBirthdayMonthDay(value: string | null): boolean {
-  if (value === null) return true;
-  const [month = 0, day = 0] = value.split("-").map(Number);
-  const date = new Date(Date.UTC(2000, month - 1, day));
-  return date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
-}
 
 wristbandRoutes.get(
   "/event/:eventId/admin/:userId",
@@ -469,9 +462,6 @@ wristbandRoutes.put(
 
     const [user] = await db.select().from(eventUser).where(eq(eventUser.id, userId));
     if (!user || user.eventId !== eventId) apiError("NOT_FOUND", "イベント内の来場者が見つかりません");
-    if (!isValidBirthdayMonthDay(profile.birthdayMonthDay)) {
-      apiError("BAD_REQUEST", "来場者の誕生日（月日）を確認してください");
-    }
     if (profile.favoriteDate && Number.isNaN(Date.parse(`${profile.favoriteDate}T00:00:00Z`))) {
       apiError("BAD_REQUEST", "お好きな日付を確認してください");
     }
@@ -482,12 +472,6 @@ wristbandRoutes.put(
     if (duplicateUsers.some((candidate) => candidate.id !== userId)) {
       apiError("CONFLICT", "この呼出IDは別の来場者が使用しています");
     }
-    for (const band of wristbands) {
-      if (!isValidBirthdayMonthDay(band.birthdayMonthDay)) {
-        apiError("BAD_REQUEST", "リストバンドの誕生日（月日）を確認してください");
-      }
-    }
-
     const [existingBands, existingVisits] = await Promise.all([
       db.select().from(wristband).where(eq(wristband.userId, userId)),
       db.select({ id: circleVisit.id }).from(circleVisit).where(eq(circleVisit.eventUserId, userId)),
@@ -528,8 +512,7 @@ wristbandRoutes.put(
         status: profile.status,
         nickname: profile.nickname || null,
         favoriteDate: profile.favoriteDate,
-        birthdayMonthDay: profile.birthdayMonthDay,
-        age: profile.age,
+        ageGroup: profile.ageGroup,
         allergies: profile.allergies === null ? null : JSON.stringify(profile.allergies),
         onboardedAt: profile.onboardedAt ? new Date(profile.onboardedAt) : null,
       }).where(and(eq(eventUser.id, userId), eq(eventUser.eventId, eventId))),
@@ -539,8 +522,7 @@ wristbandRoutes.put(
       const values = {
         status: band.status,
         nickname: band.nickname || null,
-        birthdayMonthDay: band.birthdayMonthDay,
-        age: band.age,
+        ageGroup: band.ageGroup,
         onboardedAt: band.onboardedAt ? new Date(band.onboardedAt) : null,
         assignedAt: new Date(band.assignedAt),
         deactivatedAt: band.deactivatedAt ? new Date(band.deactivatedAt) : null,
@@ -588,12 +570,11 @@ wristbandRoutes.post(
     userId: z.string().min(1),
     wristbandId: z.string().trim().min(1),
     nickname: z.string().trim().min(1).max(30),
-    birthdayMonthDay: z.string().regex(/^\d{2}-\d{2}$/),
-    age: z.number().int().min(0).max(120),
+    ageGroup: visitorAgeGroupSchema,
   })),
   async (c) => {
     const db = c.get("db");
-    const { userId, wristbandId, nickname, birthdayMonthDay, age } = c.req.valid("json");
+    const { userId, wristbandId, nickname, ageGroup } = c.req.valid("json");
     const [account] = await db.select().from(eventUser).where(eq(eventUser.id, userId));
     if (!account) apiError("NOT_FOUND", "家族を追加するアカウントが見つかりません");
     if (!account.onboardedAt || account.status !== "available") {
@@ -618,13 +599,6 @@ wristbandRoutes.post(
       apiError("CONFLICT", "入場登録済みのアカウントは家族に追加できません");
     }
 
-    const parsedMonth = Number(birthdayMonthDay.slice(0, 2));
-    const parsedDay = Number(birthdayMonthDay.slice(3, 5));
-    const parsedDate = new Date(Date.UTC(2000, parsedMonth - 1, parsedDay));
-    if (parsedDate.getUTCMonth() !== parsedMonth - 1 || parsedDate.getUTCDate() !== parsedDay) {
-      apiError("BAD_REQUEST", "誕生日（月日）を正しく入力してください");
-    }
-
     // batch 内でも未登録/履歴なしを条件にし、確認後の状態変化による巻き込みを防止する。
     // いずれかの履歴があれば代表者へ移さず拒否する。
     const historyFree = `
@@ -642,13 +616,13 @@ wristbandRoutes.post(
     const historyBindings = Array.from({ length: 10 }, () => source.id);
     const update = c.env.DB.prepare(`
       UPDATE wristband
-      SET user_id = ?, nickname = ?, birthday_month_day = ?, age = ?, onboarded_at = ?
+      SET user_id = ?, nickname = ?, age_group = ?, onboarded_at = ?
       WHERE id = ? AND user_id = ? AND status IN ('active', 'smartphone') AND onboarded_at IS NULL
         AND EXISTS (SELECT 1 FROM event_user WHERE id = ? AND event_id = ? AND onboarded_at IS NULL AND status = 'available')
         AND (SELECT COUNT(*) FROM wristband WHERE user_id = ?) = 1
         ${historyFree}
     `).bind(
-      account.id, nickname, birthdayMonthDay, age, Date.now(),
+      account.id, nickname, ageGroup, Date.now(),
       wristbandId, source.id, source.id, account.eventId, source.id,
       ...historyBindings,
     );
@@ -678,13 +652,12 @@ wristbandRoutes.patch(
   zBody(z.object({
     userId: z.string().min(1),
     nickname: z.string().trim().min(1).max(30),
-    birthdayMonthDay: z.string().regex(/^\d{2}-\d{2}$/),
-    age: z.number().int().min(0).max(120),
+    ageGroup: visitorAgeGroupSchema,
   })),
   async (c) => {
     const db = c.get("db");
     const wristbandId = c.req.param("wristbandId");
-    const { userId, nickname, birthdayMonthDay, age } = c.req.valid("json");
+    const { userId, nickname, ageGroup } = c.req.valid("json");
     const [account] = await db.select().from(eventUser).where(eq(eventUser.id, userId));
     if (!account) apiError("NOT_FOUND", "代表者が見つかりません");
     if (!account.onboardedAt || account.status !== "available") {
@@ -699,14 +672,7 @@ wristbandRoutes.patch(
     if (!band) apiError("NOT_FOUND", "このアカウントの有効な家族リストバンドが見つかりません");
     if (!band.onboardedAt) apiError("CONFLICT", "入場登録前のリストバンドは家族一覧から編集できません");
 
-    const month = Number(birthdayMonthDay.slice(0, 2));
-    const day = Number(birthdayMonthDay.slice(3, 5));
-    const parsedDate = new Date(Date.UTC(2000, month - 1, day));
-    if (parsedDate.getUTCMonth() !== month - 1 || parsedDate.getUTCDate() !== day) {
-      apiError("BAD_REQUEST", "誕生日（月日）を正しく入力してください");
-    }
-
-    await db.update(wristband).set({ nickname, birthdayMonthDay, age }).where(and(
+    await db.update(wristband).set({ nickname, ageGroup }).where(and(
       eq(wristband.id, wristbandId),
       eq(wristband.userId, userId),
       or(eq(wristband.status, "active"), eq(wristband.status, "smartphone")),
@@ -789,7 +755,7 @@ wristbandRoutes.post(
         replacementBandOwner.favoriteDate ||
         replacementBandOwner.onboardedAt ||
         replacementBand.nickname ||
-        replacementBand.birthdayMonthDay ||
+        replacementBand.ageGroup ||
         replacementBand.onboardedAt ||
         replacementBandOwnerBands.length !== 1
       ) {
@@ -865,8 +831,7 @@ wristbandRoutes.post(
               userId,
               status: "active",
               nickname: replacementSource.nickname,
-              birthdayMonthDay: replacementSource.birthdayMonthDay,
-              age: replacementSource.age,
+              ageGroup: replacementSource.ageGroup,
               onboardedAt: replacementSource.onboardedAt,
               assignedAt: new Date(),
               deactivatedAt: null,
@@ -992,13 +957,12 @@ wristbandRoutes.post(
       wristbandId: z.string().nullable().optional(),
       nickname: z.string().trim().min(1).max(30),
       favoriteDate: z.string().optional(), // YYYY-MM-DD
-      birthdayMonthDay: z.string().regex(/^\d{2}-\d{2}$/).optional(),
-      age: z.number().int().min(0).max(120).optional(),
+      ageGroup: visitorAgeGroupSchema.optional(),
     })
   ),
   async (c) => {
     const db = c.get("db");
-    const { userId, wristbandId, nickname, favoriteDate, birthdayMonthDay, age } = c.req.valid("json");
+    const { userId, wristbandId, nickname, favoriteDate, ageGroup } = c.req.valid("json");
 
     const users = await db.select().from(eventUser).where(eq(eventUser.id, userId));
     if (users.length === 0) {
@@ -1011,18 +975,9 @@ wristbandRoutes.post(
       apiError("BAD_REQUEST", "日付は YYYY-MM-DD 形式で入力してください");
     }
 
-    // 2026-10-08: 初回入場登録では月日と申告年齢を必須にする。既存会員の編集値は任意のまま保つ。
-    if (!u.onboardedAt && (!birthdayMonthDay || age === undefined)) {
-      apiError("BAD_REQUEST", "誕生日（月日）と年齢を入力してください");
-    }
-    if (birthdayMonthDay) {
-      const [rawMonth, rawDay] = birthdayMonthDay.split("-");
-      const month = Number(rawMonth ?? 0);
-      const day = Number(rawDay ?? 0);
-      const parsed = new Date(Date.UTC(2000, month - 1, day));
-      if (parsed.getUTCMonth() !== month - 1 || parsed.getUTCDate() !== day) {
-        apiError("BAD_REQUEST", "誕生日（月日）を正しく入力してください");
-      }
+    // 2026-10-20: 年代未登録のプロフィールは年代区分を必須にし、誕生日と実年齢は保持しない。
+    if (!u.ageGroup && ageGroup === undefined) {
+      apiError("BAD_REQUEST", "年代を選択してください");
     }
 
     // 2026-07-15: 2026-07-06 の write-once (登録後は変更不可) を緩和し、来場者が自分の
@@ -1044,8 +999,7 @@ wristbandRoutes.post(
       .set({
         nickname,
         favoriteDate: favoriteDate || null,
-        ...(birthdayMonthDay !== undefined ? { birthdayMonthDay } : {}),
-        ...(age !== undefined ? { age } : {}),
+        ...(ageGroup !== undefined ? { ageGroup } : {}),
         onboardedAt: u.onboardedAt ?? new Date(),
       })
       .where(eq(eventUser.id, userId));
@@ -1053,8 +1007,7 @@ wristbandRoutes.post(
     if (profileBand) {
       await db.update(wristband).set({
         nickname,
-        ...(birthdayMonthDay !== undefined ? { birthdayMonthDay } : {}),
-        ...(age !== undefined ? { age } : {}),
+        ...(ageGroup !== undefined ? { ageGroup } : {}),
         onboardedAt: new Date(),
       }).where(eq(wristband.id, profileBand.id));
     }
@@ -1066,8 +1019,7 @@ wristbandRoutes.post(
       displayId: updated.displayId,
       nickname: updated.nickname,
       favoriteDate: updated.favoriteDate,
-      birthdayMonthDay: updated.birthdayMonthDay,
-      age: updated.age,
+      ageGroup: updated.ageGroup,
       allergies: updated.allergies,
       onboardedAt: updated.onboardedAt,
     });

@@ -2,6 +2,7 @@ import { apiErrorFromResponse, networkApiError } from "./api-error";
 import { readAuthContext } from "./auth-context";
 import type { RoleType } from "@fesflow/config";
 import type { JapaneseAllergen } from "@fesflow/config/allergens";
+import type { VisitorAgeGroup } from "@fesflow/config/visitor-profile";
 import { createOrderResultSchema, type CreateOrderInput, type CreateOrderResult, type OrderStatus } from "@fesflow/config/order-contract";
 export type { CreateOrderInput, CreateOrderResult, OrderStatus } from "@fesflow/config/order-contract";
 
@@ -1383,8 +1384,7 @@ export interface EventUser {
   status: string;
   nickname?: string | null;
   favoriteDate?: string | null;
-  birthdayMonthDay?: string | null;
-  age?: number | null;
+  ageGroup?: VisitorAgeGroup | null;
   onboardedAt?: string | null;
   createdAt: string;
 }
@@ -1398,8 +1398,7 @@ export interface WristbandLookupResult {
     status: string;
     nickname?: string | null;
     favoriteDate?: string | null;
-    birthdayMonthDay?: string | null;
-    age?: number | null;
+    ageGroup?: VisitorAgeGroup | null;
     allergies?: string | null;
     onboardedAt?: string | null;
   };
@@ -1409,8 +1408,7 @@ export interface WristbandLookupResult {
     status: string;
     assignedAt: string;
     nickname?: string | null;
-    birthdayMonthDay?: string | null;
-    age?: number | null;
+    ageGroup?: VisitorAgeGroup | null;
     onboardedAt?: string | null;
   } | null;
   familyWristbands: Array<{
@@ -1419,8 +1417,7 @@ export interface WristbandLookupResult {
     status: string;
     assignedAt: string;
     nickname: string | null;
-    birthdayMonthDay: string | null;
-    age: number | null;
+    ageGroup: VisitorAgeGroup | null;
     onboardedAt: string | null;
   }>;
   familyBandCount: number;
@@ -1437,8 +1434,7 @@ export interface VisitorAdminEditorData {
     status: VisitorAccountStatus;
     nickname: string | null;
     favoriteDate: string | null;
-    birthdayMonthDay: string | null;
-    age: number | null;
+    ageGroup: VisitorAgeGroup | null;
     allergies: string | null;
     onboardedAt: string | null;
     createdAt: string;
@@ -1449,8 +1445,7 @@ export interface VisitorAdminEditorData {
     userId: string;
     status: WristbandStatus;
     nickname: string | null;
-    birthdayMonthDay: string | null;
-    age: number | null;
+    ageGroup: VisitorAgeGroup | null;
     onboardedAt: string | null;
     assignedAt: string;
     deactivatedAt: string | null;
@@ -1471,8 +1466,7 @@ export interface VisitorAdminEditorUpdate {
     status: VisitorAccountStatus;
     nickname: string | null;
     favoriteDate: string | null;
-    birthdayMonthDay: string | null;
-    age: number | null;
+    ageGroup: VisitorAgeGroup | null;
     allergies: JapaneseAllergen[] | null;
     onboardedAt: string | null;
   };
@@ -1481,8 +1475,7 @@ export interface VisitorAdminEditorUpdate {
     isNew?: boolean;
     status: WristbandStatus;
     nickname: string | null;
-    birthdayMonthDay: string | null;
-    age: number | null;
+    ageGroup: VisitorAgeGroup | null;
     onboardedAt: string | null;
     assignedAt: string;
     deactivatedAt: string | null;
@@ -1588,8 +1581,7 @@ export const wristbandApi = {
     userId: string;
     wristbandId: string;
     nickname: string;
-    birthdayMonthDay: string;
-    age: number;
+    ageGroup: VisitorAgeGroup;
   }) => fetchApi<{ success: boolean; familyBandCount: number }>("/api/wristbands/family-member", {
     method: "POST",
     body: data,
@@ -1598,15 +1590,13 @@ export const wristbandApi = {
     userId: string;
     wristbandId: string;
     nickname: string;
-    birthdayMonthDay: string;
-    age: number;
+    ageGroup: VisitorAgeGroup;
   }) => fetchApi<{ success: boolean }>(`/api/wristbands/family-member/${encodeURIComponent(data.wristbandId)}`, {
     method: "PATCH",
     body: {
       userId: data.userId,
       nickname: data.nickname,
-      birthdayMonthDay: data.birthdayMonthDay,
-      age: data.age,
+      ageGroup: data.ageGroup,
     },
   }),
   // 既存の未紐付けユーザーにスマホ用デジタルID(sp_)を発行する (2026-07-14)
@@ -1660,8 +1650,7 @@ export interface VisitorProfile {
   displayId: number;
   nickname: string | null;
   favoriteDate: string | null;
-  birthdayMonthDay: string | null;
-  age: number | null;
+  ageGroup: VisitorAgeGroup | null;
   allergies?: string | null;
   onboardedAt: string | null;
 }
@@ -1671,8 +1660,7 @@ export const visitorApi = {
     userId: string;
     wristbandId?: string | null;
     nickname: string;
-    birthdayMonthDay?: string;
-    age?: number;
+    ageGroup?: VisitorAgeGroup;
   }) =>
     fetchApi<VisitorProfile>("/api/wristbands/onboard", {
       method: "POST",

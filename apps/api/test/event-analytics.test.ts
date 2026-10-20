@@ -77,17 +77,17 @@ describe("イベント統計 analytics", () => {
 				id: uid("wb-main"),
 				userId: enteredId,
 				status: "active",
-				age: 18,
+				ageGroup: "10s",
 				onboardedAt: enteredAt,
 			},
 			{
 				id: uid("wb-family"),
 				userId: enteredId,
 				status: "smartphone",
-				age: 35,
+				ageGroup: "30s",
 				onboardedAt: enteredAt,
 			},
-			{ id: uid("wb-pending"), userId: pendingId, status: "active", age: 48 },
+			{ id: uid("wb-pending"), userId: pendingId, status: "active", ageGroup: "40s" },
 		]);
 		await db.insert(circleVisit).values([
 			{
