@@ -1,5 +1,8 @@
+import { useId } from "react";
+import { createPortal } from "react-dom";
 import { Button } from "@/components/ui/button";
 import { useFocusTrap } from "@/hooks/useFocusTrap";
+import { useBodyScrollLock } from "@/hooks/useBodyScrollLock";
 
 // フォームを未保存のまま閉じようとした時の3択 (保存/破棄/継続) ダイアログ。
 // 汎用の2択確認は ConfirmDialog を使う (2026-07-07 リネーム: 旧 ConfirmationDialog)。
@@ -33,14 +36,18 @@ export function UnsavedChangesDialog({
 }: UnsavedChangesDialogProps) {
   // Escape は「編集に戻る」扱い (処理は useFocusTrap 側に統合)
   const focusTrapRef = useFocusTrap<HTMLDivElement>(isOpen, { onEscape: onCancel });
+  const titleId = useId();
+  useBodyScrollLock(isOpen);
 
   if (!isOpen) return null;
 
-  return (
+  // 2026-10-21: 親画面の clipping/stacking context に影響されないよう body 直下へ描画する。
+  return createPortal((
     <div
-      className="fixed inset-0 z-[100] flex items-center justify-center bg-foreground/80 p-4 backdrop-blur-sm"
+      className="viewport-safe-area fixed inset-0 z-[100] flex items-center justify-center overflow-y-auto bg-foreground/80 backdrop-blur-sm"
       role="dialog"
       aria-modal="true"
+      aria-labelledby={titleId}
     >
       {/* 背景タップで閉じるための透明オーバーレイ (Modal と同様の挙動) */}
       <div className="absolute inset-0" onClick={onCancel} />
@@ -48,10 +55,10 @@ export function UnsavedChangesDialog({
       <div
         ref={focusTrapRef}
         tabIndex={-1}
-        className="relative max-h-[calc(100dvh-2rem)] w-full max-w-md overflow-y-auto overscroll-contain border-thick border-border bg-background p-6 sm:p-8 space-y-8 font-mono text-foreground z-10"
+        className="relative max-h-full w-full min-w-0 max-w-md overflow-y-auto overscroll-contain border-thick border-border bg-background p-4 sm:p-8 space-y-6 sm:space-y-8 font-mono text-foreground z-10"
       >
         <div className="space-y-2">
-          <h3 className="text-base font-bold uppercase tracking-wider text-destructive">
+          <h3 id={titleId} className="break-words text-base font-bold uppercase tracking-wider text-destructive">
             {title}
           </h3>
           <p className="text-sm text-muted-foreground leading-[1.6]">
@@ -87,5 +94,5 @@ export function UnsavedChangesDialog({
         </div>
       </div>
     </div>
-  );
+  ), document.body);
 }

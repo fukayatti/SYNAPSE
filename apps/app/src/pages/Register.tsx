@@ -1,5 +1,6 @@
 
 import { useState, useEffect, useMemo, useRef } from "react";
+import { createPortal } from "react-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { CircleAuthGuard, getAuthInfo, useAuth } from "@/hooks/useCircleAuth";
 import { menuApi, toppingApi, orderApi, circleApi, eventApi, wristbandApi, preOrderApi, couponApi, discountApi, parseCircleSettings, parseEventPaymentMethods, activeWaitTimeReport, type MenuWithToppings, type Topping, type RegisterDiscountOption, type RegisterDisplaySession } from "@/lib/api";
@@ -24,6 +25,7 @@ import { Minus, Plus, ShoppingCart, Trash2, QrCode, X, ScanLine, Monitor, Copy }
 import { QRCodeSVG } from "qrcode.react";
 import { ApiError } from "@/lib/api-error";
 import { resolveAssetUrl } from "@/lib/asset-url";
+import { useBodyScrollLock } from "@/hooks/useBodyScrollLock";
 // 2026-10-03: 画面をまたぐカート規則と再送制御を機能モジュールに集約する。
 import { addCartLine, updateCartQuantity, toggleCartTopping, lineSubtotal, checkoutTotal, cartCount, type CartLine, type CartTopping } from "@/features/orders/cart";
 import { useOrderSubmission } from "@/features/orders/use-order-submission";
@@ -532,6 +534,16 @@ function RegisterPageContent() {
   const [submittedCustomerDisplaySnapshot, setSubmittedCustomerDisplaySnapshot] = useState<RegisterDisplaySnapshot | null>(null);
   const submittingCustomerDisplaySnapshot = useRef<RegisterDisplaySnapshot | null>(null);
   const [isCartPanelOpen, setIsCartPanelOpen] = useState(false);
+  useBodyScrollLock(isCartPanelOpen);
+  useEffect(() => {
+    if (!isCartPanelOpen) return;
+    // 2026-10-21: xl 以上では固定カートを隠すため、画面回転/リサイズ時にロックも解除する。
+    const closeOnWideViewport = () => {
+      if (window.matchMedia("(min-width: 1280px)").matches) setIsCartPanelOpen(false);
+    };
+    window.addEventListener("resize", closeOnWideViewport);
+    return () => window.removeEventListener("resize", closeOnWideViewport);
+  }, [isCartPanelOpen]);
   const [scannedCode, setScannedCode] = useState("");
   const [activeCustomer, setActiveCustomer] = useState<{ userId: string; wristbandId: string | null; familyBandCount: number; allergies: JapaneseAllergen[] | null } | null>(null);
   const [activePreOrderId, setActivePreOrderId] = useState<string | null>(null);
@@ -1428,15 +1440,16 @@ function RegisterPageContent() {
       )}
 
       {/* ===== モバイル/タブレット: カートパネル（スライドアップ, xl 未満のみ） ===== */}
-      {isCartPanelOpen && (
-        <div className="xl:hidden fixed inset-0 z-50 flex items-end sm:items-center justify-center">
+      {/* 2026-10-21: ページ内の stacking context による背面化を避け、iOS の safe area 内に出す。 */}
+      {isCartPanelOpen && createPortal((
+        <div role="dialog" aria-modal="true" aria-labelledby="register-cart-title" className="viewport-safe-area xl:hidden fixed inset-0 z-[80] flex items-end overflow-y-auto sm:items-center justify-center">
           <div className="absolute inset-0 bg-foreground/60" onClick={() => setIsCartPanelOpen(false)} />
           {/* 2026-07-16: aside 側と同じ理由で overflow-hidden が必須。無いと画面が小さい端末で
               カート行が増えたときにシートが max-h-[90vh] を超えて伸び、確定ボタンが画面外に出て
               かつスクロールもできなくなる (UI破綻)。 */}
-          <div className="relative w-full sm:max-w-lg bg-background border-t-heavy sm:border-heavy border-border max-h-[90vh] overflow-hidden flex flex-col font-mono">
+          <div className="relative max-h-full w-full min-w-0 max-w-lg overflow-hidden bg-background border-t-heavy sm:border-heavy border-border flex flex-col font-mono">
             <div className="shrink-0 flex items-center justify-between px-4 py-3 border-b-thick border-border bg-primary text-primary-foreground">
-              <h2 className="font-black text-lg uppercase">[カート確認]</h2>
+              <h2 id="register-cart-title" className="min-w-0 break-words font-black text-lg uppercase">[カート確認]</h2>
               <button
                 onClick={() => setIsCartPanelOpen(false)}
                 aria-label="カートを閉じる"
@@ -1472,7 +1485,7 @@ function RegisterPageContent() {
             />
           </div>
         </div>
-      )}
+      ), document.body)}
     </div>
   );
 }

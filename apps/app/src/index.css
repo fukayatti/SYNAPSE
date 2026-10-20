@@ -149,24 +149,58 @@
     @apply border-border outline-ring/50 shadow-none rounded-none;
   }
 
+  /* 2026-10-21: 子要素の min-width:auto がページ幅を押し広げる連鎖を止める。
+     横スクロールが必要な表や一覧は、各画面内で明示的に領域を持たせる。 */
+  html,
+  body,
+  #root {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    min-height: 100%;
+  }
+
+  html {
+    overflow-x: clip;
+    scroll-padding-top: env(safe-area-inset-top);
+  }
+
   body {
     @apply bg-background text-foreground font-body;
+    overflow-x: clip;
+    overflow-wrap: anywhere;
+  }
+
+  img,
+  video,
+  canvas,
+  iframe {
+    max-width: 100%;
+  }
+
+  pre,
+  code {
+    overflow-wrap: anywhere;
   }
 
   h1 {
-    @apply font-headline text-[64px] leading-[1.0] font-normal;
+    @apply font-headline leading-[1.0] font-normal;
+    font-size: clamp(2rem, 8vw, 4rem);
   }
 
   h2 {
-    @apply font-headline text-[48px] leading-[1.05] font-normal;
+    @apply font-headline leading-[1.05] font-normal;
+    font-size: clamp(1.75rem, 6vw, 3rem);
   }
 
   h3 {
-    @apply font-headline text-[32px] leading-[1.1] font-normal;
+    @apply font-headline leading-[1.1] font-normal;
+    font-size: clamp(1.375rem, 4.5vw, 2rem);
   }
 
   h4 {
-    @apply font-body text-[22px] leading-[1.2] font-semibold;
+    @apply font-body leading-[1.2] font-semibold;
+    font-size: clamp(1.125rem, 4vw, 1.375rem);
   }
 
   .text-body {
@@ -183,6 +217,23 @@
 
   .text-mono {
     @apply font-mono text-[15px] leading-[1.5] font-normal;
+  }
+}
+
+@layer utilities {
+  /* 2026-10-21: viewport-fit=cover の Safari/PWA でも固定UIをノッチやホームバーから離す。 */
+  .viewport-safe-area {
+    padding-top: max(1rem, env(safe-area-inset-top));
+    padding-right: max(1rem, env(safe-area-inset-right));
+    padding-bottom: max(1rem, env(safe-area-inset-bottom));
+    padding-left: max(1rem, env(safe-area-inset-left));
+  }
+
+  .viewport-safe-area-compact {
+    padding-top: max(0.5rem, env(safe-area-inset-top));
+    padding-right: max(0.5rem, env(safe-area-inset-right));
+    padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
+    padding-left: max(0.5rem, env(safe-area-inset-left));
   }
 }
 

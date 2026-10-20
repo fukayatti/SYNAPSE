@@ -1,6 +1,9 @@
+import { useId } from "react";
+import { createPortal } from "react-dom";
 import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useFocusTrap } from "@/hooks/useFocusTrap";
+import { useBodyScrollLock } from "@/hooks/useBodyScrollLock";
 
 // 2026-07-04: ネイティブ window.confirm() はブラウザにブロックされ得るため、
 // 破壊的操作 (退出・削除・アンインストール等) の確認をアプリ内ダイアログで行う。
@@ -36,24 +39,29 @@ export function ConfirmDialog({
 }: ConfirmDialogProps) {
   // Escape はキャンセル扱い (処理は useFocusTrap 側に統合)
   const focusTrapRef = useFocusTrap<HTMLDivElement>(isOpen, { onEscape: onCancel });
+  const titleId = useId();
+  useBodyScrollLock(isOpen);
 
   if (!isOpen) return null;
 
-  return (
+  // 2026-10-21: 呼び出し元が開いた Modal 内でも前面・全画面に表示する。
+  return createPortal((
     <div
-      className="fixed inset-0 z-[100] flex items-center justify-center bg-foreground/80 p-4 backdrop-blur-sm"
+      className="viewport-safe-area fixed inset-0 z-[100] flex items-center justify-center overflow-y-auto bg-foreground/80 backdrop-blur-sm"
       role="dialog"
       aria-modal="true"
+      aria-labelledby={titleId}
     >
       <div className="absolute inset-0" onClick={onCancel} />
       <div
         ref={focusTrapRef}
         tabIndex={-1}
-        className="relative w-full max-w-md bg-background border-thick border-border p-6 space-y-6 font-mono text-foreground z-10"
+        className="relative w-full min-w-0 max-w-md break-words bg-background border-thick border-border p-4 sm:p-6 space-y-6 font-mono text-foreground z-10"
       >
         <div className="space-y-2">
           <h3
-            className={`text-sm font-bold uppercase tracking-wider ${
+            id={titleId}
+            className={`break-words text-sm font-bold uppercase tracking-wider ${
               destructive ? "text-destructive" : "text-foreground"
             }`}
           >
@@ -83,5 +91,5 @@ export function ConfirmDialog({
         </div>
       </div>
     </div>
-  );
+  ), document.body);
 }
