@@ -2,6 +2,7 @@ import type { CreateOrderInput, CreateOrderResult } from "@fesflow/config/order-
 import { orderApi } from "@/lib/api";
 import { ApiError } from "@/lib/api-error";
 import { getVisitor } from "@/hooks/useVisitor";
+import { orderFingerprint } from "./submission";
 
 export type MobileOrderOutboxEntry = {
   idempotencyKey: string;
@@ -21,7 +22,7 @@ const DATABASE_NAME = "fesflow-offline-orders";
 const DATABASE_VERSION = 1;
 const STORE_NAME = "mobile-order-outbox";
 let databasePromise: Promise<IDBDatabase> | null = null;
-let syncPromise: Promise<void> | null = null;
+const syncPromises = new Map<string, Promise<void>>();
 const orderLocks = new Map<string, Promise<unknown>>();
 
 async function withOrderLock<T>(key: string, operation: () => Promise<T>): Promise<T> {
@@ -68,16 +69,39 @@ async function readAll(): Promise<MobileOrderOutboxEntry[]> {
   });
 }
 
-async function writeEntry(entry: MobileOrderOutboxEntry): Promise<void> {
+async function readEntry(idempotencyKey: string): Promise<MobileOrderOutboxEntry | null> {
   const database = await openDatabase();
-  await new Promise<void>((resolve, reject) => {
-    const transaction = database.transaction(STORE_NAME, "readwrite");
-    transaction.objectStore(STORE_NAME).put(entry);
-    transaction.oncomplete = () => resolve();
-    transaction.onerror = () => reject(transaction.error ?? new Error("送信待ち注文を保存できません"));
-    transaction.onabort = () => reject(transaction.error ?? new Error("送信待ち注文の保存が中断されました"));
+  return new Promise((resolve, reject) => {
+    const request = database.transaction(STORE_NAME, "readonly").objectStore(STORE_NAME).get(idempotencyKey);
+    request.onsuccess = () => resolve((request.result as MobileOrderOutboxEntry | undefined) ?? null);
+    request.onerror = () => reject(request.error ?? new Error("送信待ち注文を読み込めません"));
   });
-  await publishOutboxState();
+}
+
+// 2026-10-21: 古いリクエストの失敗が別タブで確定した注文を未受付へ戻さないよう、状態更新をIDB transaction内で行う。
+async function updateEntry(
+  idempotencyKey: string,
+  update: (entry: MobileOrderOutboxEntry) => MobileOrderOutboxEntry,
+): Promise<MobileOrderOutboxEntry | null> {
+  const database = await openDatabase();
+  const updated = await new Promise<MobileOrderOutboxEntry | null>((resolve, reject) => {
+    const transaction = database.transaction(STORE_NAME, "readwrite");
+    const store = transaction.objectStore(STORE_NAME);
+    const request = store.get(idempotencyKey);
+    let result: MobileOrderOutboxEntry | null = null;
+    request.onsuccess = () => {
+      const current = request.result as MobileOrderOutboxEntry | undefined;
+      if (!current) return;
+      result = update(current);
+      if (result !== current) store.put(result);
+    };
+    request.onerror = () => reject(request.error ?? new Error("送信待ち注文を更新できません"));
+    transaction.oncomplete = () => resolve(result);
+    transaction.onerror = () => reject(transaction.error ?? new Error("送信待ち注文を更新できません"));
+    transaction.onabort = () => reject(transaction.error ?? new Error("送信待ち注文の更新が中断されました"));
+  });
+  if (updated) await publishOutboxState();
+  return updated;
 }
 
 async function deleteEntry(idempotencyKey: string): Promise<void> {
@@ -125,13 +149,7 @@ export async function queueMobileOrder(
   displayItems: MobileOrderOutboxEntry["displayItems"],
   idempotencyKey: string = crypto.randomUUID(),
 ): Promise<MobileOrderOutboxEntry> {
-  const fingerprint = JSON.stringify(input);
-  const entries = await readAll();
-  // 2026-10-21: 応答が消えて受付済みか分からない注文を、新しいキーの注文として重複作成させない。
-  const sameUnresolvedOrder = entries.find((entry) => entry.input.userId === input.userId && entry.fingerprint === fingerprint);
-  if (sameUnresolvedOrder) return sameUnresolvedOrder;
-  const existing = entries.find((entry) => entry.idempotencyKey === idempotencyKey);
-  if (existing) return existing;
+  const fingerprint = orderFingerprint(input);
 
   const entry: MobileOrderOutboxEntry = {
     idempotencyKey,
@@ -144,8 +162,34 @@ export async function queueMobileOrder(
     nextAttemptAt: 0,
     state: "pending",
   };
-  await writeEntry(entry);
-  return entry;
+  // 2026-10-21: 同時に開いたタブでも同じ未解決注文を1件だけ保存するため、探索と追加を同一IDB transactionで行う。
+  const database = await openDatabase();
+  const queued = await new Promise<MobileOrderOutboxEntry>((resolve, reject) => {
+    const transaction = database.transaction(STORE_NAME, "readwrite");
+    const store = transaction.objectStore(STORE_NAME);
+    const request = store.getAll();
+    let selected: MobileOrderOutboxEntry | null = null;
+    request.onsuccess = () => {
+      const existingEntries = request.result as MobileOrderOutboxEntry[];
+      const sameKey = existingEntries.find((candidate) => candidate.idempotencyKey === idempotencyKey);
+      const sameUnresolvedOrder = existingEntries.find((candidate) =>
+        candidate.state !== "confirmed"
+        && candidate.input.userId === input.userId
+        && (candidate.fingerprint === fingerprint || orderFingerprint(candidate.input) === fingerprint),
+      );
+      selected = sameKey ?? sameUnresolvedOrder ?? null;
+      if (!selected) {
+        selected = entry;
+        store.add(entry);
+      }
+    };
+    request.onerror = () => reject(request.error ?? new Error("送信待ち注文を保存できません"));
+    transaction.oncomplete = () => resolve(selected ?? entry);
+    transaction.onerror = () => reject(transaction.error ?? new Error("送信待ち注文を保存できません"));
+    transaction.onabort = () => reject(transaction.error ?? new Error("送信待ち注文の保存が中断されました"));
+  });
+  await publishOutboxState();
+  return queued;
 }
 
 function isRetryable(error: unknown): boolean {
@@ -164,6 +208,68 @@ export async function sendMobileOrder(entry: MobileOrderOutboxEntry): Promise<Cr
   return orderApi.createMobile(entry.input, entry.idempotencyKey);
 }
 
+async function sendQueuedMobileOrder(
+  idempotencyKey: string,
+  options: { retryAttention?: boolean } = {},
+): Promise<CreateOrderResult | null> {
+  return withOrderLock(idempotencyKey, async () => {
+    const current = await readEntry(idempotencyKey);
+    if (!current) return null;
+    if (current.state === "confirmed") return current.result ?? null;
+    if (current.state === "attention" && !options.retryAttention) return null;
+    if (getVisitor()?.userId !== current.input.userId) {
+      throw new Error("来場者が切り替わったため、注文は端末に保存されています");
+    }
+
+    let result: CreateOrderResult;
+    try {
+      result = await sendMobileOrder(current);
+    } catch (error) {
+      if (getVisitor()?.userId !== current.input.userId) throw error;
+      const retryable = isRetryable(error);
+      let saved: MobileOrderOutboxEntry | null;
+      try {
+        saved = await updateEntry(idempotencyKey, (latest) => latest.state === "confirmed"
+          ? latest
+          : {
+              ...latest,
+              attemptCount: latest.attemptCount + 1,
+              nextAttemptAt: retryable ? Date.now() + retryDelay(latest, error) : 0,
+              state: retryable ? "pending" : "attention",
+              errorMessage: error instanceof Error ? error.message : "注文を送信できませんでした",
+            });
+      } catch {
+        // 2026-10-21: 状態保存に失敗してもAPIの応答種別を保ち、通信不明なら注文履歴へ案内する。
+        await publishOutboxState();
+        throw error;
+      }
+      if (saved?.state === "confirmed" && saved.result) return saved.result;
+      if (!retryable) announce("fesflow:mobile-order-attention", { entry: saved ?? current, error });
+      throw error;
+    }
+
+    let confirmed: MobileOrderOutboxEntry | null;
+    try {
+      confirmed = await updateEntry(idempotencyKey, (latest) => latest.state === "confirmed"
+        ? latest
+        : { ...latest, state: "confirmed", result, nextAttemptAt: 0, errorMessage: undefined });
+    } catch {
+      // 2026-10-21: API受付後に端末保存が失敗しても、受付成功を利用者へ返し同じキーの再照合を残す。
+      await publishOutboxState();
+      return result;
+    }
+    if (confirmed?.state === "confirmed") {
+      try {
+        await deleteEntry(idempotencyKey);
+      } catch {
+        // 受付結果は端末に記録済み。同じキーで再送する状態には戻さない。
+      }
+      return confirmed.result ?? result;
+    }
+    return result;
+  });
+}
+
 // 2026-10-21: 通信断後の応答消失でも同じキーで照会・再送できるよう、送信前に注文を永続化する。
 export async function submitMobileOrder(
   input: CreateOrderInput,
@@ -172,38 +278,17 @@ export async function submitMobileOrder(
   idempotencyKey: string,
 ): Promise<CreateOrderResult> {
   const entry = await queueMobileOrder(input, circleName, displayItems, idempotencyKey);
-  try {
-    return await withOrderLock(entry.idempotencyKey, async () => {
-      if (getVisitor()?.userId !== entry.input.userId) throw new Error("来場者が切り替わったため、注文は端末に保存されています");
-      const current = (await readAll()).find((item) => item.idempotencyKey === entry.idempotencyKey) ?? entry;
-      const result = await sendMobileOrder(current);
-      // 2026-10-21: API受付後の端末整理失敗を未受付と誤認して再注文させない。
-      await writeEntry({ ...current, state: "confirmed", result, errorMessage: undefined });
-      try {
-        await deleteEntry(current.idempotencyKey);
-      } catch {
-        // 同じ注文キーで成功応答が保存済みなので、次回表示で受付済みと分かる状態を保つ。
-      }
-      return result;
-    });
-  } catch (error) {
-    if (getVisitor()?.userId !== entry.input.userId) throw error;
-    const retryable = isRetryable(error);
-    await writeEntry({
-      ...entry,
-      attemptCount: entry.attemptCount + 1,
-      nextAttemptAt: retryable ? Date.now() + retryDelay(entry, error) : 0,
-      state: retryable ? "pending" : "attention",
-      errorMessage: error instanceof Error ? error.message : "注文を送信できませんでした",
-    });
-    throw error;
-  }
+  const result = await sendQueuedMobileOrder(entry.idempotencyKey, { retryAttention: true });
+  if (!result) throw new Error("注文の受付状態を確認できません。注文履歴を確認してください");
+  return result;
 }
 
 export async function syncMobileOrderOutbox(userId: string | null | undefined): Promise<void> {
-  if (!userId || typeof navigator === "undefined" || !navigator.onLine || syncPromise) return syncPromise ?? Promise.resolve();
+  if (!userId || typeof navigator === "undefined" || !navigator.onLine) return;
+  const existingSync = syncPromises.get(userId);
+  if (existingSync) return existingSync;
 
-  syncPromise = (async () => {
+  const currentSync = (async () => {
     const entries = (await getMobileOrderOutboxEntries(userId)).filter((entry) => entry.state === "pending");
     if (entries.length === 0) return;
     let completed = 0;
@@ -213,46 +298,38 @@ export async function syncMobileOrderOutbox(userId: string | null | undefined): 
         if (entry.nextAttemptAt > Date.now() || !navigator.onLine) continue;
         if (getVisitor()?.userId !== entry.input.userId) break;
         try {
-          await withOrderLock(entry.idempotencyKey, async () => {
-            const current = (await readAll()).find((item) => item.idempotencyKey === entry.idempotencyKey);
-            if (!current || current.state !== "pending" || current.nextAttemptAt > Date.now() || getVisitor()?.userId !== entry.input.userId) return;
-            const result = await sendMobileOrder(current);
-            await writeEntry({ ...current, state: "confirmed", result, errorMessage: undefined });
-            try {
-              await deleteEntry(current.idempotencyKey);
-            } catch {
-              // 受付結果は端末に記録済み。同じキーで再送する状態には戻さない。
-            }
+          const result = await sendQueuedMobileOrder(entry.idempotencyKey);
+          if (result) {
             completed += 1;
-            announce("fesflow:mobile-order-synced", { entry: current, result });
+            announce("fesflow:mobile-order-synced", { entry, result });
             announce("fesflow:sync-progress", { active: true, total: entries.length, completed });
-          });
+          }
         } catch (error) {
           if (getVisitor()?.userId !== entry.input.userId) break;
-          const retryable = isRetryable(error);
-          const nextAttemptAt = retryable ? Date.now() + retryDelay(entry, error) : 0;
-          await writeEntry({
-            ...entry,
-            attemptCount: entry.attemptCount + 1,
-            nextAttemptAt,
-            state: retryable ? "pending" : "attention",
-            errorMessage: error instanceof Error ? error.message : "注文を送信できませんでした",
-          });
-          if (!retryable) announce("fesflow:mobile-order-attention", { entry, error });
-          if (error instanceof ApiError && error.code === "NETWORK") break;
+          if (!(error instanceof ApiError) || error.code === "NETWORK") break;
         }
       }
     } finally {
       announce("fesflow:sync-progress", { active: false, total: entries.length, completed });
     }
-  })().finally(() => { syncPromise = null; });
-  return syncPromise;
+  })();
+  syncPromises.set(userId, currentSync);
+  try {
+    await currentSync;
+  } finally {
+    if (syncPromises.get(userId) === currentSync) syncPromises.delete(userId);
+  }
 }
 
 export async function retryMobileOrder(idempotencyKey: string): Promise<void> {
-  const entry = (await readAll()).find((item) => item.idempotencyKey === idempotencyKey);
+  const entry = await readEntry(idempotencyKey);
   if (!entry || entry.state === "confirmed") return;
-  await writeEntry({ ...entry, state: "pending", nextAttemptAt: 0, errorMessage: undefined });
+  if (getVisitor()?.userId !== entry.input.userId) throw new Error("この注文を送信した来場者に切り替えてから再試行してください");
+  await withOrderLock(idempotencyKey, async () => {
+    await updateEntry(idempotencyKey, (current) => current.state === "confirmed"
+      ? current
+      : { ...current, state: "pending", nextAttemptAt: 0, errorMessage: undefined });
+  });
   await syncMobileOrderOutbox(entry.input.userId);
 }
 

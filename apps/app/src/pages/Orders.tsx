@@ -58,7 +58,12 @@ export default function OrdersPage() {
 
   const [modHooks, setModHooks] = useState<{ id: string; hook: any }[]>([]);
 
-  const { data: queuedOrders = [], isLoading: queuedOrdersLoading, refetch: refetchQueuedOrders } = useQuery({
+  const {
+    data: queuedOrders = [],
+    isLoading: queuedOrdersLoading,
+    isError: queuedOrdersError,
+    refetch: refetchQueuedOrders,
+  } = useQuery({
     queryKey: ["mobileOrderOutbox", userId],
     queryFn: () => getMobileOrderOutboxEntries(userId),
     enabled: isLoaded && !!userId,
@@ -150,7 +155,7 @@ export default function OrdersPage() {
     loadModHooks();
   }, [orderHistory]);
 
-  if (!isLoaded || queuedOrdersLoading) {
+  if (!isLoaded) {
     return (
       <div className="max-w-3xl mx-auto p-4 space-y-4 font-mono">
         <Skeleton className="h-12 w-48" />
@@ -161,6 +166,10 @@ export default function OrdersPage() {
 
   const history: VisitorOrderHistory[] = orderHistory ?? [];
   const displayedHistory = history.filter((order) => order.id !== receipt?.orderId);
+  // 2026-10-21: 受付結果を端末に残したまま整理に失敗した場合、サーバー履歴との二重表示を避ける。
+  const visibleQueuedOrders = queuedOrders.filter((order) =>
+    order.state !== "confirmed" || !history.some((saved) => saved.id === order.result?.id),
+  );
   const hasHistory = displayedHistory.length > 0;
   const hasPreOrders = !!preOrders && preOrders.length > 0;
 
@@ -214,7 +223,20 @@ export default function OrdersPage() {
         </section>
       )}
 
-      {queuedOrders.length > 0 && (
+      {queuedOrdersError && (
+        <div role="alert" className="space-y-2 border-heavy border-destructive bg-destructive/10 p-4">
+          <p className="font-bold">端末に保存した注文状態を読み込めません。</p>
+          <p className="text-xs">通信が戻っても、注文を再送する前に受付状態を確認してください。</p>
+          <Button type="button" variant="outline" onClick={() => void refetchQueuedOrders()} className="min-h-11">
+            端末の注文状態を再確認
+          </Button>
+        </div>
+      )}
+      {queuedOrdersLoading && (
+        <p role="status" className="border-thin border-border bg-muted p-3 text-xs">端末に保存した注文状態を確認しています…</p>
+      )}
+
+      {visibleQueuedOrders.length > 0 && (
         <section aria-labelledby="queued-orders-heading" className="space-y-3">
           <h2 id="queued-orders-heading" className="flex items-center gap-2 border-b-thick border-border pb-2 text-lg font-black uppercase">
             <Clock className="h-5 w-5" />送信待ちの注文
@@ -222,7 +244,7 @@ export default function OrdersPage() {
           <p className="border-thick border-warning bg-warning/10 p-3 text-xs font-bold" role="status">
             通信が切れた場合、サークル側で受付済みの可能性があります。受付確認待ちの注文は、同じキーで結果を確認します。
           </p>
-          {queuedOrders.map((order: MobileOrderOutboxEntry) => (
+          {visibleQueuedOrders.map((order: MobileOrderOutboxEntry) => (
             <article key={order.idempotencyKey} className="space-y-3 border-thick border-border bg-background p-4">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
@@ -262,7 +284,7 @@ export default function OrdersPage() {
       </button>
 
       {/* どちらも無い & エラーも無いときは1つの空状態にまとめる */}
-      {!hasHistory && !hasPreOrders && !historyError && !preOrdersError && !historyLoading && !preOrdersLoading ? (
+      {!hasHistory && !hasPreOrders && !historyError && !preOrdersError && !queuedOrdersError && !historyLoading && !preOrdersLoading ? (
         <EmptyState icon={Receipt} message="まだ注文履歴はありません" />
       ) : null}
       {!hasHistory && !hasPreOrders && (historyLoading || preOrdersLoading) && (
