@@ -255,11 +255,12 @@ function MenuManagementContent() {
 
         {/* トッピングセクション */}
         <section aria-labelledby="topping-management-heading" className="space-y-4 border-thick border-border p-4">
-          <div className="flex justify-between items-center border-b-thick border-border pb-3">
+          {/* 2026-10-21: 小画面では追加ボタンを見出しの下へ移し、見出しと重ならない幅を確保する。 */}
+          <div className="flex flex-col items-stretch gap-2 border-b-thick border-border pb-3 sm:flex-row sm:items-center sm:justify-between">
             <h2 id="topping-management-heading" className="text-sm font-bold uppercase tracking-wider">[トッピング管理]</h2>
             <Button
               onClick={handleOpenToppingAdd}
-              className="rounded-none border-thick border-primary bg-primary text-primary-foreground hover:bg-background hover:text-foreground h-8 text-[11px] font-bold uppercase px-3 flex items-center gap-1"
+              className="w-full rounded-none border-thick border-primary bg-primary text-primary-foreground hover:bg-background hover:text-foreground h-8 text-[11px] font-bold uppercase px-3 flex items-center justify-center gap-1 sm:w-auto"
             >
               <Plus className="h-3.5 w-3.5" />
               トッピングを追加

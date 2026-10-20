@@ -59,7 +59,12 @@ menuRoutes.get("/", async (c) => {
 
   const toppings =
     toppingIds.length > 0
-      ? await db.select().from(topping).where(and(inArray(topping.id, toppingIds), eq(topping.isArchived, false)))
+      ? await db
+        .select()
+        .from(topping)
+        .where(and(inArray(topping.id, toppingIds), eq(topping.isArchived, false)))
+        // 2026-10-21: サークル設定の順番を来場者・レジの選択肢にも同じ順で返す。
+        .orderBy(asc(topping.sortOrder), asc(topping.createdAt), asc(topping.id))
       : [];
 
   // メニューにトッピング情報を追加
@@ -105,7 +110,12 @@ menuRoutes.get("/:id", async (c) => {
 
   const toppings =
     toppingIds.length > 0
-      ? await db.select().from(topping).where(and(inArray(topping.id, toppingIds), eq(topping.isArchived, false)))
+      ? await db
+        .select()
+        .from(topping)
+        .where(and(inArray(topping.id, toppingIds), eq(topping.isArchived, false)))
+        // 2026-10-21: 単品取得も一覧と同じ順序を使う。
+        .orderBy(asc(topping.sortOrder), asc(topping.createdAt), asc(topping.id))
       : [];
 
   return c.json({

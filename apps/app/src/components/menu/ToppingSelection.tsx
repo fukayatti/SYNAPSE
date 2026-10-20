@@ -103,9 +103,9 @@ export function ToppingSelection({
   return (
     <div className="space-y-3">
       {wizardEnabled && (
-        <div className="flex items-center justify-between gap-2 border-b-thin border-border pb-2 font-mono text-[10px] uppercase">
-          <span>カテゴリ {activeStep + 1} / {groups.length}</span>
-          <span className="text-muted-foreground">選ぶと価格に加算されます</span>
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b-thin border-border pb-2 font-mono text-[10px] uppercase">
+          <span className="min-w-0">カテゴリ {activeStep + 1} / {groups.length}</span>
+          <span className="min-w-0 text-muted-foreground">選ぶと価格に加算されます</span>
         </div>
       )}
       {shownGroups.map(({ category, options }) => {
@@ -121,9 +121,9 @@ export function ToppingSelection({
             : "選ばなくてもOK";
         return (
           <section key={category} className="space-y-2" aria-label={`${categoryLabel(category)}のトッピング`}>
-            <div className="flex items-baseline justify-between gap-2">
-              <h4 className="font-mono text-xs font-black uppercase tracking-wider">{categoryLabel(category)}</h4>
-              <span className={cn("font-mono text-[10px]", meetsRule ? "text-muted-foreground" : "text-warning font-bold")}>
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <h4 className="min-w-0 break-words font-mono text-xs font-black uppercase tracking-wider">{categoryLabel(category)}</h4>
+              <span className={cn("min-w-0 break-words text-right font-mono text-[10px]", meetsRule ? "text-muted-foreground" : "text-warning font-bold")}>
                 {ruleLabel} · {chosenCount}{maximum ? `/${maximum}` : "個選択中"}
               </span>
             </div>
@@ -146,24 +146,25 @@ export function ToppingSelection({
                       onToggle(topping.id);
                     }}
                     className={cn(
-                      "flex min-h-11 w-full items-center gap-2 px-2 py-2 text-left text-xs font-bold transition-colors disabled:cursor-not-allowed disabled:opacity-40",
+                      "flex min-h-11 w-full items-center gap-2 px-2 py-2 text-left text-xs font-bold transition-colors disabled:cursor-not-allowed",
                       topping.soldOut
-                        ? "bg-error/10 text-destructive"
-                        : isSelected ? "bg-primary text-primary-foreground" : "bg-background hover:bg-muted",
+                        ? "bg-error/10 text-destructive disabled:opacity-100"
+                        : cn(isSelected ? "bg-primary text-primary-foreground" : "bg-background hover:bg-muted", disabled && "opacity-50"),
                     )}
                   >
                     <span aria-hidden="true" className="flex h-5 w-5 shrink-0 items-center justify-center border-thick border-current">{isSelected ? "✓" : ""}</span>
                     {topping.imagePath && <img src={resolveAssetUrl(topping.imagePath)} alt="" className="h-7 w-7 shrink-0 border-thin border-current object-cover" />}
-                    <span className="flex-1">{topping.name}</span>
+                    {/* 2026-10-21: 長い商品名でも価格・売切ラベルを押し出さず、狭い端末で折り返す。 */}
+                    <span className="min-w-0 flex-1 break-words [overflow-wrap:anywhere]">{topping.name}</span>
                     {isFree ? (
-                      <span className="flex items-center gap-1"><span className="line-through opacity-70">¥{topping.price}</span><span>無料</span></span>
+                      <span className="flex shrink-0 items-center gap-1 whitespace-nowrap"><span className="line-through opacity-70">¥{topping.price}</span><span>無料</span></span>
                     ) : (
-                      <span className={isSelected ? "opacity-80" : "text-muted-foreground"}>
+                      <span className={cn("shrink-0 whitespace-nowrap", isSelected ? "opacity-80" : "text-muted-foreground")}>
                         {topping.price >= 0 ? `+¥${topping.price}` : `-¥${Math.abs(topping.price)}`}
                       </span>
                     )}
                     {/* 2026-10-21: 無効化された行でも売切の赤ラベルを識別できるよう、状態色を面で示す。 */}
-                    {topping.soldOut && <span className="shrink-0 border-thin border-error bg-error px-1 text-background">売り切れ</span>}
+                    {topping.soldOut && <span className="shrink-0 whitespace-nowrap border-thin border-error bg-error px-1 text-background">売り切れ</span>}
                   </button>
                 );
               })}

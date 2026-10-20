@@ -124,7 +124,7 @@ function VisitorMenuCard({
   };
 
   return (
-    <Card>
+    <Card className="w-full max-w-lg justify-self-center">
       <CardHeader>
         <div className="relative h-48 w-full overflow-hidden border-b-thick border-border">
           {menu.imagePath ? (
@@ -1040,7 +1040,8 @@ function MenuPageContent() {
         {menus && menus.length > 0 ? (
           <>
           <MenuCategoryFilter menus={menus} selectedCategory={selectedMenuCategory} onSelect={setSelectedMenuCategory} />
-          <div className="grid gap-sp-3 sm:grid-cols-2 lg:grid-cols-3">
+          {/* 2026-10-21: 商品数が少ない画面で空の列を残さず、1件でも中央に読みやすい幅で表示する。 */}
+          <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,20rem),1fr))] gap-sp-3">
             {menus.filter((menu) => selectedMenuCategory === null || menuCategoryKey(menu.category) === selectedMenuCategory).map((menu) => (
               <VisitorMenuCard
                 key={menu.id}
