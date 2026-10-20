@@ -30,6 +30,8 @@ export const menu = sqliteTable(
     allergens: text("allergens"),
     soldOut: integer("sold_out", { mode: "boolean" }).default(false).notNull(),
     stockQuantity: integer("stock_quantity").default(0).notNull(),
+    // 2026-10-21: 注文履歴から参照される商品は物理削除せず、販売停止状態を保持する。
+    isArchived: integer("is_archived", { mode: "boolean" }).default(false).notNull(),
     // 2026-09-27: 在庫は商品単位で明示的に有効化する。数量0を未管理と混同せず、
     // 未選択の商品を注文時に誤って在庫切れにしないため既定はOFF。
     inventoryEnabled: integer("inventory_enabled", { mode: "boolean" })
@@ -80,6 +82,8 @@ export const topping = sqliteTable(
     stockQuantity: integer("stock_quantity").default(0).notNull(),
     // 2026-10-16: 管理画面で調整したトッピング順を保持し、注文側でも同じ順を使う。
     sortOrder: integer("sort_order").default(0).notNull(),
+    // 2026-10-21: 注文履歴の外部キーとスナップショットを保護し、新規販売だけ停止する。
+    isArchived: integer("is_archived", { mode: "boolean" }).default(false).notNull(),
     createdAt: integer("created_at", { mode: "timestamp_ms" })
       .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
       .notNull(),

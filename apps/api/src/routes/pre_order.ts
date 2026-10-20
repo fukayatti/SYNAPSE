@@ -286,7 +286,7 @@ preOrderRoutes.post(
       const menus = await db
         .select()
         .from(menu)
-        .where(inArray(menu.id, menuIds));
+        .where(and(inArray(menu.id, menuIds), eq(menu.isArchived, false)));
 
       // トッピング取得 (order.ts と同じ検証方針)。指定が無ければ空。
       const allToppingIds = items.flatMap((i) => i.toppingIds || []);
@@ -295,7 +295,7 @@ preOrderRoutes.post(
           ? await db
               .select()
               .from(topping)
-              .where(inArray(topping.id, allToppingIds))
+              .where(and(inArray(topping.id, allToppingIds), eq(topping.isArchived, false)))
           : [];
       // 指定トッピングが対象メニューに実際に紐付いているかを検証するための関連
       const menuToppingLinks =

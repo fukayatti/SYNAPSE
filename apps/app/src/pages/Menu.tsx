@@ -118,7 +118,7 @@ function VisitorMenuCard({
   };
 
   return (
-    <Card className={menu.soldOut ? "opacity-60" : ""}>
+    <Card>
       <CardHeader>
         <div className="relative h-48 w-full overflow-hidden border-b-thick border-border">
           {menu.imagePath ? (
@@ -132,8 +132,9 @@ function VisitorMenuCard({
               <span className="font-mono text-[14px] uppercase tracking-[1px]">No Image</span>
             </div>
           )}
+          {/* 2026-10-21: 売切を販売停止の状態色で示し、商品画像上でも見落としにくくする。 */}
           {menu.soldOut && (
-            <div className="absolute inset-0 bg-foreground/85 flex items-center justify-center">
+            <div className="absolute inset-0 bg-error/85 flex items-center justify-center">
               <span className="text-background text-[24px] font-headline uppercase tracking-[2px]">
                 売り切れ
               </span>

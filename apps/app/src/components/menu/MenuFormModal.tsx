@@ -325,7 +325,8 @@ export function MenuFormModal({ circleId, isOpen, onClose, menu, onDelete }: Men
             <div className="border-thick border-border bg-muted/30 p-3 text-xs font-mono text-muted-foreground">
               この商品は<strong className="text-foreground">在庫管理</strong>がONのため、売り切れは在庫数から自動判定されます。
               売切の切り替えは「在庫管理」から行ってください。
-              <div className="mt-1.5 font-bold text-foreground">
+              {/* 2026-10-21: 在庫から自動判定される売切も、手動設定と同じ赤で区別する。 */}
+              <div className={cn("mt-1.5 font-bold", form.soldOut ? "text-destructive" : "text-success")}>
                 現在: {form.soldOut ? "売り切れ" : "販売中"}
               </div>
             </div>
@@ -511,9 +512,14 @@ export function MenuFormModal({ circleId, isOpen, onClose, menu, onDelete }: Men
             追加する
           </FormSubmitButton>
         )}
-        {/* 2026-10-16: 削除を一覧から外し、編集内容と同じ文脈で行えるようにする。 */}
+        {/* 2026-10-21: 履歴を保った販売停止であることを操作前に示す。 */}
         <div className="flex justify-between gap-2 border-t-thick border-border pt-3">
-          {isEdit && onDelete ? <Button type="button" variant="destructive" onClick={onDelete}>削除</Button> : <span />}
+          {isEdit && onDelete ? (
+            <div className="space-y-1">
+              <p className="text-[10px] text-muted-foreground">今後の注文に表示されなくなります。過去の注文履歴には残ります。</p>
+              <Button type="button" variant="destructive" onClick={onDelete}>販売停止</Button>
+            </div>
+          ) : <span />}
           <Button type="button" variant="outline" onClick={handleOverlayClose}>閉じる</Button>
         </div>
       </Modal>

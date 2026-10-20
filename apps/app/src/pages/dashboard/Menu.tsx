@@ -97,7 +97,8 @@ function MenuManagementContent() {
       queryClient,
       queryKey: ["menus", circleId],
       id: menu.id,
-      message: `メニュー「${menu.name}」を削除しました`,
+      // 2026-10-21: 履歴は保持する操作のため、物理削除と誤解しない販売停止表記にする。
+      message: `メニュー「${menu.name}」を販売停止にしました`,
       commit: () => menuApi.delete(menu.id),
     });
 
@@ -107,7 +108,8 @@ function MenuManagementContent() {
       queryClient,
       queryKey: ["toppings", circleId],
       id: topping.id,
-      message: `トッピング「${topping.name}」を削除しました`,
+      // 2026-10-21: 履歴は保持する操作のため、物理削除と誤解しない使用停止表記にする。
+      message: `トッピング「${topping.name}」を使用停止にしました`,
       commit: async () => {
         await toppingApi.delete(topping.id);
         queryClient.invalidateQueries({ queryKey: ["menus", circleId] }); // メニューのトッピング一覧も更新
@@ -212,7 +214,7 @@ function MenuManagementContent() {
                   {menu.imagePath ? <img src={resolveAssetUrl(menu.imagePath)} alt="" className="h-16 w-20 shrink-0 border-thin border-border object-cover" /> : <div className="flex h-16 w-20 shrink-0 items-center justify-center bg-muted text-[9px] uppercase">No Image</div>}
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-3"><CardTitle className="text-sm font-bold uppercase">{menu.name}</CardTitle><span className="text-base font-black">¥{menu.price.toLocaleString()}</span>
-                      {menu.soldOut && <span className="text-[10px] font-bold text-destructive">売り切れ</span>}
+                      {menu.soldOut && <span className="border-thin border-destructive bg-destructive/10 px-1 text-[10px] font-bold text-destructive">売り切れ</span>}
                       {menu.inventoryEnabled && <span className="text-[10px] text-muted-foreground">在庫 {menu.stockQuantity ?? 0}</span>}
                     </div>
                     {menu.description && <p className="mt-1 text-xs text-muted-foreground">{menu.description}</p>}
@@ -220,7 +222,8 @@ function MenuManagementContent() {
                   </div>
                   {/* 2026-10-16: 操作ボタンは狭い画面で折り返し、商品名と重ならないようにする。 */}
                   <div className="flex shrink-0 flex-wrap gap-2">
-                    {!menu.inventoryEnabled && <Button type="button" variant="outline" size="sm" onClick={() => toggleSoldOut.mutate(menu)} disabled={toggleSoldOut.isPending}>{menu.soldOut ? "販売再開" : "売り切れ"}</Button>}
+                    {/* 2026-10-21: 売切中の操作も状態色に合わせ、販売再開対象を一覧で見つけやすくする。 */}
+                    {!menu.inventoryEnabled && <Button type="button" variant={menu.soldOut ? "destructive" : "outline"} size="sm" onClick={() => toggleSoldOut.mutate(menu)} disabled={toggleSoldOut.isPending}>{menu.soldOut ? "販売再開" : "売り切れ"}</Button>}
                     <Button variant="outline" size="sm" onClick={() => handleOpenMenuEdit(menu)}><Edit className="mr-1 h-3 w-3" />編集</Button>
                   </div>
                 </div>
@@ -263,13 +266,13 @@ function MenuManagementContent() {
               {toppings.map((topping, index) => (
                 <div key={topping.id} className="flex w-full flex-col gap-3 py-3 sm:flex-row sm:items-center">
                   {topping.imagePath ? <img src={resolveAssetUrl(topping.imagePath)} alt="" className="h-14 w-16 shrink-0 border-thin border-border object-cover" /> : <div className="flex h-14 w-16 shrink-0 items-center justify-center bg-muted text-[9px] uppercase">No Image</div>}
-                  <div className="min-w-0 flex-1"><p className="text-sm font-bold uppercase">{topping.name}</p><p className="text-[10px] text-muted-foreground">{topping.category || "未分類"} · +¥{topping.price.toLocaleString()} · {topping.soldOut ? "売り切れ" : "販売中"}</p>{topping.description && <p className="mt-1 text-xs text-muted-foreground">{topping.description}</p>}</div>
+                  <div className="min-w-0 flex-1"><p className="text-sm font-bold uppercase">{topping.name}</p><p className="text-[10px] text-muted-foreground">{topping.category || "未分類"} · +¥{topping.price.toLocaleString()} · <span className={topping.soldOut ? "font-bold text-destructive" : "text-success"}>{topping.soldOut ? "売り切れ" : "販売中"}</span></p>{topping.description && <p className="mt-1 text-xs text-muted-foreground">{topping.description}</p>}</div>
                   {/* 2026-10-16: 順序調整の意味をラベルで示し、販売操作と見分けやすくする。 */}
                   <div className="flex shrink-0 flex-wrap items-center gap-2">
                     <span className="w-full text-[9px] font-bold uppercase text-muted-foreground sm:w-auto">順番</span>
                     <Button type="button" variant="outline" size="icon" title="上へ移動" aria-label={`${topping.name}を上へ`} disabled={isReorderingToppings || index === 0} onClick={() => moveTopping(index, -1)}><ArrowUp className="h-4 w-4" /></Button>
                     <Button type="button" variant="outline" size="icon" title="下へ移動" aria-label={`${topping.name}を下へ`} disabled={isReorderingToppings || index === toppings.length - 1} onClick={() => moveTopping(index, 1)}><ArrowDown className="h-4 w-4" /></Button>
-                    {!toppingStockManaged && <Button type="button" variant="outline" size="sm" onClick={() => toggleToppingSoldOut.mutate(topping)}>{topping.soldOut ? "販売再開" : "売り切れ"}</Button>}
+                    {!toppingStockManaged && <Button type="button" variant={topping.soldOut ? "destructive" : "outline"} size="sm" onClick={() => toggleToppingSoldOut.mutate(topping)}>{topping.soldOut ? "販売再開" : "売り切れ"}</Button>}
                     <Button variant="outline" size="sm" onClick={() => handleOpenToppingEdit(topping)}><Edit className="mr-1 h-3 w-3" />編集</Button>
                   </div>
                 </div>

@@ -490,9 +490,9 @@ const handleCreateOrder = async (
       // 2026-07-05: 指定トッピングが対象メニューに実際に紐付いているかを検証するため
       // menu_topping の関連を取得しておく。2026-10-03: 独立した読取を同時に開始する。
       const [menus, toppings, menuToppingLinks] = await Promise.all([
-        db.select().from(menu).where(inArray(menu.id, menuIds)),
+        db.select().from(menu).where(and(inArray(menu.id, menuIds), eq(menu.isArchived, false))),
         allToppingIds.length > 0
-          ? db.select().from(topping).where(inArray(topping.id, allToppingIds))
+          ? db.select().from(topping).where(and(inArray(topping.id, allToppingIds), eq(topping.isArchived, false)))
           : Promise.resolve([]),
         allToppingIds.length > 0
           ? db.select().from(menuTopping).where(inArray(menuTopping.menuId, menuIds))
