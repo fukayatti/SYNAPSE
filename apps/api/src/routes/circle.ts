@@ -507,6 +507,14 @@ circleRoutes.patch(
       apiError("NOT_FOUND", "サークルが見つかりません");
     }
 
+    let oldSettings: Record<string, unknown> = {};
+    try {
+      const parsed: unknown = JSON.parse(existingCircle[0]!.settings || "{}");
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) oldSettings = parsed as Record<string, unknown>;
+    } catch {
+      oldSettings = {};
+    }
+
     // 2026-10-16 (#127): 店舗エリアと支払方法は親イベントの定義に限定し、運営画面からの変更も作成時と同じ制約で検証する。
     if (
       Object.prototype.hasOwnProperty.call(settings, "storeAreaId") ||
@@ -583,6 +591,19 @@ circleRoutes.patch(
         !Array.isArray(display.media) || display.media.length > 20) {
         apiError("BAD_REQUEST", "番号表示の設定が正しくありません");
       }
+      const previousDisplay = oldSettings.orderNumberDisplay;
+      const previousMediaPercent = previousDisplay && typeof previousDisplay === "object" && !Array.isArray(previousDisplay)
+        ? (previousDisplay as Record<string, unknown>).mediaPercent
+        : undefined;
+      // 2026-10-21: 新旧クライアント間の設定更新で比率を失わず、スライダー範囲内の値だけを保存する。
+      const mediaPercent = display.mediaPercent === undefined
+        ? typeof previousMediaPercent === "number" && Number.isFinite(previousMediaPercent)
+          ? Math.max(20, Math.min(80, Math.round(previousMediaPercent / 5) * 5))
+          : 35
+        : display.mediaPercent;
+      if (typeof mediaPercent !== "number" || !Number.isInteger(mediaPercent) || mediaPercent < 20 || mediaPercent > 80 || mediaPercent % 5 !== 0) {
+        apiError("BAD_REQUEST", "番号とメディアの表示比率が正しくありません");
+      }
       const media = display.media.map((item: unknown) => {
         if (!item || typeof item !== "object" || Array.isArray(item)) apiError("BAD_REQUEST", "表示メディアが正しくありません");
         const candidate = item as Record<string, unknown>;
@@ -604,16 +625,9 @@ circleRoutes.patch(
         showPreparingNumbers: display.showPreparingNumbers,
         showPickupNumbers: display.showPickupNumbers,
         overflowPriority: display.overflowPriority,
+        mediaPercent,
         media,
       };
-    }
-
-    let oldSettings: Record<string, unknown> = {};
-    try {
-      const parsed: unknown = JSON.parse(existingCircle[0]!.settings || "{}");
-      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) oldSettings = parsed as Record<string, unknown>;
-    } catch {
-      oldSettings = {};
     }
 
     await db

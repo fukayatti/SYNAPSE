@@ -21,7 +21,7 @@ function NumberColumn({
     return priority === "latest" ? -difference : difference;
   });
   return (
-    <section className="flex min-h-0 flex-col border-thick border-foreground bg-background text-foreground">
+    <section className="flex min-h-0 min-w-0 flex-col border-thick border-foreground bg-background text-foreground">
       <header className={`flex items-baseline justify-between gap-3 border-b-thick border-foreground px-4 py-3 sm:px-6 sm:py-4 ${tone === "ready" ? "bg-success text-white" : "bg-primary text-primary-foreground"}`}>
         <h2 className="font-headline text-2xl uppercase tracking-wide sm:text-4xl">{title}</h2>
         <span className="shrink-0 font-mono text-xl font-black tabular-nums sm:text-3xl">{orders.length}</span>
@@ -83,7 +83,7 @@ function DisplayMedia({ media, onAspectRatioChange }: { media: OrderNumberDispla
   if (!current) return null;
   const next = () => setIndex((previous) => (previous + 1) % media.length);
   return (
-    <aside className="flex min-h-0 flex-col border-thick border-foreground bg-background p-2 sm:p-3" aria-label="サークルの表示メディア">
+    <aside className="flex min-h-0 min-w-0 flex-col overflow-hidden border-thick border-foreground bg-background p-2 sm:p-3" aria-label="サークルの表示メディア">
       <div className="flex min-h-0 flex-1 items-center justify-center overflow-hidden bg-black">
         {!mediaUrl || mediaMissing ? (
           <p className="max-w-sm p-4 text-center font-mono text-sm font-bold text-white">
@@ -115,10 +115,13 @@ export default function OrderNumberDisplay() {
   const displayAreaRef = useRef<HTMLDivElement>(null);
   const [displayAreaSize, setDisplayAreaSize] = useState({ width: 0, height: 0 });
   const [mediaAspectRatio, setMediaAspectRatio] = useState(16 / 9);
+  // 2026-10-21: 別端末の設定保存を投影画面へ反映するため、注文一覧と同じ間隔で設定も再取得する。
   const circleQuery = useQuery({
     queryKey: ["circle", circleId],
     queryFn: () => circleApi.get(circleId),
     enabled: !!circleId,
+    refetchInterval: 5_000,
+    refetchIntervalInBackground: true,
   });
   const displaySettings = useMemo(
     () => parseCircleSettings(circleQuery.data?.settings).orderNumberDisplay,
@@ -182,9 +185,10 @@ export default function OrderNumberDisplay() {
     ? new Date(ordersQuery.dataUpdatedAt).toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" })
     : "接続中";
 
+  // 2026-10-21: 表示専用画面をビューポートに固定し、見切れをページ全体のスクロールで補わない。
   return (
-    <main className="flex min-h-svh w-full flex-col bg-background text-foreground">
-      <header className="flex flex-col gap-2 border-b-heavy border-foreground bg-primary px-4 py-3 text-primary-foreground sm:flex-row sm:items-end sm:justify-between sm:px-8 sm:py-5">
+    <main className="flex h-dvh min-h-0 w-full flex-col overflow-hidden bg-background text-foreground">
+      <header className="flex shrink-0 flex-col gap-2 border-b-heavy border-foreground bg-primary px-4 py-3 text-primary-foreground sm:flex-row sm:items-end sm:justify-between sm:px-8 sm:py-5">
         <div className="min-w-0">
           <p className="font-mono text-xs font-bold uppercase tracking-[0.2em] sm:text-sm">{circleQuery.data?.name ?? "FesFlow"}</p>
           <h1 className="break-words font-headline text-2xl uppercase tracking-wide sm:text-4xl xl:text-5xl">注文番号のご案内</h1>
@@ -198,14 +202,14 @@ export default function OrderNumberDisplay() {
       </header>
 
       {ordersQuery.isError && (
-        <p role="status" className="bg-error px-4 py-2 text-center font-mono text-sm font-bold text-white sm:text-base">
+        <p role="status" className="shrink-0 bg-error px-4 py-2 text-center font-mono text-sm font-bold text-white sm:text-base">
           番号を更新できません。最終取得 {lastUpdated} の表示です。
         </p>
       )}
 
       <div
         ref={displayAreaRef}
-        className="grid min-h-0 flex-1 gap-3 p-3 sm:gap-4 sm:p-5"
+        className="grid min-h-0 min-w-0 flex-1 gap-3 overflow-hidden p-3 sm:gap-4 sm:p-5"
         style={{
           gridTemplateColumns: placeMediaBesideNumbers
             ? `minmax(0, ${100 - displaySettings.mediaPercent}fr) minmax(0, ${displaySettings.mediaPercent}fr)`
@@ -221,7 +225,7 @@ export default function OrderNumberDisplay() {
         </div>
         {displaySettings.media.length > 0 && <DisplayMedia media={displaySettings.media} onAspectRatioChange={updateMediaAspectRatio} />}
       </div>
-      <footer className="border-t-thin border-foreground px-4 py-2 text-right font-mono text-xs text-muted-foreground sm:px-8">
+      <footer className="shrink-0 border-t-thin border-foreground px-4 py-2 text-right font-mono text-xs text-muted-foreground sm:px-8">
         自動更新 · 最終更新 {lastUpdated} · {clock.toLocaleDateString("ja-JP", { month: "numeric", day: "numeric" })}
       </footer>
     </main>

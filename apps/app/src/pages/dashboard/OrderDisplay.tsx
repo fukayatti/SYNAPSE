@@ -190,10 +190,11 @@ function OrderDisplayContent() {
             <CardContent className="space-y-3 pt-4">
               <p className="text-[10px] text-muted-foreground">ファイルはこの端末のブラウザー内に保存し、サーバーへ送信しません。再生する端末ごとに選択してください。1ファイル最大100GBですが、実際に保存できる量はOSとブラウザーがこの端末に割り当てた空き容量までです。画像は2〜60秒、動画は再生終了後に次へ進みます。JPG、PNG、GIF、WebP、MP4、WebM、MOV。</p>
               <fieldset className="space-y-2 border-thin border-border p-3" disabled={settings.media.length === 0}>
-                <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-                  <legend className="text-xs font-black">番号とメディアの表示比率</legend>
+                {/* 2026-10-21: legendをfieldset直下に置き、スライダーのグループ名を支援技術へ伝える。 */}
+                <legend className="flex w-full flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+                  <span className="text-xs font-black">番号とメディアの表示比率</span>
                   <span className="text-[10px] font-bold tabular-nums">番号 {100 - settings.mediaPercent}% · メディア {settings.mediaPercent}%</span>
-                </div>
+                </legend>
                 <label htmlFor="order-display-media-percent" className="sr-only">メディアに使う画面の割合</label>
                 <input
                   id="order-display-media-percent"
@@ -207,6 +208,13 @@ function OrderDisplayContent() {
                   aria-valuetext={`メディア${settings.mediaPercent}パーセント、番号${100 - settings.mediaPercent}パーセント`}
                 />
                 <p className="text-[10px] leading-snug text-muted-foreground">表示端末とメディアの縦横比を比べ、横並びまたは上下に自動調整します。メディア未登録時は追加後に調整できます。</p>
+                <p role="status" aria-live="polite" className={`text-[10px] leading-snug font-bold ${saveMutation.isPending ? "text-muted-foreground" : isDirty ? "text-warning" : "text-success"}`}>
+                  {saveMutation.isPending
+                    ? "設定を保存しています…"
+                    : isDirty
+                      ? "未保存の変更があります。「設定を保存」を押すと表示画面へ反映します。"
+                      : "保存済みです。表示画面は5秒以内に新しい設定を取得します。"}
+                </p>
               </fieldset>
               {settings.media.length === 0 ? (
                 <div className="flex min-h-36 flex-col items-center justify-center gap-2 border-thick border-dashed border-border p-4 text-center text-xs text-muted-foreground"><ImageIcon className="h-6 w-6" />表示する画像・動画はまだありません</div>
