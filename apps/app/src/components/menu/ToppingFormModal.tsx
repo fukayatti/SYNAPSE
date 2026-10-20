@@ -246,9 +246,14 @@ export function ToppingFormModal({ circleId, isOpen, onClose, topping, onDelete 
             追加する
           </FormSubmitButton>
         )}
-        {/* 2026-10-16: 削除を一覧から外し、フォーム下部に編集終了操作を置く。 */}
+        {/* 2026-10-21: 注文履歴を保った使用停止であることを操作前に示す。 */}
         <div className="flex justify-between gap-2 border-t-thick border-border pt-3">
-          {isEdit && onDelete ? <Button type="button" variant="destructive" onClick={onDelete}>削除</Button> : <span />}
+          {isEdit && onDelete ? (
+            <div className="space-y-1">
+              <p className="text-[10px] text-muted-foreground">今後の注文に表示されなくなります。過去の注文履歴には残ります。</p>
+              <Button type="button" variant="destructive" onClick={onDelete}>使用停止</Button>
+            </div>
+          ) : <span />}
           <Button type="button" variant="outline" onClick={handleOverlayClose}>閉じる</Button>
         </div>
       </Modal>

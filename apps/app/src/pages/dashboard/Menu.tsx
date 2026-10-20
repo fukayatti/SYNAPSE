@@ -97,7 +97,8 @@ function MenuManagementContent() {
       queryClient,
       queryKey: ["menus", circleId],
       id: menu.id,
-      message: `メニュー「${menu.name}」を削除しました`,
+      // 2026-10-21: 履歴は保持する操作のため、物理削除と誤解しない販売停止表記にする。
+      message: `メニュー「${menu.name}」を販売停止にしました`,
       commit: () => menuApi.delete(menu.id),
     });
 
@@ -107,7 +108,8 @@ function MenuManagementContent() {
       queryClient,
       queryKey: ["toppings", circleId],
       id: topping.id,
-      message: `トッピング「${topping.name}」を削除しました`,
+      // 2026-10-21: 履歴は保持する操作のため、物理削除と誤解しない使用停止表記にする。
+      message: `トッピング「${topping.name}」を使用停止にしました`,
       commit: async () => {
         await toppingApi.delete(topping.id);
         queryClient.invalidateQueries({ queryKey: ["menus", circleId] }); // メニューのトッピング一覧も更新

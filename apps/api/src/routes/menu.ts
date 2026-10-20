@@ -37,7 +37,7 @@ menuRoutes.get("/", async (c) => {
   await requireActiveCircle(c, circleId);
 
   // メニューを取得
-  const menus = await db.select().from(menu).where(eq(menu.circleId, circleId));
+  const menus = await db.select().from(menu).where(and(eq(menu.circleId, circleId), eq(menu.isArchived, false)));
 
   // 各メニューのトッピングを取得
   const menuIds = menus.map((m) => m.id);
@@ -55,7 +55,7 @@ menuRoutes.get("/", async (c) => {
 
   const toppings =
     toppingIds.length > 0
-      ? await db.select().from(topping).where(inArray(topping.id, toppingIds))
+      ? await db.select().from(topping).where(and(inArray(topping.id, toppingIds), eq(topping.isArchived, false)))
       : [];
 
   // メニューにトッピング情報を追加
@@ -80,7 +80,7 @@ menuRoutes.get("/:id", async (c) => {
   const db = c.get("db");
   const id = c.req.param("id");
 
-  const menus = await db.select().from(menu).where(eq(menu.id, id));
+  const menus = await db.select().from(menu).where(and(eq(menu.id, id), eq(menu.isArchived, false)));
 
   if (menus.length === 0) {
     apiError("NOT_FOUND", "メニューが見つかりません");
@@ -101,7 +101,7 @@ menuRoutes.get("/:id", async (c) => {
 
   const toppings =
     toppingIds.length > 0
-      ? await db.select().from(topping).where(inArray(topping.id, toppingIds))
+      ? await db.select().from(topping).where(and(inArray(topping.id, toppingIds), eq(topping.isArchived, false)))
       : [];
 
   return c.json({
@@ -212,7 +212,7 @@ menuRoutes.put(
     const input = c.req.valid("json");
 
     // Get circleId first
-    const existingMenu = await db.select().from(menu).where(eq(menu.id, id));
+    const existingMenu = await db.select().from(menu).where(and(eq(menu.id, id), eq(menu.isArchived, false)));
     if (existingMenu.length === 0) apiError("NOT_FOUND", "見つかりません");
 
     if (!(await hasPermission(c, existingMenu[0]!.circleId, "menu:write"))) {
@@ -301,7 +301,7 @@ menuRoutes.patch(
     const db = c.get("db");
     const id = c.req.param("id");
     const { inventoryEnabled } = c.req.valid("json");
-    const existing = await db.select().from(menu).where(eq(menu.id, id));
+    const existing = await db.select().from(menu).where(and(eq(menu.id, id), eq(menu.isArchived, false)));
     if (existing.length === 0) apiError("NOT_FOUND", "見つかりません");
     if (!(await hasPermission(c, existing[0]!.circleId, "stock:write"))) {
       apiError("FORBIDDEN", "権限がありません");
@@ -334,11 +334,8 @@ menuRoutes.delete("/:id", async (c) => {
     apiError("FORBIDDEN", "権限がありません");
   }
 
-  // トッピング関連を削除
-  await db.delete(menuTopping).where(eq(menuTopping.menuId, id));
-
-  // メニューを削除
-  await db.delete(menu).where(eq(menu.id, id));
+  // 2026-10-21: 注文・事前注文の履歴から参照されるため、商品行を残して新規販売だけ停止する。
+  await db.update(menu).set({ isArchived: true }).where(eq(menu.id, id));
 
   return c.json({ success: true });
 });
@@ -356,7 +353,7 @@ menuRoutes.patch(
     const id = c.req.param("id");
     const input = c.req.valid("json");
 
-    const existingMenu = await db.select().from(menu).where(eq(menu.id, id));
+    const existingMenu = await db.select().from(menu).where(and(eq(menu.id, id), eq(menu.isArchived, false)));
     if (existingMenu.length === 0) apiError("NOT_FOUND", "見つかりません");
 
     if (!(await hasPermission(c, existingMenu[0]!.circleId, "stock:write"))) {
