@@ -45,6 +45,7 @@ const pageImports = {
 
 	// 来場者用画面 (基本プリロード不要)
 	Branding: () => import("@/pages/Branding"),
+	VisitorDataUseNotice: () => import("@/components/visitor/VisitorDataUseNotice"),
 	VisitorHome: () => import("@/pages/VisitorHome"),
 	Entry: () => import("@/pages/Entry"),
 	Onboarding: () => import("@/pages/Onboarding"),
@@ -83,6 +84,7 @@ const DashboardReviews = lazy(pageImports.DashboardReviews);
 const NotFound = lazy(pageImports.NotFound);
 
 const Branding = lazy(pageImports.Branding);
+const VisitorDataUseNoticePage = lazy(pageImports.VisitorDataUseNotice);
 const VisitorHome = lazy(pageImports.VisitorHome);
 const Entry = lazy(pageImports.Entry);
 const Onboarding = lazy(pageImports.Onboarding);
@@ -195,6 +197,8 @@ export default function App() {
 				{/* ドメインルートはブランディングページ (VisitorHeader なし) */}
 				<Route element={<BareLayout />}>
 					<Route path="/" element={<Branding />} />
+					{/* 2026-10-20: 入場前でも取得情報の利用目的と取扱いを確認できる公開ページ。 */}
+					<Route path="/visitor/data-use" element={<VisitorDataUseNoticePage />} />
 				</Route>
 
 				{/* 来場者アプリは /visitor/* に集約 (2026-07-11)。

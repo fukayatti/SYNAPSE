@@ -54,6 +54,12 @@ export default function Branding() {
               スタッフ・管理者ログイン
             </Link>
           </div>
+          <Link
+            to="/visitor/data-use"
+            className="mt-6 inline-block text-[11px] font-bold text-muted-foreground underline underline-offset-4 hover:text-foreground"
+          >
+            取得情報の利用目的と取扱いについて
+          </Link>
         </div>
       </div>
 
