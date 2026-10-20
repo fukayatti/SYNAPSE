@@ -12,6 +12,7 @@ import { useState } from "react";
 import { handleApiErrorToast } from "@/lib/api-error";
 import { ConnectionStatusProvider } from "@/components/ConnectionStatus";
 import PwaLifecycle from "@/components/PwaLifecycle";
+import { RegisterDisplayConnectionProvider } from "@/features/orders/RegisterDisplayConnectionProvider";
 
 export default function Providers({ children }: { children: React.ReactNode }) {
   // 2026-07-06: 例外は必ずトーストで可視化する。
@@ -52,6 +53,8 @@ export default function Providers({ children }: { children: React.ReactNode }) {
   return (
     <QueryClientProvider client={queryClient}>
       <ConnectionStatusProvider>
+      {/* 2026-10-21: レジから移動してもお客さま画面への同期を続ける。 */}
+      <RegisterDisplayConnectionProvider />
       <ThemeProvider>
         {children}
         <ReactQueryDevtools />

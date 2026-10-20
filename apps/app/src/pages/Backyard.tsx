@@ -10,6 +10,7 @@ import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { toast } from "sonner";
 import { Monitor } from "lucide-react";
 import { SwipeableOrderStack, type KitchenOrderView } from "@/components/pos/SwipeableOrderStack";
+import { useSessionState } from "@/hooks/useSessionState";
 
 function BackyardPageContent() {
   // 2026-07-16: circleId を useState+useEffect(mount時一度きり) で固定していると、
@@ -19,8 +20,8 @@ function BackyardPageContent() {
   const circleId = authCircleId ?? "";
   const orderNumberDisplayWindow = useRef<Window | null>(null);
   // 2026-10-17: 起動時は未着手と調理中を一続きの作業キューにし、最初に対応すべき注文へ案内する。
-  const [selectedStatus, setSelectedStatus] = useState<string | undefined>("actionable");
-  const [view, setView] = useState<KitchenOrderView>("horizontal");
+  const [selectedStatus, setSelectedStatus] = useSessionState<string | undefined>(`fesflow:backyard:${circleId || "unselected"}:status`, "actionable");
+  const [view, setView] = useSessionState<KitchenOrderView>(`fesflow:backyard:${circleId || "unselected"}:view`, "horizontal");
   // 注文キャンセルの確認ダイアログ用
   const [pendingCancel, setPendingCancel] = useState<{ id: string; orderNumber: string } | null>(
     null
@@ -77,6 +78,17 @@ function BackyardPageContent() {
     onError: (error: any) => {
       toast.error(error.message || "完了処理に失敗しました");
     },
+  });
+
+  const markReceived = useMutation({
+    mutationFn: (input: { id: string }) => orderApi.markReceived(input.id),
+    onSuccess: () => {
+      toast.success("受け渡し済みにしました");
+      queryClient.invalidateQueries({ queryKey: ["orders"] });
+      queryClient.invalidateQueries({ queryKey: ["projector-orders"] });
+      queryClient.invalidateQueries({ queryKey: ["myOrders"] });
+    },
+    onError: (error: any) => toast.error(error.message || "受け渡し状態を更新できませんでした"),
   });
 
   const handleStartPreparing = (orderId: string) => {
@@ -207,6 +219,20 @@ function BackyardPageContent() {
           完成
         </Button>
         <Button
+          variant={selectedStatus === "pickup" ? "default" : "outline"}
+          onClick={() => setSelectedStatus("pickup")}
+          className="border-thick border-border rounded-none font-mono uppercase text-xs sm:text-sm"
+        >
+          受け取り待ち
+        </Button>
+        <Button
+          variant={selectedStatus === "received" ? "default" : "outline"}
+          onClick={() => setSelectedStatus("received")}
+          className="border-thick border-border rounded-none font-mono uppercase text-xs sm:text-sm"
+        >
+          受け渡し済み
+        </Button>
+        <Button
           variant={selectedStatus === "cancelled" ? "default" : "outline"}
           onClick={() => setSelectedStatus("cancelled")}
           className="border-thick border-border rounded-none font-mono uppercase text-xs sm:text-sm"
@@ -230,9 +256,10 @@ function BackyardPageContent() {
         onViewChange={setView}
         onStart={handleStartPreparing}
         onComplete={handleComplete}
+        onMarkReceived={(id) => markReceived.mutateAsync({ id })}
         onCancelRequest={(id, orderNumber) => setPendingCancel({ id, orderNumber })}
         cancelAnimationOrderId={cancelAnimationOrderId}
-        isUpdating={updateStatus.isPending || completeOrder.isPending}
+        isUpdating={updateStatus.isPending || completeOrder.isPending || markReceived.isPending}
       />
 
       <ConfirmDialog

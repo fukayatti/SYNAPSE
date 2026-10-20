@@ -17,6 +17,7 @@ const allergensSchema = z.array(z.enum(JAPANESE_ALLERGENS_28)).max(28)
 toppingRoutes.get("/", async (c) => {
   const db = c.get("db");
   const circleId = c.req.query("circleId");
+  const includeArchived = c.req.query("includeArchived") === "true";
 
   if (!circleId) {
     apiError("BAD_REQUEST", "circleIdが必要です");
@@ -26,11 +27,17 @@ toppingRoutes.get("/", async (c) => {
   if (!(await hasPermission(c, circleId, "menu:read"))) {
     apiError("FORBIDDEN", "権限がありません");
   }
+  // 2026-10-21: 停止中トッピングは削除権限のある管理画面に限って復活候補として返す。
+  if (includeArchived && !(await hasPermission(c, circleId, "menu:delete"))) {
+    apiError("FORBIDDEN", "使用停止中トッピングを表示する権限がありません");
+  }
 
   const toppings = await db
     .select()
     .from(topping)
-    .where(and(eq(topping.circleId, circleId), eq(topping.isArchived, false)))
+    .where(includeArchived
+      ? eq(topping.circleId, circleId)
+      : and(eq(topping.circleId, circleId), eq(topping.isArchived, false)))
     .orderBy(asc(topping.sortOrder), asc(topping.createdAt));
 
   return c.json(toppings);
@@ -210,6 +217,20 @@ toppingRoutes.delete("/:id", async (c) => {
 
   // 2026-10-21: 履歴行の外部キーを保ちつつ、新規の選択肢と販売対象から外す。
   await db.update(topping).set({ isArchived: true }).where(eq(topping.id, id));
+  return c.json({ success: true });
+});
+
+// 2026-10-21: 参照中の注文履歴を保持したまま、停止したトッピングを明示的に再利用できるようにする。
+toppingRoutes.post("/:id/restore", async (c) => {
+  const db = c.get("db");
+  const id = c.req.param("id");
+  const rows = await db.select().from(topping).where(eq(topping.id, id)).limit(1);
+  const archivedTopping = rows[0];
+  if (!archivedTopping) apiError("NOT_FOUND", "トッピングが見つかりません");
+  if (!(await hasPermission(c, archivedTopping.circleId, "menu:delete"))) {
+    apiError("FORBIDDEN", "権限がありません");
+  }
+  await db.update(topping).set({ isArchived: false }).where(eq(topping.id, id));
   return c.json({ success: true });
 });
 

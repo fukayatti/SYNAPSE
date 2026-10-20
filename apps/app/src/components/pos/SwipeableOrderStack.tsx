@@ -10,12 +10,14 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, CheckCircle, Clock, List, Rows3, Users, XCircle } from "lucide-react";
+import { displayOrderNumber } from "@/lib/order-number";
 
 export interface SwipeableOrder {
   id: string;
   orderNumber: string;
   createdAt: string | Date | null;
   status: string;
+  receivedAt?: string | Date | null;
   source?: "pos" | "mobile";
   totalPrice?: number;
   peopleCount?: number;
@@ -43,6 +45,7 @@ interface SwipeableOrderStackProps {
   onViewChange: (view: KitchenOrderView) => void;
   onStart: (id: string) => Promise<unknown>;
   onComplete: (id: string) => Promise<unknown>;
+  onMarkReceived: (id: string) => Promise<unknown>;
   onCancelRequest: (id: string, orderNumber: string) => void;
   cancelAnimationOrderId?: string | null;
   isUpdating?: boolean;
@@ -60,7 +63,7 @@ function statusBadge(status: string) {
   const config: Record<string, { label: string; variant: "default" | "warning" | "active" | "error" }> = {
     pending: { label: "未着手", variant: "default" },
     preparing: { label: "調理中", variant: "warning" },
-    ready: { label: "受渡可", variant: "active" },
+    ready: { label: "受け取り待ち", variant: "active" },
     completed: { label: "完成", variant: "active" },
     cancelled: { label: "キャンセル", variant: "error" },
   };
@@ -96,6 +99,7 @@ function KitchenOrderCard({
   isUpdating,
   onStart,
   onComplete,
+  onMarkReceived,
   onCancelRequest,
   cancelAnimationOrderId,
 }: {
@@ -104,6 +108,7 @@ function KitchenOrderCard({
   isUpdating: boolean;
   onStart: () => Promise<unknown>;
   onComplete: () => Promise<unknown>;
+  onMarkReceived: () => Promise<unknown>;
   onCancelRequest: () => void;
   cancelAnimationOrderId?: string | null;
 }) {
@@ -112,7 +117,12 @@ function KitchenOrderCard({
   const [gestureHint, setGestureHint] = useState<"start" | "complete" | "cancel" | null>(null);
   const [exitDirection, setExitDirection] = useState<"up" | "down" | null>(null);
   const action = orderAction(order.status);
-  const badge = statusBadge(order.status);
+  const isAwaitingPickup = (order.status === "ready" || order.status === "completed") && !order.receivedAt;
+  const badge = order.receivedAt
+    ? { label: "受け渡し済み", variant: "active" as const }
+    : order.status === "completed"
+      ? { label: "受け取り待ち", variant: "active" as const }
+      : statusBadge(order.status);
   const canCancel = order.status === "pending" || order.status === "preparing";
 
   const performAction = async () => {
@@ -198,7 +208,7 @@ function KitchenOrderCard({
       onKeyDown={onGestureKeyDown}
       tabIndex={view === "horizontal" && (action || canCancel) ? 0 : undefined}
       role="group"
-      aria-label={`注文 ${order.orderNumber}、${badge.label}`}
+      aria-label={`注文 ${displayOrderNumber(order.orderNumber)}、${badge.label}`}
     >
       {gestureHint && (
         <div className={`pointer-events-none absolute inset-0 z-10 flex items-center justify-center ${gestureHint === "cancel" ? "bg-destructive/15 text-destructive" : "bg-success/15 text-success"}`}>
@@ -208,7 +218,7 @@ function KitchenOrderCard({
       <CardHeader className="border-b-thin border-border p-3 sm:p-4">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
-              <CardTitle className="font-headline text-2xl uppercase leading-none sm:text-3xl">#{order.orderNumber}</CardTitle>
+              <CardTitle className="font-headline text-2xl uppercase leading-none sm:text-3xl">#{displayOrderNumber(order.orderNumber)}</CardTitle>
               <CardDescription className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-xs">
                 <span className="inline-flex items-center gap-1"><Clock className="h-3.5 w-3.5" />{orderTime(order.createdAt)}</span>
                 {order.peopleCount != null && <span className="inline-flex items-center gap-1"><Users className="h-3.5 w-3.5" />{order.peopleCount}名</span>}
@@ -265,21 +275,30 @@ function KitchenOrderCard({
       </CardContent>
 
       <CardFooter className="grid grid-cols-1 gap-2 border-t-thin border-border p-3 sm:grid-cols-2 sm:p-4">
-        {action ? (
+        {isAwaitingPickup ? (
+          <Button
+            onClick={() => void onMarkReceived()}
+            disabled={isUpdating}
+            aria-label={`注文${displayOrderNumber(order.orderNumber)}を受け渡し済みにする`}
+            className="h-12 w-full border-thick border-border bg-success font-mono font-black uppercase text-white hover:bg-success/90 sm:col-span-2"
+          >
+            <CheckCircle className="mr-2 h-4 w-4" />受け渡し済み
+          </Button>
+        ) : action ? (
           <Button
             onClick={() => {
               setExitDirection("up");
               actionTimer.current = window.setTimeout(() => void performAction(), EXIT_ANIMATION_MS);
             }}
             disabled={isUpdating || exitDirection !== null}
-            aria-label={`注文${order.orderNumber}を${action.label}`}
+            aria-label={`注文${displayOrderNumber(order.orderNumber)}を${action.label}`}
             className="h-12 w-full border-thick border-border font-mono font-black uppercase"
           >
             <action.icon className="mr-2 h-4 w-4" />{action.label}
           </Button>
         ) : (
           <Button disabled variant="outline" className="h-12 w-full border-thick border-border font-mono font-bold uppercase sm:col-span-2">
-            {order.status === "completed" ? <><CheckCircle className="mr-2 h-4 w-4" />完了済み</> : order.status === "cancelled" ? <><XCircle className="mr-2 h-4 w-4" />キャンセル済み</> : badge.label}
+            {order.receivedAt ? <><CheckCircle className="mr-2 h-4 w-4" />受け渡し済み</> : order.status === "completed" ? <><CheckCircle className="mr-2 h-4 w-4" />受け取り待ち</> : order.status === "cancelled" ? <><XCircle className="mr-2 h-4 w-4" />キャンセル済み</> : badge.label}
           </Button>
         )}
         {canCancel && (
@@ -287,7 +306,7 @@ function KitchenOrderCard({
             variant="outline"
             onClick={onCancelRequest}
             disabled={isUpdating || exitDirection !== null}
-            aria-label={`注文${order.orderNumber}をキャンセル`}
+            aria-label={`注文${displayOrderNumber(order.orderNumber)}をキャンセル`}
             className="h-12 w-full border-thick border-destructive font-mono font-bold text-destructive hover:bg-destructive hover:text-primary-foreground"
           >
             <XCircle className="mr-2 h-4 w-4" />キャンセル
@@ -306,6 +325,7 @@ export function SwipeableOrderStack({
   onViewChange,
   onStart,
   onComplete,
+  onMarkReceived,
   onCancelRequest,
   cancelAnimationOrderId,
   isUpdating = false,
@@ -410,7 +430,8 @@ export function SwipeableOrderStack({
               isUpdating={isUpdating}
               onStart={() => onStart(order.id)}
               onComplete={() => onComplete(order.id)}
-              onCancelRequest={() => onCancelRequest(order.id, order.orderNumber)}
+              onMarkReceived={() => onMarkReceived(order.id)}
+              onCancelRequest={() => onCancelRequest(order.id, displayOrderNumber(order.orderNumber))}
               cancelAnimationOrderId={cancelAnimationOrderId}
             />
           </div>

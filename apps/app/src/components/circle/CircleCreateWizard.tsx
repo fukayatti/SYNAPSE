@@ -3,7 +3,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { circleApi, parseEventPaymentMethods, parseStoreAreas, uploadImage, type Event, type EventStoreArea, type OrderFlowMode } from "@/lib/api";
+import { circleApi, parseEventPaymentMethods, parseStoreAreas, uploadImage, type Event, type EventStoreArea, type OrderFlowMode, type OrderNumberDisplaySettings } from "@/lib/api";
 import { resolveAssetUrl } from "@/lib/asset-url";
 import { useUnsavedChanges } from "@/components/UnsavedNavigationGuard";
 
@@ -11,12 +11,15 @@ const STEPS = ["基本情報", "画像", "運用設定", "確認"];
 
 type CreatedCircleSettings = {
   orderFlowMode: OrderFlowMode;
+  preOrderEnabled: boolean;
   mobileOrderEnabled: boolean;
   extensions: { stock: boolean; staff: boolean };
   acceptedPayments: string[];
   storeAreaId: string | null;
   // 2026-10-21: 新規店舗のレビューは、運用設定で明示されるまで非公開にする。
   reviewPublication: { publishReviews: boolean; showAverageRating: boolean; showStars: boolean; showComments: boolean };
+  // 2026-10-21: 新規店舗には作成中・受取待ちの両番号を既定表示し、媒体は空で始める。
+  orderNumberDisplay: OrderNumberDisplaySettings;
 };
 
 export function CircleCreateWizard({
@@ -73,12 +76,15 @@ export function CircleCreateWizard({
     setCreating(true);
     const settings: CreatedCircleSettings = {
       orderFlowMode,
+      // 2026-10-21: 新規サークルは事前注文も明示的に有効化するまで受け付けない。
+      preOrderEnabled: false,
       // 2026-10-17: 新規サークルは来場者注文を明示的に有効化するまで受け付けない。
       mobileOrderEnabled: false,
       extensions: { stock: stockEnabled, staff: staffEnabled },
       acceptedPayments,
       storeAreaId: storeAreaId || null,
       reviewPublication: { publishReviews: false, showAverageRating: false, showStars: false, showComments: false },
+      orderNumberDisplay: { showPreparingNumbers: true, showPickupNumbers: true, overflowPriority: "latest", media: [] },
     };
     try {
       const result = await circleApi.create({

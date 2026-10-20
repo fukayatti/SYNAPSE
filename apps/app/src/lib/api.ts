@@ -68,7 +68,10 @@ async function fetchApi<T>(
     throw networkApiError(err);
   }
 
-  if (typeof window !== "undefined") window.dispatchEvent(new Event("fesflow:api-network-success"));
+  // 2026-10-21: HTTP応答を受け取っても5xxは業務API障害として扱い、通信復帰と誤表示しない。
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event(response.status >= 500 ? "fesflow:api-server-failure" : "fesflow:api-network-success"));
+  }
 
   if (!response.ok) {
     throw await apiErrorFromResponse(response);
@@ -99,7 +102,9 @@ async function fetchApiBlob(endpoint: string): Promise<Blob> {
     if (typeof window !== "undefined") window.dispatchEvent(new Event("fesflow:api-network-failure"));
     throw networkApiError(err);
   }
-  if (typeof window !== "undefined") window.dispatchEvent(new Event("fesflow:api-network-success"));
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event(response.status >= 500 ? "fesflow:api-server-failure" : "fesflow:api-network-success"));
+  }
   if (!response.ok) throw await apiErrorFromResponse(response);
   return response.blob();
 }
@@ -215,8 +220,8 @@ export const circleApi = {
 
 // Menu API
 export const menuApi = {
-  list: (circleId: string) =>
-    fetchApi<MenuWithToppings[]>(`/api/menus?circleId=${circleId}`),
+  list: (circleId: string, includeArchived = false) =>
+    fetchApi<MenuWithToppings[]>(`/api/menus?circleId=${encodeURIComponent(circleId)}${includeArchived ? "&includeArchived=true" : ""}`),
   get: (id: string) => fetchApi<MenuWithToppings>(`/api/menus/${id}`),
   create: (data: CreateMenuInput) =>
     fetchApi<{ id: string }>("/api/menus", { method: "POST", body: data }),
@@ -227,6 +232,8 @@ export const menuApi = {
     }),
   delete: (id: string) =>
     fetchApi<{ success: boolean }>(`/api/menus/${id}`, { method: "DELETE" }),
+  restore: (id: string) =>
+    fetchApi<{ success: boolean }>(`/api/menus/${id}/restore`, { method: "POST" }),
   // 在庫の絶対値更新 (在庫>0 で soldOut は自動解除される)。
   // サーバ (menu.ts の PATCH /:id/stock) は stockQuantity を要求する。
   // 以前は { stock } を送っており zBody のバリデーションで常に 400 になっていた。
@@ -245,8 +252,8 @@ export const menuApi = {
 
 // Topping API
 export const toppingApi = {
-  list: (circleId: string) =>
-    fetchApi<Topping[]>(`/api/toppings?circleId=${circleId}`),
+  list: (circleId: string, includeArchived = false) =>
+    fetchApi<Topping[]>(`/api/toppings?circleId=${encodeURIComponent(circleId)}${includeArchived ? "&includeArchived=true" : ""}`),
   get: (id: string) => fetchApi<Topping>(`/api/toppings/${id}`),
   create: (data: CreateToppingInput) =>
     fetchApi<{ id: string }>("/api/toppings", { method: "POST", body: data }),
@@ -263,6 +270,8 @@ export const toppingApi = {
     }),
   delete: (id: string) =>
     fetchApi<{ success: boolean }>(`/api/toppings/${id}`, { method: "DELETE" }),
+  restore: (id: string) =>
+    fetchApi<{ success: boolean }>(`/api/toppings/${id}/restore`, { method: "POST" }),
 };
 
 // Staff API
@@ -286,6 +295,8 @@ export const staffApi = {
 export interface ProjectorOrder {
   orderNumber: string;
   status: string;
+  receivedAt: string | null;
+  createdAt: string;
 }
 
 export interface RegisterDisplaySession {
@@ -360,6 +371,10 @@ export const orderApi = {
     }),
   complete: (id: string) =>
     fetchApi<{ success: boolean }>(`/api/orders/${id}/complete`, {
+      method: "POST",
+    }),
+  markReceived: (id: string) =>
+    fetchApi<{ success: boolean }>(`/api/orders/${id}/received`, {
       method: "POST",
     }),
   setEstimatedTime: (id: string, estimatedMinutes: number) =>
@@ -592,7 +607,13 @@ export const uploadImage = async (
       credentials: "include",
     });
   } catch (err) {
+    if (typeof window !== "undefined") window.dispatchEvent(new Event("fesflow:api-network-failure"));
     throw networkApiError(err);
+  }
+
+  if (typeof window !== "undefined") {
+    // 2026-10-21: 画像・動画アップロードも通信状態の判定へ含める。
+    window.dispatchEvent(new Event(response.status >= 500 ? "fesflow:api-server-failure" : "fesflow:api-network-success"));
   }
 
   if (!response.ok) {
@@ -1081,9 +1102,25 @@ export interface CircleReviewPublicationSettings {
   showComments: boolean;
 }
 
+export interface OrderNumberDisplayMedia {
+  id: string;
+  name: string;
+  kind: "image" | "video";
+  durationSeconds: number;
+}
+
+export interface OrderNumberDisplaySettings {
+  showPreparingNumbers: boolean;
+  showPickupNumbers: boolean;
+  overflowPriority: "latest" | "oldest";
+  media: OrderNumberDisplayMedia[];
+}
+
 export interface CircleSettings {
   // 新規注文の初期状態: pending=未着手 / preparing=調理中 / completed=即完成
   orderFlowMode: OrderFlowMode;
+  // 2026-10-21: 事前注文はレジで確定する注文とは別の受け入れ設定にする。
+  preOrderEnabled: boolean;
   // 2026-10-17: 来場者の確定注文は店舗が許可した場合だけ受け付ける (初期値は停止)。
   mobileOrderEnabled: boolean;
   // 組み込み拡張機能のON/OFF (既定はすべてOFF=オプトイン)
@@ -1097,12 +1134,15 @@ export interface CircleSettings {
   // 2026-10-16 (#126): event.storeAreas のどの位置に出店するかを参照するID。
   storeAreaId: string | null;
   reviewPublication: CircleReviewPublicationSettings;
+  orderNumberDisplay: OrderNumberDisplaySettings;
 }
 
 // settings JSON をパースし、未設定キーを既定値で補完する
 export function parseCircleSettings(raw?: string | null): CircleSettings {
   const defaults: CircleSettings = {
     orderFlowMode: "pending",
+    // 2026-10-21: 設定キーを持たない既存サークルは従来どおり事前注文を受け付ける。
+    preOrderEnabled: true,
     mobileOrderEnabled: false,
     extensions: { stock: false, staff: false },
     acceptedPayments: [],
@@ -1112,6 +1152,12 @@ export function parseCircleSettings(raw?: string | null): CircleSettings {
       showAverageRating: false,
       showStars: false,
       showComments: false,
+    },
+    orderNumberDisplay: {
+      showPreparingNumbers: true,
+      showPickupNumbers: true,
+      overflowPriority: "latest",
+      media: [],
     },
   };
   if (!raw) return defaults;
@@ -1123,6 +1169,7 @@ export function parseCircleSettings(raw?: string | null): CircleSettings {
         parsed?.orderFlowMode === "completed"
           ? parsed.orderFlowMode
           : "pending",
+      preOrderEnabled: parsed?.preOrderEnabled !== false,
       mobileOrderEnabled: parsed?.mobileOrderEnabled === true,
       extensions: {
         stock: parsed?.extensions?.stock === true,
@@ -1139,6 +1186,37 @@ export function parseCircleSettings(raw?: string | null): CircleSettings {
         showStars: parsed?.reviewPublication?.showStars === true,
         showComments: parsed?.reviewPublication?.showComments === true,
       },
+      // 2026-10-21: 共有設定には端末内メディアの識別子だけを残し、ファイル本体やURLは保存しない。
+      orderNumberDisplay: (() => {
+        const rawDisplay = parsed?.orderNumberDisplay;
+        const media = Array.isArray(rawDisplay?.media)
+          ? rawDisplay.media.flatMap((item: unknown) => {
+              if (!item || typeof item !== "object") return [];
+              const candidate = item as Record<string, unknown>;
+              if (
+                typeof candidate.id !== "string" ||
+                typeof candidate.name !== "string" ||
+                (candidate.kind !== "image" && candidate.kind !== "video")
+              ) return [];
+              return [{
+                id: candidate.id.slice(0, 80),
+                name: candidate.name.slice(0, 160),
+                kind: candidate.kind,
+                durationSeconds: typeof candidate.durationSeconds === "number" && Number.isFinite(candidate.durationSeconds)
+                  ? Math.max(2, Math.min(60, Math.round(candidate.durationSeconds)))
+                  : 8,
+              }];
+            }).slice(0, 20)
+          : [];
+        const showPreparingNumbers = rawDisplay?.showPreparingNumbers !== false;
+        const showPickupNumbers = rawDisplay?.showPickupNumbers !== false;
+        return {
+          showPreparingNumbers: showPreparingNumbers || !showPickupNumbers,
+          showPickupNumbers,
+          overflowPriority: rawDisplay?.overflowPriority === "oldest" ? "oldest" as const : "latest" as const,
+          media,
+        };
+      })(),
     };
   } catch {
     return defaults;
@@ -1158,6 +1236,7 @@ export interface Menu {
   stockQuantity: number | null;
   inventoryEnabled: boolean;
   soldOut: boolean;
+  isArchived: boolean;
   /** 既定トッピングID配列を JSON 文字列で保持 (例: '["t1","t2"]') */
   defaultToppingIds?: string;
   toppingWizardEnabled: boolean;
@@ -1177,6 +1256,7 @@ export interface Topping {
   soldOut: boolean;
   stockQuantity: number;
   sortOrder: number;
+  isArchived: boolean;
 }
 
 export interface MenuWithToppings extends Menu {
@@ -1202,6 +1282,7 @@ export interface Order {
   estimatedMinutes: number | null;
   createdAt: Date | null;
   completedAt: Date | null;
+  receivedAt: Date | null;
   peopleCount: number;
   paymentMethod: string | null;
   // レジ担当者 (order.cashier_id)。スタッフ向け一覧 (orderApi.list) にのみ含まれる想定で、
@@ -1252,6 +1333,7 @@ export interface VisitorOrderHistory {
   circleName: string | null;
   createdAt: string;
   completedAt: string | null;
+  receivedAt: string | null;
   estimatedTime: number | null;
   items: VisitorOrderHistoryItem[];
 }

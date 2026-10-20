@@ -1,17 +1,25 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/useCircleAuth";
-import { circleApi, orderApi, type ProjectorOrder } from "@/lib/api";
+import { circleApi, orderApi, parseCircleSettings, type OrderNumberDisplayMedia, type ProjectorOrder } from "@/lib/api";
+import { displayOrderNumber } from "@/lib/order-number";
+import { getLocalDisplayMedia } from "@/lib/local-display-media";
 
 function NumberColumn({
   title,
   orders,
   tone,
+  priority,
 }: {
   title: string;
   orders: ProjectorOrder[];
   tone: "preparing" | "ready";
+  priority: "latest" | "oldest";
 }) {
+  const ordered = [...orders].sort((left, right) => {
+    const difference = new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime();
+    return priority === "latest" ? -difference : difference;
+  });
   return (
     <section className="flex min-h-0 flex-col border-thick border-foreground bg-background text-foreground">
       <header className={`flex items-baseline justify-between gap-3 border-b-thick border-foreground px-4 py-3 sm:px-6 sm:py-4 ${tone === "ready" ? "bg-success text-white" : "bg-primary text-primary-foreground"}`}>
@@ -19,13 +27,13 @@ function NumberColumn({
         <span className="shrink-0 font-mono text-xl font-black tabular-nums sm:text-3xl">{orders.length}</span>
       </header>
       <div className="grid min-h-0 flex-1 content-start grid-cols-[repeat(auto-fill,minmax(min(100%,9rem),1fr))] gap-2 overflow-y-auto p-3 sm:gap-3 sm:p-5">
-        {orders.length === 0 ? (
+        {ordered.length === 0 ? (
           <p className="col-span-full py-8 text-center font-mono text-lg font-bold text-muted-foreground sm:text-2xl">
             {tone === "ready" ? "完成した注文はありません" : "作成中の注文はありません"}
           </p>
-        ) : orders.map((order) => (
+        ) : ordered.map((order) => (
           <div key={order.orderNumber} className={`flex min-h-20 flex-col items-center justify-center border-thick border-foreground px-2 py-3 text-center ${tone === "ready" ? "bg-success text-white" : "bg-background"}`}>
-            <span className="break-all font-mono text-2xl font-black leading-tight tabular-nums sm:text-4xl xl:text-5xl">{order.orderNumber}</span>
+            <span className="break-all font-mono text-2xl font-black leading-tight tabular-nums sm:text-4xl xl:text-5xl">{displayOrderNumber(order.orderNumber)}</span>
             {tone === "preparing" && (
               <span className="mt-2 font-mono text-xs font-bold uppercase sm:text-sm">
                 {order.status === "pending" ? "受付" : "作成中"}
@@ -35,6 +43,60 @@ function NumberColumn({
         ))}
       </div>
     </section>
+  );
+}
+
+function DisplayMedia({ media }: { media: OrderNumberDisplayMedia[] }) {
+  const [index, setIndex] = useState(0);
+  const [mediaUrl, setMediaUrl] = useState<string | null>(null);
+  const [mediaMissing, setMediaMissing] = useState(false);
+  const current = media[index];
+  useEffect(() => setIndex(0), [media]);
+  useEffect(() => {
+    let active = true;
+    let objectUrl: string | null = null;
+    setMediaUrl(null);
+    setMediaMissing(false);
+    if (!current) return;
+    void getLocalDisplayMedia(current.id).then((blob) => {
+      if (!active) return;
+      if (!blob) {
+        setMediaMissing(true);
+        return;
+      }
+      objectUrl = URL.createObjectURL(blob);
+      setMediaUrl(objectUrl);
+    }).catch(() => {
+      if (active) setMediaMissing(true);
+    });
+    return () => {
+      active = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [current?.id]);
+  useEffect(() => {
+    if (!current || current.kind === "video" || media.length < 2) return;
+    const timer = window.setTimeout(() => setIndex((previous) => (previous + 1) % media.length), current.durationSeconds * 1000);
+    return () => window.clearTimeout(timer);
+  }, [current, media.length]);
+  if (!current) return null;
+  const next = () => setIndex((previous) => (previous + 1) % media.length);
+  return (
+    <aside className="flex min-h-0 flex-col border-thick border-foreground bg-background p-2 sm:p-3" aria-label="サークルの表示メディア">
+      <div className="flex min-h-0 flex-1 items-center justify-center overflow-hidden bg-black">
+        {!mediaUrl || mediaMissing ? (
+          <p className="max-w-sm p-4 text-center font-mono text-sm font-bold text-white">
+            {mediaMissing ? "この端末にメディアがありません。再生する端末でファイルを選択してください。" : "メディアを読み込み中…"}
+          </p>
+        ) : current.kind === "video" ? (
+          // 2026-10-21: 動画が1本だけの設定でも再生終了後にループする。
+          <video key={current.id} src={mediaUrl} autoPlay muted playsInline loop={media.length === 1} onEnded={next} onError={() => setMediaMissing(true)} className="h-full w-full object-contain" aria-label={current.name} />
+        ) : (
+          <img src={mediaUrl} alt={current.name} onError={() => setMediaMissing(true)} className="h-full w-full object-contain" />
+        )}
+      </div>
+      <p className="mt-2 truncate text-center font-mono text-[10px] font-bold sm:text-xs">{current.name}</p>
+    </aside>
   );
 }
 
@@ -48,6 +110,10 @@ export default function OrderNumberDisplay() {
     queryFn: () => circleApi.get(circleId),
     enabled: !!circleId,
   });
+  const displaySettings = useMemo(
+    () => parseCircleSettings(circleQuery.data?.settings).orderNumberDisplay,
+    [circleQuery.data?.settings],
+  );
   const ordersQuery = useQuery({
     queryKey: ["projector-orders", circleId],
     queryFn: () => orderApi.projector(circleId),
@@ -72,9 +138,9 @@ export default function OrderNumberDisplay() {
   }, []);
 
   const orders = ordersQuery.data ?? [];
-  // 2026-10-21: ready は受取待ちとして掲示し、実際に受け取って completed になった注文は外す。
+  // 2026-10-21: 完成と受け渡しを分け、未受け渡しの完成注文を番号表示に残す。
   const preparingOrders = orders.filter((order) => order.status === "pending" || order.status === "preparing");
-  const readyOrders = orders.filter((order) => order.status === "ready");
+  const readyOrders = orders.filter((order) => (order.status === "ready" || order.status === "completed") && !order.receivedAt);
   const lastUpdated = ordersQuery.dataUpdatedAt
     ? new Date(ordersQuery.dataUpdatedAt).toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" })
     : "接続中";
@@ -100,9 +166,12 @@ export default function OrderNumberDisplay() {
         </p>
       )}
 
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 p-3 sm:gap-4 sm:p-5 md:grid-cols-2">
-        <NumberColumn title="作成中" orders={preparingOrders} tone="preparing" />
-        <NumberColumn title="完成・お渡し待ち" orders={readyOrders} tone="ready" />
+      <div className={`grid min-h-0 flex-1 gap-3 p-3 sm:gap-4 sm:p-5 ${displaySettings.media.length > 0 ? "xl:grid-cols-[minmax(0,2fr)_minmax(16rem,1fr)]" : "md:grid-cols-2"}`}>
+        <div className={`grid min-h-0 gap-3 ${displaySettings.showPreparingNumbers && displaySettings.showPickupNumbers ? "md:grid-cols-2" : "grid-cols-1"}`}>
+          {displaySettings.showPreparingNumbers && <NumberColumn title="作成中" orders={preparingOrders} tone="preparing" priority={displaySettings.overflowPriority} />}
+          {displaySettings.showPickupNumbers && <NumberColumn title="受け取り待ち" orders={readyOrders} tone="ready" priority={displaySettings.overflowPriority} />}
+        </div>
+        {displaySettings.media.length > 0 && <DisplayMedia media={displaySettings.media} />}
       </div>
       <footer className="border-t-thin border-foreground px-4 py-2 text-right font-mono text-xs text-muted-foreground sm:px-8">
         自動更新 · 最終更新 {lastUpdated} · {clock.toLocaleDateString("ja-JP", { month: "numeric", day: "numeric" })}

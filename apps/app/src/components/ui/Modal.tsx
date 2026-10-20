@@ -32,6 +32,8 @@ interface ModalProps {
   maxWidth?: "md" | "lg" | "xl" | "full";
   // 2026-10-20: 全画面一覧など、呼び出し側が残りの高さを子要素へ配分する場合に使う。
   contentClassName?: string;
+  // 2026-10-21: 編集対象を切り替えてもダイアログの外寸を一定に保つ画面向け。
+  dialogClassName?: string;
   /** 確認ダイアログ等をこのモーダルの上に重ねる場合に z-index を調整する。 */
   zIndexClassName?: string;
 }
@@ -44,6 +46,7 @@ export function Modal({
   children,
   maxWidth = "lg",
   contentClassName,
+  dialogClassName,
   zIndexClassName = "z-50",
 }: ModalProps) {
   useBodyScrollLock(isOpen);
@@ -76,6 +79,7 @@ export function Modal({
           // 2026-10-20: 全画面モーダルは内側の余白を縮め、縦の短い画面でも一覧の表示領域を確保する。
           maxWidth === "full" && "max-h-full p-2 sm:p-4",
           MAX_WIDTH[maxWidth],
+          dialogClassName,
         )}
       >
         <CardHeader className="min-w-0 pb-3 border-b-thick border-border flex flex-row items-start justify-between gap-3 shrink-0">

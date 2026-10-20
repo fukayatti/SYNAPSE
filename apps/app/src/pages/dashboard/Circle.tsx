@@ -28,6 +28,7 @@ import { ErrorState } from "@/components/ui/ErrorState";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { OptionCard } from "@/components/ui/OptionCard";
 import { ToggleSwitch } from "@/components/ui/ToggleSwitch";
+import { Checkbox } from "@/components/ui/checkbox";
 import { ExtensionsManager } from "@/components/circle/ExtensionsManager";
 import { toast } from "sonner";
 import { Save, UserCheck, CreditCard, Crown, Clock, ChefHat, CheckCircle2, ShoppingCart, Star, MessageSquareText } from "lucide-react";
@@ -84,6 +85,7 @@ function CircleSettingsContent() {
 
   // 2026-09-27: stockEnabledは旧設定値の保存互換用で、UIでは切り替えない。
   const [orderFlowMode, setOrderFlowMode] = useState<OrderFlowMode>("pending");
+  const [preOrderEnabled, setPreOrderEnabled] = useState(false);
   const [mobileOrderEnabled, setMobileOrderEnabled] = useState(false);
   const [stockEnabled, setStockEnabled] = useState(false);
   const [staffEnabled, setStaffEnabled] = useState(false);
@@ -100,6 +102,7 @@ function CircleSettingsContent() {
   // 項目別に保存できない。2026-10-21: レビュー公開設定も同じスナップショットへ含める。
   const [settingsSnapshot, setSettingsSnapshot] = useState({
     orderFlowMode: "pending" as OrderFlowMode,
+    preOrderEnabled: false,
     mobileOrderEnabled: false,
     stockEnabled: false,
     staffEnabled: false,
@@ -151,6 +154,7 @@ function CircleSettingsContent() {
 
       const s = parseCircleSettings(circle.settings);
       setOrderFlowMode(s.orderFlowMode);
+      setPreOrderEnabled(s.preOrderEnabled);
       setMobileOrderEnabled(s.mobileOrderEnabled);
       setStockEnabled(s.extensions.stock);
       setStaffEnabled(s.extensions.staff);
@@ -159,6 +163,7 @@ function CircleSettingsContent() {
       setReviewPublication(s.reviewPublication);
       setSettingsSnapshot({
         orderFlowMode: s.orderFlowMode,
+        preOrderEnabled: s.preOrderEnabled,
         mobileOrderEnabled: s.mobileOrderEnabled,
         stockEnabled: s.extensions.stock,
         staffEnabled: s.extensions.staff,
@@ -208,11 +213,12 @@ function CircleSettingsContent() {
 
   // 「運用設定」の保存。circleApi.updateSettings は settings カラムを丸ごと上書きするため、
   // 注文モード・拡張機能・支払い方法・レビュー公開設定を常にまとめて送る。旧stock値も後方互換用に保持する。
-  const settingsDraft = { orderFlowMode, mobileOrderEnabled, stockEnabled, staffEnabled, acceptedPayments, storeAreaId, reviewPublication };
+  const settingsDraft = { orderFlowMode, preOrderEnabled, mobileOrderEnabled, stockEnabled, staffEnabled, acceptedPayments, storeAreaId, reviewPublication };
   const updateSettings = useMutation({
     mutationFn: async (draft: typeof settingsDraft) =>
       circleApi.updateSettings(circleId, {
         orderFlowMode: draft.orderFlowMode,
+        preOrderEnabled: draft.preOrderEnabled,
         mobileOrderEnabled: draft.mobileOrderEnabled,
         extensions: { stock: draft.stockEnabled, staff: draft.staffEnabled },
         // イベントに存在する方法だけ残す (イベント側で削除された方法を掃除)
@@ -294,6 +300,7 @@ function CircleSettingsContent() {
     onDiscard: () => {
       setForm(formSnapshot);
       setOrderFlowMode(settingsSnapshot.orderFlowMode);
+      setPreOrderEnabled(settingsSnapshot.preOrderEnabled);
       setMobileOrderEnabled(settingsSnapshot.mobileOrderEnabled);
       setStockEnabled(settingsSnapshot.stockEnabled);
       setStaffEnabled(settingsSnapshot.staffEnabled);
@@ -451,6 +458,18 @@ function CircleSettingsContent() {
             <div className="space-y-2 border-t-thin border-border pt-4">
               <h3 className="text-xs font-bold uppercase tracking-wider">注文受付</h3>
               <div className="space-y-3 pt-1">
+                <label htmlFor="preOrderEnabled" className="flex cursor-pointer items-start gap-3 border-thick border-border p-3">
+                  <Checkbox
+                    id="preOrderEnabled"
+                    checked={preOrderEnabled}
+                    onCheckedChange={(checked) => setPreOrderEnabled(checked === true)}
+                    className="mt-0.5"
+                  />
+                  <span className="min-w-0">
+                    <span className="block text-xs font-bold uppercase">事前注文を受け付ける</span>
+                    <span className="mt-0.5 block text-[10px] text-muted-foreground">来場者が注文内容を先に登録し、レジで受け取る注文を受け付けます。</span>
+                  </span>
+                </label>
                 <ExtensionToggle
                   icon={ShoppingCart}
                   label="モバイルオーダーを受け付ける"
@@ -556,7 +575,7 @@ function CircleSettingsContent() {
                   <ExtensionToggle
                     icon={Star}
                     label="平均評価を出店一覧に表示"
-                    description="平均値と、星ごとの件数を5段階のバーで表示します。"
+                    description="平均値と、5つの星の塗りつぶしで評価を表示します。"
                     enabled={reviewPublication.showAverageRating}
                     onToggle={() => setReviewPublication((value) => ({ ...value, showAverageRating: !value.showAverageRating }))}
                   />

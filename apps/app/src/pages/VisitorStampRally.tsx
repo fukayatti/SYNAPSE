@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, CheckCircle2, ExternalLink, MapPin, Ticket } from "lucide-react";
 import { useNavigate } from "react-router-dom";
@@ -9,6 +8,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useVisitor } from "@/hooks/useVisitor";
 import { stampRallyApi, type StampRallyCircle } from "@/lib/api";
 import { resolveAssetUrl } from "@/lib/asset-url";
+import { useSessionState } from "@/hooks/useSessionState";
 
 function safeHttpUrl(raw: string): string | null {
   try {
@@ -30,8 +30,8 @@ function dateLabel(value: string | null): string {
 export default function VisitorStampRallyPage() {
   const navigate = useNavigate();
   const { userId, isLoaded } = useVisitor();
-  const [selectedAreaId, setSelectedAreaId] = useState<string | null>(null);
-  const [selectedCircle, setSelectedCircle] = useState<StampRallyCircle | null>(null);
+  const [selectedAreaId, setSelectedAreaId] = useSessionState<string | null>(`fesflow:visitor-stamps:${userId ?? "guest"}:area`, null);
+  const [selectedCircleId, setSelectedCircleId] = useSessionState<string | null>(`fesflow:visitor-stamps:${userId ?? "guest"}:circle`, null);
   const query = useQuery({
     queryKey: ["visitor-stamp-rally", userId],
     queryFn: () => stampRallyApi.visitor(userId!),
@@ -44,6 +44,7 @@ export default function VisitorStampRallyPage() {
   });
 
   const data = query.data;
+  const selectedCircle: StampRallyCircle | null = data?.areas.flatMap((area) => area.circles).find((circle) => circle.id === selectedCircleId) ?? null;
   const eventEnded = data?.eventEnded ?? false;
   const stampedCount = data?.stampedCount ?? 0;
   const areaRequirement = data?.qualification.minQualifiedAreaCount ?? null;
@@ -164,7 +165,7 @@ export default function VisitorStampRallyPage() {
                     <li key={circle.id} className="min-w-0">
                       <button
                         type="button"
-                        onClick={() => setSelectedCircle(circle)}
+                        onClick={() => setSelectedCircleId(circle.id)}
                         aria-label={`${circle.name}: ${circle.stamped ? "利用済み。注文内容を確認" : "未利用"}`}
                         className={`w-full text-center ${circle.stamped ? "" : "opacity-50 grayscale"}`}
                       >
@@ -191,7 +192,7 @@ export default function VisitorStampRallyPage() {
 
       <Modal
         isOpen={!!selectedCircle}
-        onClose={() => setSelectedCircle(null)}
+        onClose={() => setSelectedCircleId(null)}
         title={`「${selectedCircle?.name ?? "店舗"}」の注文履歴`}
         subtitle="受取完了した注文と注文時点の商品名を表示しています。"
         maxWidth="md"

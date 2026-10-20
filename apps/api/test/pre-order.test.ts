@@ -58,7 +58,7 @@ function createPreOrderDraft(body: {
 	});
 }
 
-async function seedTestData() {
+async function seedTestData(preOrderEnabled?: boolean) {
 	const db = testDb();
 	const eventId = uid("ev");
 	const circleId = uid("ci");
@@ -76,6 +76,8 @@ async function seedTestData() {
 		id: circleId,
 		eventId,
 		name: "テスト模擬店",
+		// 2026-10-21: 未設定キーの既存サークルと、明示ON/OFFの両方を検証する。
+		settings: JSON.stringify(preOrderEnabled === undefined ? {} : { preOrderEnabled }),
 	});
 
 	// 3. メニュー作成
@@ -99,6 +101,16 @@ async function seedTestData() {
 }
 
 describe("事前オーダー機能", () => {
+	it("受付設定がOFFのサークルは事前注文を受け付けない", async () => {
+		const { circleId, menuId, userId } = await seedTestData(false);
+		const createRes = await createPreOrderDraft({
+			userId,
+			circleId,
+			items: [{ menuId, quantity: 1 }],
+		});
+		expect(createRes.status).toBe(400);
+	});
+
 	it("事前オーダーの作成、取得、確定の一連のライフサイクルが正しく機能する", async () => {
 		const db = testDb();
 		const { circleId, menuId, userId } = await seedTestData();

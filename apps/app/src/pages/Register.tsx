@@ -26,6 +26,8 @@ import { QRCodeSVG } from "qrcode.react";
 import { ApiError } from "@/lib/api-error";
 import { resolveAssetUrl } from "@/lib/asset-url";
 import { useBodyScrollLock } from "@/hooks/useBodyScrollLock";
+import { useSessionState } from "@/hooks/useSessionState";
+import { displayOrderNumber } from "@/lib/order-number";
 // 2026-10-03: 画面をまたぐカート規則と再送制御を機能モジュールに集約する。
 import { addCartLine, updateCartQuantity, toggleCartTopping, lineSubtotal, checkoutTotal, cartCount, type CartLine, type CartTopping } from "@/features/orders/cart";
 import { useOrderSubmission } from "@/features/orders/use-order-submission";
@@ -34,7 +36,7 @@ import { ToppingSelection, parseToppingCategoryMaximums, parseToppingCategoryMin
 import { MenuCategoryFilter, menuCategoryKey } from "@/components/menu/MenuCategoryFilter";
 import { parseJapaneseAllergens, type JapaneseAllergen } from "@fesflow/config/allergens";
 import { getCartAllergyWarnings, OrderAllergyWarning } from "@/features/orders/allergy-check";
-import { publishRegisterDisplaySnapshot } from "@/features/orders/register-display-sync";
+import { clearRegisterDisplayConnection, readRegisterDisplayConnection, saveRegisterDisplayConnection } from "@/features/orders/register-display-connection";
 import type { RegisterDisplaySnapshot } from "@fesflow/config/register-display-contract";
 
 type CustomerDisplayShare = RegisterDisplaySession & { circleId: string; url: string; localOnly: boolean };
@@ -521,17 +523,17 @@ function RegisterPageContent() {
   const { circleId: authCircleId } = useAuth();
   const queryClient = useQueryClient();
   const circleId = authCircleId ?? "";
-  const [selectedMenuCategory, setSelectedMenuCategory] = useState<string | null>(null);
-  useEffect(() => setSelectedMenuCategory(null), [circleId]);
-  const [cart, setCart] = useState<CartLine[]>([]);
-  const [peopleCount, setPeopleCount] = useState(1);
+  const registerStateKey = `fesflow:register-state:${circleId || "unselected"}`;
+  const [selectedMenuCategory, setSelectedMenuCategory] = useSessionState<string | null>(`${registerStateKey}:category`, null);
+  const [cart, setCart] = useSessionState<CartLine[]>(`${registerStateKey}:cart`, []);
+  const [peopleCount, setPeopleCount] = useSessionState(`${registerStateKey}:people`, 1);
   const [isQrModalOpen, setIsQrModalOpen] = useState(false);
   const [isCustomerQrModalOpen, setIsCustomerQrModalOpen] = useState(false);
   const [isCustomerDisplayModalOpen, setIsCustomerDisplayModalOpen] = useState(false);
   const [customerDisplayShare, setCustomerDisplayShare] = useState<CustomerDisplayShare | null>(null);
   const [customerDisplaySyncError, setCustomerDisplaySyncError] = useState(false);
   const customerDisplayWindow = useRef<Window | null>(null);
-  const [submittedCustomerDisplaySnapshot, setSubmittedCustomerDisplaySnapshot] = useState<RegisterDisplaySnapshot | null>(null);
+  const [submittedCustomerDisplaySnapshot, setSubmittedCustomerDisplaySnapshot] = useSessionState<RegisterDisplaySnapshot | null>(`${registerStateKey}:customer-display-submitted`, null);
   const submittingCustomerDisplaySnapshot = useRef<RegisterDisplaySnapshot | null>(null);
   const [isCartPanelOpen, setIsCartPanelOpen] = useState(false);
   useBodyScrollLock(isCartPanelOpen);
@@ -545,25 +547,23 @@ function RegisterPageContent() {
     return () => window.removeEventListener("resize", closeOnWideViewport);
   }, [isCartPanelOpen]);
   const [scannedCode, setScannedCode] = useState("");
-  const [activeCustomer, setActiveCustomer] = useState<{ userId: string; wristbandId: string | null; familyBandCount: number; allergies: JapaneseAllergen[] | null } | null>(null);
-  const [activePreOrderId, setActivePreOrderId] = useState<string | null>(null);
-  const [activePreOrderTotalPrice, setActivePreOrderTotalPrice] = useState<number | null>(null);
-  const [registerCouponId, setRegisterCouponId] = useState("");
+  const [activeCustomer, setActiveCustomer] = useSessionState<{ userId: string; wristbandId: string | null; familyBandCount: number; allergies: JapaneseAllergen[] | null } | null>(`${registerStateKey}:customer`, null);
+  const [activePreOrderId, setActivePreOrderId] = useSessionState<string | null>(`${registerStateKey}:preorder`, null);
+  const [activePreOrderTotalPrice, setActivePreOrderTotalPrice] = useSessionState<number | null>(`${registerStateKey}:preorder-total`, null);
+  const [registerCouponId, setRegisterCouponId] = useSessionState(`${registerStateKey}:coupon`, "");
   const { data: registerCoupons = [] } = useQuery({
     queryKey: ["register-coupons", circleId],
     queryFn: () => couponApi.registerOptions(circleId),
     enabled: !!circleId,
     refetchInterval: 60_000,
   });
-  useEffect(() => setRegisterCouponId(""), [circleId]);
-  const [discountId, setDiscountId] = useState("");
+  const [discountId, setDiscountId] = useSessionState(`${registerStateKey}:discount`, "");
   const { data: registerDiscounts = [] } = useQuery({
     queryKey: ["register-discounts", circleId],
     queryFn: () => discountApi.registerOptions(circleId),
     enabled: !!circleId,
     refetchInterval: 60_000,
   });
-  useEffect(() => setDiscountId(""), [circleId]);
 
   const { data: circle } = useQuery({
     queryKey: ["circle", circleId],
@@ -597,7 +597,7 @@ function RegisterPageContent() {
     const list = accepted.length > 0 ? accepted.filter((p) => eventMethods.includes(p)) : eventMethods;
     return list.length > 0 ? list : eventMethods;
   })();
-  const [paymentMethod, setPaymentMethod] = useState<string>("");
+  const [paymentMethod, setPaymentMethod] = useSessionState(`${registerStateKey}:payment`, "");
   // 対応が1つだけなら自動採用。選択肢が変わって現在値が無効になったらリセット。
   useEffect(() => {
     if (effectivePayments.length === 1) setPaymentMethod(effectivePayments[0]!);
@@ -742,7 +742,7 @@ function RegisterPageContent() {
       const submittedSnapshot = submittingCustomerDisplaySnapshot.current;
       if (submittedSnapshot) setSubmittedCustomerDisplaySnapshot({ ...submittedSnapshot, displayState: "submitted", orderNumber: data.orderNumber });
       submittingCustomerDisplaySnapshot.current = null;
-      toast.success(`注文完了！注文番号: ${data.orderNumber}`);
+      toast.success(`注文完了！呼出番号: ${displayOrderNumber(data.orderNumber)}`);
       setCart([]);
       setPeopleCount(1);
       setActiveCustomer(null); // 会計完了後に顧客情報をクリア
@@ -770,7 +770,7 @@ function RegisterPageContent() {
       const submittedSnapshot = submittingCustomerDisplaySnapshot.current;
       if (submittedSnapshot) setSubmittedCustomerDisplaySnapshot({ ...submittedSnapshot, displayState: "submitted", orderNumber: data.orderNumber });
       submittingCustomerDisplaySnapshot.current = null;
-      toast.success(`注文完了！ 注文番号: ${data.orderNumber}`, {
+      toast.success(`注文完了！ 呼出番号: ${displayOrderNumber(data.orderNumber)}`, {
         style: {
           border: "3px solid var(--border)",
           borderRadius: "var(--radius)",
@@ -885,64 +885,32 @@ function RegisterPageContent() {
   }, [cart, circle?.name, activePreOrderId, activePreOrderTotalPrice, registerCoupons, registerCouponId, registerDiscounts, discountId]);
   const currentCustomerDisplaySnapshot = submittedCustomerDisplaySnapshot ?? customerDisplaySnapshot;
 
-  const displayRevision = useRef({ sessionId: "", revision: 0 });
+  useEffect(() => {
+    if (!circleId || customerDisplayShare?.circleId === circleId) return;
+    const saved = readRegisterDisplayConnection(circleId);
+    if (!saved) return;
+    if (saved.expiresAt <= Date.now()) {
+      clearRegisterDisplayConnection(saved.circleId, saved.id);
+      return;
+    }
+    // 2026-10-21: レジへ戻った時も稼働中のお客さま画面を再利用し、新規共有を作らない。
+    setCustomerDisplayShare(saved);
+    setCustomerDisplaySyncError(false);
+  }, [circleId, customerDisplayShare?.circleId]);
+
   useEffect(() => {
     if (!customerDisplayShare || customerDisplayShare.circleId !== circleId) return;
-    if (displayRevision.current.sessionId !== customerDisplayShare.id) {
-      displayRevision.current = { sessionId: customerDisplayShare.id, revision: customerDisplayShare.revision };
-    }
-    const revision = ++displayRevision.current.revision;
-    const sessionStorageKey = `fesflow-register-display:${circleId}`;
-    const persistRevision = (nextRevision: number) => {
-      try {
-        const cached = JSON.parse(sessionStorage.getItem(sessionStorageKey) ?? "null") as RegisterDisplaySession | null;
-        if (cached?.id === customerDisplayShare.id) {
-          sessionStorage.setItem(sessionStorageKey, JSON.stringify({ ...cached, revision: nextRevision }));
-        }
-      } catch {
-        // sessionStorage を使えない環境でも、そのタブを開いている間の同期は続ける。
-      }
-    };
-    const publish = (nextRevision: number) => {
-      publishRegisterDisplaySnapshot(customerDisplayShare.id, currentCustomerDisplaySnapshot, nextRevision);
-      persistRevision(nextRevision);
-    };
-    // 2026-10-21: 同一端末の表示は回線状態に関係なくすぐ反映し、API側は連番で古い書込みを拒む。
-    publish(revision);
-    if (customerDisplayShare.localOnly) {
-      const heartbeat = window.setInterval(() => publishRegisterDisplaySnapshot(customerDisplayShare.id, currentCustomerDisplaySnapshot, revision), 4_000);
-      return () => window.clearInterval(heartbeat);
-    }
-
-    let cancelled = false;
-    const sync = (nextRevision: number) => {
-      publish(nextRevision);
-      const isLatestRevision = () =>
-        displayRevision.current.sessionId === customerDisplayShare.id &&
-        displayRevision.current.revision === nextRevision;
-      orderApi.updateRegisterDisplay(customerDisplayShare.id, currentCustomerDisplaySnapshot, nextRevision)
-        .then(() => { if (!cancelled && isLatestRevision()) setCustomerDisplaySyncError(false); })
-        .catch(() => { if (!cancelled && isLatestRevision()) setCustomerDisplaySyncError(true); });
-    };
-    const timeout = window.setTimeout(() => {
-      sync(revision);
-    }, 200);
-    const retryWhenOnline = () => {
-      if (displayRevision.current.sessionId !== customerDisplayShare.id) {
-        displayRevision.current = { sessionId: customerDisplayShare.id, revision: customerDisplayShare.revision };
-      }
-      sync(++displayRevision.current.revision);
-    };
-    // 2026-10-21: カートが変わらない待ち時間も別端末へ生存確認を送り、停止したレジを検出できるようにする。
-    const heartbeat = window.setInterval(retryWhenOnline, 15_000);
-    window.addEventListener("online", retryWhenOnline);
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timeout);
-      window.clearInterval(heartbeat);
-      window.removeEventListener("online", retryWhenOnline);
-    };
+    saveRegisterDisplayConnection({ ...customerDisplayShare, snapshot: currentCustomerDisplaySnapshot });
   }, [customerDisplayShare, currentCustomerDisplaySnapshot, circleId]);
+
+  useEffect(() => {
+    const onSync = (event: Event) => {
+      const detail = (event as CustomEvent<{ sessionId: string; ok: boolean }>).detail;
+      if (detail?.sessionId === customerDisplayShare?.id) setCustomerDisplaySyncError(!detail.ok);
+    };
+    window.addEventListener("fesflow:register-display-sync", onSync);
+    return () => window.removeEventListener("fesflow:register-display-sync", onSync);
+  }, [customerDisplayShare?.id]);
 
   useEffect(() => {
     if (!customerDisplayShare || customerDisplayShare.circleId === circleId) return;
@@ -950,6 +918,7 @@ function RegisterPageContent() {
     if (!customerDisplayShare.localOnly) {
       void orderApi.closeRegisterDisplay(customerDisplayShare.id).catch(() => undefined);
     }
+    clearRegisterDisplayConnection(customerDisplayShare.circleId, customerDisplayShare.id);
     if (customerDisplayWindow.current && !customerDisplayWindow.current.closed) customerDisplayWindow.current.close();
     customerDisplayWindow.current = null;
     setCustomerDisplayShare(null);
@@ -1014,34 +983,17 @@ function RegisterPageContent() {
   };
 
   const openCustomerDisplay = async () => {
-    // 2026-10-21: popup blocker対策でユーザー操作中に空窓を確保してから共有URLへ遷移する。
-    const existingPopup = customerDisplayWindow.current && !customerDisplayWindow.current.closed
-      ? customerDisplayWindow.current
-      : null;
-    const popup = existingPopup ?? window.open("about:blank", `fesflow-customer-display-${Date.now()}`);
-    if (!existingPopup) customerDisplayWindow.current = popup;
-    if (popup && !existingPopup) {
-      try {
-        popup.opener = null;
-        popup.document.title = "お客さま用画面を準備中";
-        popup.document.body.textContent = "レジに接続しています…";
-      } catch {
-        // 一部ブラウザーで空窓の文書に触れない場合も、共有URLへの遷移は続ける。
-      }
-    } else if (existingPopup) {
-      existingPopup.focus();
-    }
-
+    // 2026-10-21: 先に選択UIを出し、レジ担当が明示した時だけ新しいタブを開く。
+    setIsCustomerDisplayModalOpen(true);
+    if (customerDisplayShare?.circleId === circleId) return;
     try {
       if (!circleId) throw new Error("サークルを特定できません");
       const session = await getOrCreateCustomerDisplaySession(currentCustomerDisplaySnapshot);
-      displayRevision.current = { sessionId: session.id, revision: session.revision };
       const url = new URL(`/register-display/${session.id}`, window.location.origin);
       url.hash = session.token;
       const share: CustomerDisplayShare = { ...session, circleId, url: url.toString(), localOnly: false };
       setCustomerDisplayShare(share);
       setCustomerDisplaySyncError(false);
-      if (popup && !popup.closed) popup.location.replace(url.toString());
     } catch {
       // 2026-10-21: APIが使えない時も同じ端末の別窓は維持し、QR共有だけを未接続として示す。
       const localId = `local-${crypto.randomUUID()}`;
@@ -1055,14 +1007,25 @@ function RegisterPageContent() {
         url: localUrl,
         localOnly: true,
       };
-      displayRevision.current = { sessionId: localId, revision: 0 };
       setCustomerDisplayShare(localShare);
       setCustomerDisplaySyncError(true);
-      if (popup && !popup.closed) popup.location.replace(localUrl);
       toast.warning("別端末共有に接続できません。同じ端末の別ウィンドウ表示は利用できます。");
     }
-    setIsCustomerDisplayModalOpen(true);
-    if (!popup) toast.error("新しいウィンドウが開けませんでした。ブラウザーのポップアップ設定をご確認ください。");
+  };
+
+  const openCustomerDisplayWindow = () => {
+    if (!customerDisplayShare) return;
+    if (customerDisplayWindow.current && !customerDisplayWindow.current.closed) {
+      customerDisplayWindow.current.focus();
+      return;
+    }
+    const popup = window.open(customerDisplayShare.url, "_blank");
+    if (!popup) {
+      toast.error("画面を開けませんでした。ブラウザーのポップアップ設定をご確認ください。");
+      return;
+    }
+    popup.opener = null;
+    customerDisplayWindow.current = popup;
   };
 
   const copyCustomerDisplayUrl = async () => {
@@ -1079,7 +1042,7 @@ function RegisterPageContent() {
     if (!customerDisplayShare) return;
     try {
       if (!customerDisplayShare.localOnly) await orderApi.closeRegisterDisplay(customerDisplayShare.id);
-      try { sessionStorage.removeItem(`fesflow-register-display:${circleId}`); } catch { /* 共有終了は続ける */ }
+      clearRegisterDisplayConnection(customerDisplayShare.circleId, customerDisplayShare.id);
       if (customerDisplayWindow.current && !customerDisplayWindow.current.closed) customerDisplayWindow.current.close();
       customerDisplayWindow.current = null;
       setCustomerDisplayShare(null);
@@ -1160,6 +1123,9 @@ function RegisterPageContent() {
               ネットワークに接続できないため、QR共有は停止中です。同じ端末で開いた別ウィンドウにはカートを表示できます。
             </p>
             <p className="break-all text-xs text-muted-foreground">{customerDisplayShare.url}</p>
+            <Button onClick={openCustomerDisplayWindow} className="w-full border-thick border-border font-mono uppercase">
+              <Monitor className="mr-2 h-4 w-4" />新しいタブで開く
+            </Button>
           </div>
         ) : customerDisplayShare ? (
           <div className="flex flex-col items-center gap-4 text-center">
@@ -1168,6 +1134,9 @@ function RegisterPageContent() {
             </div>
             <p className="text-sm font-bold">別のスマートフォンで読み取ると、カートの内容と金額が同期されます。</p>
             <p className="break-all text-xs text-muted-foreground">有効期限: {new Date(customerDisplayShare.expiresAt).toLocaleString("ja-JP")}</p>
+            <Button onClick={openCustomerDisplayWindow} className="w-full border-thick border-border font-mono uppercase">
+              <Monitor className="mr-2 h-4 w-4" />新しいタブで開く
+            </Button>
             {customerDisplaySyncError && (
               <p role="status" className="w-full border-l-heavy border-error bg-muted p-3 text-left text-sm font-bold">
                 別端末への同期を確認できません。同じ端末の別ウィンドウは引き続き同期します。

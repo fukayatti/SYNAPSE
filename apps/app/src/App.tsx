@@ -1,5 +1,5 @@
-import { lazy, Suspense, useEffect } from "react";
-import { Routes, Route, Outlet, Navigate, useSearchParams } from "react-router-dom";
+import { lazy, Suspense, useEffect, useLayoutEffect } from "react";
+import { Routes, Route, Outlet, Navigate, useLocation, useSearchParams } from "react-router-dom";
 import { useVisitor } from "@/hooks/useVisitor";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import Providers from "@/components/providers";
@@ -10,7 +10,6 @@ import SystemBanner from "@/components/SystemBanner";
 
 import SystemGate from "@/components/SystemGate";
 import VisitorHeader from "@/components/visitor-header";
-import Loader from "@/components/loader";
 
 import { CircleAuthGuard, SystemAdminGuard, EventAdminGuard } from "@/hooks/useCircleAuth";
 import { ImpersonationBanner } from "@/components/system/ImpersonationBanner";
@@ -33,6 +32,7 @@ const pageImports = {
 	EventDashboard: () => import("@/pages/EventDashboard"),
 	DashboardIndex: () => import("@/pages/dashboard/Index"),
 	DashboardCircle: () => import("@/pages/dashboard/Circle"),
+	DashboardOrderDisplay: () => import("@/pages/dashboard/OrderDisplay"),
 	DashboardMembers: () => import("@/pages/dashboard/Members"),
 	DashboardMenu: () => import("@/pages/dashboard/Menu"),
 	DashboardQr: () => import("@/pages/dashboard/Qr"),
@@ -77,6 +77,7 @@ const Admin = lazy(pageImports.Admin);
 const EventDashboard = lazy(pageImports.EventDashboard);
 const DashboardIndex = lazy(pageImports.DashboardIndex);
 const DashboardCircle = lazy(pageImports.DashboardCircle);
+const DashboardOrderDisplay = lazy(pageImports.DashboardOrderDisplay);
 const DashboardMembers = lazy(pageImports.DashboardMembers);
 const DashboardMenu = lazy(pageImports.DashboardMenu);
 const DashboardQr = lazy(pageImports.DashboardQr);
@@ -112,7 +113,7 @@ const CouponRedeem = lazy(pageImports.CouponRedeem);
 export function preloadStaffPages() {
 	const staffKeys: (keyof typeof pageImports)[] = [
 		"Home", "Login", "Register", "Backyard", "OrderNumberDisplay", "RegisterCustomerDisplay", "Checkin", "Invite", "Admin",
-		"EventDashboard", "DashboardIndex", "DashboardCircle", "DashboardMembers", 
+		"EventDashboard", "DashboardIndex", "DashboardCircle", "DashboardOrderDisplay", "DashboardMembers",
 		"DashboardMenu", "DashboardQr", "DashboardSales", "DashboardStaff",
 		"DashboardStock", "DashboardAnalytics", "DashboardExport", "DashboardCoupons", "DashboardDiscounts", "StaffOnboarding"
 	];
@@ -140,8 +141,10 @@ function AdminLayout() {
 			<Header />
 			<SystemBanner />
 			{/* 2026-09-27: Grid item の自動最小幅で子テーブルが画面全体を押し広げないよう縮小を許可する。 */}
-			<main className="min-w-0 w-full">
-				<Outlet />
+      <main className="min-w-0 w-full">
+        <Suspense fallback={<RoutePageLoading />}>
+          <Outlet />
+        </Suspense>
 			</main>
 		</div>
 	);
@@ -154,7 +157,9 @@ function VisitorLayout() {
 				<MobileOrderOutboxSync />
 				<VisitorHeader />
 				<main>
-					<Outlet />
+					<Suspense fallback={<RoutePageLoading />}>
+						<Outlet />
+					</Suspense>
 				</main>
 			</div>
 		</SystemGate>
@@ -189,9 +194,51 @@ function VisitorOnboardingGate() {
 function BareLayout() {
 	return (
 		<SystemGate>
-			<Outlet />
+			<Suspense fallback={<RoutePageLoading />}>
+				<Outlet />
+			</Suspense>
 		</SystemGate>
 	);
+}
+
+function RoutePageLoading() {
+	// 2026-10-21: SPAの遅延読込では共通ヘッダーを残し、画面全体が消えたように見せない。
+	return (
+		<div className="mx-auto flex min-h-[45vh] w-full max-w-7xl items-start p-6" role="status" aria-live="polite">
+			<span className="border-l-heavy border-primary pl-3 text-sm font-bold text-muted-foreground">画面を表示しています…</span>
+		</div>
+	);
+}
+
+function RouteScrollRestoration() {
+	const location = useLocation();
+	const routeKey = `${location.pathname}${location.search}`;
+
+	useEffect(() => {
+		const key = routeKey;
+		let timer = 0;
+		const save = () => {
+			try { window.sessionStorage.setItem(`fesflow:scroll:${key}`, String(window.scrollY)); } catch { /* 保存不可でも遷移を続ける */ }
+		};
+		const onScroll = () => {
+			window.clearTimeout(timer);
+			timer = window.setTimeout(save, 120);
+		};
+		window.addEventListener("scroll", onScroll, { passive: true });
+		return () => {
+			window.clearTimeout(timer);
+			save();
+			window.removeEventListener("scroll", onScroll);
+		};
+	}, [routeKey]);
+
+	useLayoutEffect(() => {
+		let top = 0;
+		try { top = Number(window.sessionStorage.getItem(`fesflow:scroll:${routeKey}`) ?? 0); } catch { /* 保存不可なら先頭 */ }
+		window.requestAnimationFrame(() => window.scrollTo({ top: Number.isFinite(top) ? top : 0, behavior: "auto" }));
+	}, [routeKey]);
+
+	return null;
 }
 
 export default function App() {
@@ -202,7 +249,7 @@ export default function App() {
 			<DebugConsole />
 			{/* なりすまし中は全ページ最上部にバナーを出す (Phase E) */}
 			<ImpersonationBanner />
-			<Suspense fallback={<Loader />}>
+			<RouteScrollRestoration />
 				<Routes>
 				{/* ドメインルートはブランディングページ (VisitorHeader なし) */}
 				<Route element={<BareLayout />}>
@@ -317,6 +364,10 @@ export default function App() {
 						}
 					/>
 					<Route
+						path="/circle/dashboard/number-display"
+						element={<CircleAuthGuard><DashboardOrderDisplay /></CircleAuthGuard>}
+					/>
+					<Route
 						path="/circle/dashboard/members"
 						element={
 							<CircleAuthGuard>
@@ -398,8 +449,7 @@ export default function App() {
 
 				{/* 2026-10-01: 未対応画面用の案内を404と誤認させないよう、未定義URLは専用ページへ送る。 */}
 				<Route path="*" element={<NotFound />} />
-			</Routes>
-			</Suspense>
+				</Routes>
 		</Providers>
 		</ErrorBoundary>
 	);

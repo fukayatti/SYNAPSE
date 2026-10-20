@@ -1,4 +1,4 @@
-import { ReactNode, useEffect, useState } from "react";
+import { ReactNode, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Link, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
@@ -27,6 +27,7 @@ import {
   ScrollText,
   BarChart3,
   MonitorCheck,
+  MonitorPlay,
   Boxes,
   Calculator,
   CalendarCheck,
@@ -125,23 +126,6 @@ export default function DashboardLayout({
     };
   }, []);
 
-  // 2026-10-20: サイドバーの上下を固定ヘッダーの実寸に追従させ、画面の高さに合わせて内側だけスクロールする。
-  useEffect(() => {
-    const header = document.querySelector<HTMLElement>("[data-app-header]");
-    if (!header || typeof ResizeObserver === "undefined") return;
-    const root = document.documentElement;
-    const previousHeight = root.style.getPropertyValue("--app-header-height");
-    const updateHeight = () => root.style.setProperty("--app-header-height", `${header.getBoundingClientRect().height}px`);
-    const observer = new ResizeObserver(updateHeight);
-    observer.observe(header);
-    updateHeight();
-    return () => {
-      observer.disconnect();
-      if (previousHeight) root.style.setProperty("--app-header-height", previousHeight);
-      else root.style.removeProperty("--app-header-height");
-    };
-  }, []);
-
   useBodyScrollLock(isMobileMenuOpen);
 
   // Escape 閉じ・フォーカストラップは Modal.tsx と同じ共通フックを再利用する。
@@ -156,6 +140,22 @@ export default function DashboardLayout({
   // 最新の circleId を返すため、これに乗り換えて再マウント不要で反映されるようにする。
   const { circleId: authCircleId, isCircleOwner, checkPermission, isLoading: authLoading } = useAuth();
   const circleId = type === "circle" ? (authCircleId ?? "") : "";
+  const sidebarScrollRef = useRef<HTMLElement>(null);
+  const sidebarScrollKey = `fesflow:dashboard-sidebar:${type}:${circleId || eventId || "default"}`;
+
+  useEffect(() => {
+    const sidebar = sidebarScrollRef.current;
+    if (!sidebar) return;
+    try { sidebar.scrollTop = Number(window.sessionStorage.getItem(sidebarScrollKey) ?? 0); } catch { /* 保存できなくても通常操作を続ける */ }
+    const savePosition = () => {
+      try { window.sessionStorage.setItem(sidebarScrollKey, String(sidebar.scrollTop)); } catch { /* 保存できなくても通常操作を続ける */ }
+    };
+    sidebar.addEventListener("scroll", savePosition, { passive: true });
+    return () => {
+      savePosition();
+      sidebar.removeEventListener("scroll", savePosition);
+    };
+  }, [sidebarScrollKey]);
 
   // 2026-09-27: スタッフ管理の表示判定のためサークル設定を取得。在庫管理は組み込み機能とする。
   const { data: circle } = useQuery({
@@ -164,6 +164,19 @@ export default function DashboardLayout({
     enabled: type === "circle" && !!circleId,
   });
   const circleSettings = parseCircleSettings(circle?.settings);
+
+  // 2026-10-21: 左メニューだけをヘッダー下へ固定し、長いメニューは左側だけでスクロールさせる。
+  useEffect(() => {
+    const header = document.querySelector<HTMLElement>("[data-app-header]");
+    if (!header) return;
+    const updateHeaderHeight = () => {
+      document.documentElement.style.setProperty("--app-header-height", `${header.getBoundingClientRect().height}px`);
+    };
+    updateHeaderHeight();
+    const observer = new ResizeObserver(updateHeaderHeight);
+    observer.observe(header);
+    return () => observer.disconnect();
+  }, []);
 
   // 閲覧のみモード (2026-07-16)。イベントが終了/保持中なら配下の変更操作はサーバで拒否されるため、
   // 全ダッシュボード共通のこの場所で理由を明示する (各画面に個別実装しないで済む)。
@@ -187,6 +200,7 @@ export default function DashboardLayout({
       items: [
         { title: "ダッシュボード", href: "/circle/dashboard", icon: LayoutDashboard },
         { title: "モバイルオーダーQR", href: "/circle/dashboard/qr", icon: QrCode, permission: "circle:read" },
+        { title: "番号表示", href: "/circle/dashboard/number-display", icon: MonitorPlay, permission: "circle:write" },
       ],
     },
     {
@@ -335,7 +349,7 @@ export default function DashboardLayout({
     // 2026-10-20: URL直入力でも権限外のタブを描画せず、そのスタッフが使える最初の画面へ移す。
     onTabChange(firstVisibleTab);
   }, [type, authLoading, activeItem?.tab, firstVisibleTab, onTabChange]);
-  // 2026-10-20: 管理メニューのカテゴリは常時表示し、画面高を超える分だけサイドバー内でスクロールする。
+  // 2026-10-21: 短い設定画面でサイドバーだけが画面下まで伸びたり、本文スクロールへ追従したりしないよう自然高で表示する。
   const renderMenuGroups = (isMobile: boolean) => visibleMenuGroups.map((group) => {
     return (
       <div key={group.label} className={cn("pt-3 first:pt-0", !isMobile && "md:w-full")}>
@@ -479,10 +493,10 @@ export default function DashboardLayout({
 
       {/* 2カラムレイアウト */}
       <div className="flex flex-col md:flex-row gap-6 items-start">
-        {/* 左サイドバー: 全カテゴリを表示し、画面高に収まらない項目は内側でスクロールする。 */}
+        {/* 2026-10-21: 長いサイドメニューはヘッダー下に固定し、右のページとは独立してスクロールさせる。 */}
         <aside
-          className="hidden w-full shrink-0 overscroll-contain border-thick border-border bg-background p-2 shadow-none md:sticky md:block md:w-64 md:self-start md:overflow-y-auto"
-          style={{ top: "calc(var(--app-header-height, 0px) + 1rem)", height: "calc(100dvh - var(--app-header-height, 0px) - 2rem)" }}
+          ref={sidebarScrollRef}
+          className="sticky top-[calc(var(--app-header-height,4rem)+1rem)] hidden w-full shrink-0 overflow-y-auto overscroll-contain border-thick border-border bg-background p-2 pb-5 shadow-none md:mb-6 md:block md:max-h-[calc(100dvh-var(--app-header-height,4rem)-2rem)] md:w-64 md:self-start"
         >
           <nav className="flex md:flex-col gap-1">
             {renderMenuGroups(false)}

@@ -134,6 +134,17 @@ preOrderRoutes.post(
       const preOrderId = draftId;
       const currentDraftRows = await db.select().from(preOrder).where(eq(preOrder.id, preOrderId)).limit(1);
       const currentDraft = currentDraftRows[0];
+      let preOrderAccepting = false;
+      try {
+        // 2026-10-21: 未設定キーの既存サークルは受付を維持し、明示OFFだけ新規注文を止める。
+        preOrderAccepting = JSON.parse(circles[0]!.settings || "{}").preOrderEnabled !== false;
+      } catch {
+        preOrderAccepting = false;
+      }
+      // 2026-10-21: 設定OFF後は新規・変更注文を止めるが、受付済みドラフトの空カート取消だけは許可する。
+      if (!preOrderAccepting && !(currentDraft?.status === "pending" && items.length === 0 && couponInputs.length === 0)) {
+        apiError("BAD_REQUEST", "このサークルは事前注文を受け付けていません");
+      }
       let isStaleDraftWrite = false;
       if (currentDraft) {
         if (currentDraft.userId !== userId || currentDraft.circleId !== circleId) {

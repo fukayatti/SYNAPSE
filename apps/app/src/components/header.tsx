@@ -61,6 +61,21 @@ export default function Header() {
   const navigate = useNavigate();
   const pathname = useLocation().pathname;
   const queryClient = useQueryClient();
+  const [lastCircleDashboardPath, setLastCircleDashboardPath] = useState(() => {
+    try {
+      const saved = window.sessionStorage.getItem("fesflow:last-circle-dashboard-path");
+      return saved?.startsWith("/circle/dashboard") ? saved : "/circle/dashboard";
+    } catch {
+      return "/circle/dashboard";
+    }
+  });
+
+  useEffect(() => {
+    if (!pathname.startsWith("/circle/dashboard")) return;
+    // 2026-10-21: レジ・厨房から戻る時に、最後に使っていた管理画面を開く。
+    setLastCircleDashboardPath(pathname);
+    try { window.sessionStorage.setItem("fesflow:last-circle-dashboard-path", pathname); } catch { /* 保存不可ならトップへ戻る */ }
+  }, [pathname]);
   const { role, eventId, userName, circleName, isLoading, isAuthenticated, isEventAdmin, userEmail, membershipAuthorityError, retryAuthorization } =
     useAuth();
   const { data: spaces } = useMySpaces();
@@ -525,7 +540,7 @@ export default function Header() {
     ];
   } else if (isCircleView && (role === "circle_manager" || role === "circle_admin" || role === "circle_staff" || role === "super_admin" || role === "event_manager")) {
     links = [
-      { to: "/circle/dashboard", label: "ダッシュボード" },
+      { to: lastCircleDashboardPath, label: "ダッシュボード" },
       ...(hasPermission(role, "order:write", isEventAdmin) ? [{ to: "/circle/register", label: "レジ" }] : []),
       ...(hasPermission(role, "order:read", isEventAdmin) ? [{ to: "/circle/backyard", label: "厨房" }] : []),
     ];

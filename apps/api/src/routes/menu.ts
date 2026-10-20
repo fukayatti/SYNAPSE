@@ -28,6 +28,7 @@ async function requireActiveCircle(c: Context<AppEnv>, circleId: string) {
 menuRoutes.get("/", async (c) => {
   const db = c.get("db");
   const circleId = c.req.query("circleId");
+  const includeArchived = c.req.query("includeArchived") === "true";
 
   if (!circleId) {
     apiError("BAD_REQUEST", "circleIdが必要です");
@@ -35,12 +36,18 @@ menuRoutes.get("/", async (c) => {
 
   // 2026-10-15 (#128): 既知のサークルIDを使った直接APIアクセスでも削除済みイベントを表示しない。
   await requireActiveCircle(c, circleId);
+  // 2026-10-21: 販売停止中の商品は管理権限のある画面だけで復活候補として見せる。
+  if (includeArchived && !(await hasPermission(c, circleId, "menu:delete"))) {
+    apiError("FORBIDDEN", "販売停止中メニューを表示する権限がありません");
+  }
 
   // メニューを取得
   const menus = await db
     .select()
     .from(menu)
-    .where(and(eq(menu.circleId, circleId), eq(menu.isArchived, false)))
+    .where(includeArchived
+      ? eq(menu.circleId, circleId)
+      : and(eq(menu.circleId, circleId), eq(menu.isArchived, false)))
     .orderBy(asc(menu.sortOrder), asc(menu.createdAt), asc(menu.id));
 
   // 各メニューのトッピングを取得
@@ -375,6 +382,20 @@ menuRoutes.delete("/:id", async (c) => {
   // 2026-10-21: 注文・事前注文の履歴から参照されるため、商品行を残して新規販売だけ停止する。
   await db.update(menu).set({ isArchived: true }).where(eq(menu.id, id));
 
+  return c.json({ success: true });
+});
+
+// 2026-10-21: 注文履歴の参照を保ったまま、販売停止した商品を管理者が再公開できるようにする。
+menuRoutes.post("/:id/restore", async (c) => {
+  const db = c.get("db");
+  const id = c.req.param("id");
+  const rows = await db.select().from(menu).where(eq(menu.id, id)).limit(1);
+  const archivedMenu = rows[0];
+  if (!archivedMenu) apiError("NOT_FOUND", "メニューが見つかりません");
+  if (!(await hasPermission(c, archivedMenu.circleId, "menu:delete"))) {
+    apiError("FORBIDDEN", "権限がありません");
+  }
+  await db.update(menu).set({ isArchived: false }).where(eq(menu.id, id));
   return c.json({ success: true });
 });
 

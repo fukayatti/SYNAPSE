@@ -98,6 +98,12 @@ function DashboardContent() {
       href: "/circle/dashboard/qr",
       permission: "circle:read" as const,
     },
+    {
+      title: "番号表示",
+      description: "呼出番号と表示する画像・動画を設定",
+      href: "/circle/dashboard/number-display",
+      permission: "circle:write" as const,
+    },
     // --- ここから拡張機能 (末尾) ---
     ...(settings.extensions.staff
       ? [{

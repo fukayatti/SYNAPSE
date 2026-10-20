@@ -192,6 +192,7 @@ export function MenuFormModal({ circleId, isOpen, onClose, menu, onDelete }: Men
         isOpen={isOpen}
         onClose={handleOverlayClose}
         title={isEdit ? `[メニュー編集: ${menu?.name}]` : "[新規メニュー追加]"}
+        dialogClassName="h-[min(82dvh,52rem)]"
       >
         {isEdit && <EditModeBanner saveStatus={saveStatus} />}
         {isEdit && menu?.id && (

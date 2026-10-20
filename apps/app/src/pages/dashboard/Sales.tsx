@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/Modal";
 import { ErrorState } from "@/components/ui/ErrorState";
 import { ChevronLeft, ChevronRight } from "lucide-react";
+import { useSessionState } from "@/hooks/useSessionState";
 
 // ローカルタイムの YYYY-MM-DD キー (日付ごとの集計・切り替えに使用)
 const dayKey = (d: Date) =>
@@ -36,7 +37,8 @@ function SalesManagementContent() {
   const circleId = authCircleId ?? "";
   const circleName = authCircleName ?? "サークルダッシュボード";
   // 表示対象の日付 (日にちごとに切り替えながら見られるようにする)
-  const [selectedDate, setSelectedDate] = useState<string>("");
+  // 2026-10-21: レジ等へ移動して戻っても確認中の日付を保つ。
+  const [selectedDate, setSelectedDate] = useSessionState<string>(`fesflow:sales-date:${circleId}`, "");
   // グラフ拡大モーダル用状態
   const [isChartExpanded, setIsChartExpanded] = useState(false);
 

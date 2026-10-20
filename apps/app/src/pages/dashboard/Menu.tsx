@@ -22,9 +22,10 @@ function MenuManagementContent() {
   // localStorage から固定読みしていたため、同一パス上でスペース切り替え後も
   // 古いサークルのメニュー管理画面のまま表示され続けていた。useAuth() (authChange
   // 購読) に統一する。
-  const { circleId: authCircleId, circleName: authCircleName } = useAuth();
+  const { circleId: authCircleId, circleName: authCircleName, checkPermission } = useAuth();
   const circleId = authCircleId ?? "";
   const circleName = authCircleName ?? "サークルダッシュボード";
+  const canRestoreArchived = checkPermission("menu:delete");
 
   // モーダル開閉用ステート
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -46,7 +47,7 @@ function MenuManagementContent() {
     refetch: refetchMenus,
   } = useQuery({
     queryKey: ["menus", circleId],
-    queryFn: () => menuApi.list(circleId),
+    queryFn: () => menuApi.list(circleId, canRestoreArchived),
     enabled: !!circleId,
   });
 
@@ -58,7 +59,7 @@ function MenuManagementContent() {
     refetch: refetchToppings,
   } = useQuery({
     queryKey: ["toppings", circleId],
-    queryFn: () => toppingApi.list(circleId),
+    queryFn: () => toppingApi.list(circleId, canRestoreArchived),
     enabled: !!circleId,
   });
 
@@ -82,6 +83,30 @@ function MenuManagementContent() {
     },
     onError: (e: any) => toast.error(e?.message || "更新に失敗しました"),
   });
+
+  const restoreMenu = useMutation({
+    mutationFn: (menu: any) => menuApi.restore(menu.id),
+    onSuccess: () => {
+      toast.success("メニューの販売を再開しました");
+      queryClient.invalidateQueries({ queryKey: ["menus", circleId] });
+    },
+    onError: (error: any) => toast.error(error?.message || "メニューを再開できませんでした"),
+  });
+
+  const restoreTopping = useMutation({
+    mutationFn: (topping: any) => toppingApi.restore(topping.id),
+    onSuccess: () => {
+      toast.success("トッピングを再び選べるようにしました");
+      queryClient.invalidateQueries({ queryKey: ["toppings", circleId] });
+      queryClient.invalidateQueries({ queryKey: ["menus", circleId] });
+    },
+    onError: (error: any) => toast.error(error?.message || "トッピングを再開できませんでした"),
+  });
+
+  const activeMenus = (menus ?? []).filter((menu) => !menu.isArchived);
+  const archivedMenus = (menus ?? []).filter((menu) => menu.isArchived);
+  const activeToppings = (toppings ?? []).filter((topping) => !topping.isArchived);
+  const archivedToppings = (toppings ?? []).filter((topping) => topping.isArchived);
 
   // メニュー削除 (確認ダイアログの代わりに undo 付きトースト)
   const handleDeleteMenu = (menu: any) =>
@@ -131,7 +156,7 @@ function MenuManagementContent() {
   // 2026-10-21: カテゴリ内で順番を入れ替え、来場者画面でも使う表示順として保存する。
   const moveMenu = async (category: string, index: number, offset: -1 | 1) => {
     if (!menus || isReorderingMenus) return;
-    const categoryMenus = menus.filter((menu) => (menu.category?.trim() || "未分類") === category);
+    const categoryMenus = activeMenus.filter((menu) => (menu.category?.trim() || "未分類") === category);
     const target = index + offset;
     if (target < 0 || target >= categoryMenus.length) return;
     const reordered = [...categoryMenus];
@@ -151,8 +176,8 @@ function MenuManagementContent() {
   const moveTopping = async (index: number, offset: -1 | 1) => {
     if (!toppings || isReorderingToppings) return;
     const target = index + offset;
-    if (target < 0 || target >= toppings.length) return;
-    const reordered = [...toppings];
+    if (target < 0 || target >= activeToppings.length) return;
+    const reordered = [...activeToppings];
     [reordered[index], reordered[target]] = [reordered[target]!, reordered[index]!];
     setIsReorderingToppings(true);
     try {
@@ -206,7 +231,7 @@ function MenuManagementContent() {
           {/* メニュー一覧 */}
           {menusError ? (
             <ErrorState error={menusErrorObj} onRetry={() => refetchMenus()} />
-          ) : !menus || menus.length === 0 ? (
+          ) : activeMenus.length === 0 ? (
             <EmptyState
               icon={UtensilsCrossed}
               message="メニューがまだありません"
@@ -216,14 +241,14 @@ function MenuManagementContent() {
           ) : (
             <div className="space-y-6">
               {/* 2026-10-16: メニューはカテゴリ単位の横幅を使う行表示にし、編集フォームへ設定を集約する。 */}
-              {[...new Set(menus.map((menu) => menu.category?.trim() || "未分類"))].sort((a, b) => a.localeCompare(b, "ja")).map((category) => (
+              {[...new Set(activeMenus.map((menu) => menu.category?.trim() || "未分類"))].sort((a, b) => a.localeCompare(b, "ja")).map((category) => (
                 <section key={category} className="space-y-2">
                   <div className="flex flex-wrap items-center justify-between gap-2 border-b-thin border-border pb-2">
                     <h3 className="text-xs font-bold uppercase">{category}</h3>
                     <span className="text-[9px] font-bold text-muted-foreground">カテゴリ内の順番</span>
                   </div>
                   <div className="w-full divide-y-thin divide-border border-y-thin border-border">
-              {menus.filter((menu) => (menu.category?.trim() || "未分類") === category).map((menu, index, categoryMenus) => (
+              {activeMenus.filter((menu) => (menu.category?.trim() || "未分類") === category).map((menu, index, categoryMenus) => (
                 <div key={menu.id} className="flex w-full flex-col gap-3 py-3 sm:flex-row sm:items-center">
                   {menu.imagePath ? <img src={resolveAssetUrl(menu.imagePath)} alt="" className="h-16 w-20 shrink-0 border-thin border-border object-cover" /> : <div className="flex h-16 w-20 shrink-0 items-center justify-center bg-muted text-[9px] uppercase">No Image</div>}
                   <div className="min-w-0 flex-1">
@@ -251,6 +276,25 @@ function MenuManagementContent() {
             </div>
 
           )}
+
+          {canRestoreArchived && archivedMenus.length > 0 && (
+            <section aria-labelledby="archived-menu-heading" className="space-y-2 border-t-thin border-border pt-4">
+              <h3 id="archived-menu-heading" className="text-xs font-bold uppercase">販売停止中 · {archivedMenus.length}件</h3>
+              <div className="divide-y-thin divide-border border-y-thin border-border">
+                {archivedMenus.map((menu) => (
+                  <div key={menu.id} className="flex flex-wrap items-center justify-between gap-3 py-3">
+                    <div className="min-w-0">
+                      <p className="break-words text-sm font-bold">{menu.name}</p>
+                      <p className="text-[10px] text-muted-foreground">¥{menu.price.toLocaleString("ja-JP")} · {menu.category?.trim() || "未分類"}</p>
+                    </div>
+                    <Button type="button" variant="outline" onClick={() => restoreMenu.mutate(menu)} disabled={restoreMenu.isPending}>
+                      販売を再開
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
         </section>
 
         {/* トッピングセクション */}
@@ -270,7 +314,7 @@ function MenuManagementContent() {
           {/* トッピング一覧 */}
           {toppingsError ? (
             <ErrorState error={toppingsErrorObj} onRetry={() => refetchToppings()} />
-          ) : !toppings || toppings.length === 0 ? (
+          ) : activeToppings.length === 0 ? (
             <EmptyState
               icon={UtensilsCrossed}
               message="トッピングがまだありません"
@@ -281,7 +325,7 @@ function MenuManagementContent() {
             <>
               {/* 2026-10-16: トッピング一覧は全幅の行と並び替え操作で現場の順序調整を可能にする。 */}
               <div className="w-full divide-y-thin divide-border border-y-thin border-border">
-              {toppings.map((topping, index) => (
+              {activeToppings.map((topping, index) => (
                 <div key={topping.id} className="flex w-full flex-col gap-3 py-3 sm:flex-row sm:items-center">
                   {topping.imagePath ? <img src={resolveAssetUrl(topping.imagePath)} alt="" className="h-14 w-16 shrink-0 border-thin border-border object-cover" /> : <div className="flex h-14 w-16 shrink-0 items-center justify-center bg-muted text-[9px] uppercase">No Image</div>}
                   <div className="min-w-0 flex-1"><p className="text-sm font-bold uppercase">{topping.name}</p><p className="text-[10px] text-muted-foreground">{topping.category || "未分類"} · +¥{topping.price.toLocaleString()} · <span className={topping.soldOut ? "font-bold text-destructive" : "text-success"}>{topping.soldOut ? "売り切れ" : "販売中"}</span></p>{topping.description && <p className="mt-1 text-xs text-muted-foreground">{topping.description}</p>}</div>
@@ -289,7 +333,7 @@ function MenuManagementContent() {
                   <div className="flex shrink-0 flex-wrap items-center gap-2">
                     <span className="w-full text-[9px] font-bold uppercase text-muted-foreground sm:w-auto">順番</span>
                     <Button type="button" variant="outline" size="icon" title="上へ移動" aria-label={`${topping.name}を上へ`} disabled={isReorderingToppings || index === 0} onClick={() => moveTopping(index, -1)}><ArrowUp className="h-4 w-4" /></Button>
-                    <Button type="button" variant="outline" size="icon" title="下へ移動" aria-label={`${topping.name}を下へ`} disabled={isReorderingToppings || index === toppings.length - 1} onClick={() => moveTopping(index, 1)}><ArrowDown className="h-4 w-4" /></Button>
+                    <Button type="button" variant="outline" size="icon" title="下へ移動" aria-label={`${topping.name}を下へ`} disabled={isReorderingToppings || index === activeToppings.length - 1} onClick={() => moveTopping(index, 1)}><ArrowDown className="h-4 w-4" /></Button>
                     {/* 2026-10-21: 在庫数とは別に一時的な提供停止を行えるよう、在庫管理中も手動切替を表示する。 */}
                     <Button type="button" variant={topping.soldOut ? "destructive" : "outline"} size="sm" onClick={() => toggleToppingSoldOut.mutate(topping)} disabled={toggleToppingSoldOut.isPending}>{topping.soldOut ? "販売再開" : "売り切れ"}</Button>
                     <Button variant="outline" size="sm" onClick={() => handleOpenToppingEdit(topping)}><Edit className="mr-1 h-3 w-3" />編集</Button>
@@ -298,6 +342,25 @@ function MenuManagementContent() {
               ))}
               </div>
             </>
+          )}
+
+          {canRestoreArchived && archivedToppings.length > 0 && (
+            <section aria-labelledby="archived-topping-heading" className="space-y-2 border-t-thin border-border pt-4">
+              <h3 id="archived-topping-heading" className="text-xs font-bold uppercase">使用停止中 · {archivedToppings.length}件</h3>
+              <div className="divide-y-thin divide-border border-y-thin border-border">
+                {archivedToppings.map((topping) => (
+                  <div key={topping.id} className="flex flex-wrap items-center justify-between gap-3 py-3">
+                    <div className="min-w-0">
+                      <p className="break-words text-sm font-bold">{topping.name}</p>
+                      <p className="text-[10px] text-muted-foreground">{topping.category?.trim() || "未分類"} · ¥{topping.price.toLocaleString("ja-JP")}</p>
+                    </div>
+                    <Button type="button" variant="outline" onClick={() => restoreTopping.mutate(topping)} disabled={restoreTopping.isPending}>
+                      選択肢に戻す
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            </section>
           )}
         </section>
 

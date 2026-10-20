@@ -3,8 +3,9 @@ import { useEffect, useRef, useState, Suspense } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { ModSandbox } from "@/components/ModSandbox";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { eventApi, circleApi, menuApi, preOrderApi, orderApi, wristbandApi, reviewApi, type CreatePreOrderInput, type MenuWithToppings, type Topping, type PublicStoreReviewList } from "@/lib/api";
+import { eventApi, circleApi, menuApi, preOrderApi, orderApi, wristbandApi, reviewApi, parseCircleSettings, type CreatePreOrderInput, type MenuWithToppings, type Topping, type PublicStoreReviewList } from "@/lib/api";
 import { useVisitor } from "@/hooks/useVisitor";
+import { useSessionState } from "@/hooks/useSessionState";
 import { getCouponsForCircle, type StoredCoupon } from "@/lib/coupon-storage";
 import { cn } from "@/lib/utils";
 import {
@@ -263,12 +264,13 @@ function MenuPageContent() {
   const activeWristband = wristbandStatus?.wristband;
   const familyAllergies = parseJapaneseAllergens(wristbandStatus?.user.allergies);
 
-  const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
-  const [selectedCircleId, setSelectedCircleId] = useState<string | null>(
-    circleIdParam
-  );
-  const [cart, setCart] = useState<CartLine[]>([]);
-  const [selectedMenuCategory, setSelectedMenuCategory] = useState<string | null>(null);
+  // 2026-10-21: 来場者の店舗一覧へ戻った時に選択中のイベントと店舗を復元する。
+  const [selectedEventId, setSelectedEventId] = useSessionState<string | null>(`fesflow:visitor-menu:${eventNameParam ?? "browse"}:event`, null);
+  const circleSelectionKey = circleIdParam ?? (eventNameParam ? `${eventNameParam}:${circleNameParam ?? "event"}` : "browse");
+  const [selectedCircleId, setSelectedCircleId] = useSessionState<string | null>(`fesflow:visitor-menu-selection:${circleSelectionKey}`, circleIdParam);
+  const visitorOrderStateKey = `fesflow:visitor-menu:${selectedCircleId || circleIdParam || "browse"}`;
+  const [cart, setCart] = useSessionState<CartLine[]>(`${visitorOrderStateKey}:cart`, []);
+  const [selectedMenuCategory, setSelectedMenuCategory] = useSessionState<string | null>(`${visitorOrderStateKey}:category`, null);
   const [hydratedDraftKey, setHydratedDraftKey] = useState<string | null>(null);
   const [isQrOpen, setIsQrOpen] = useState(false);
   const [isReviewsOpen, setIsReviewsOpen] = useState(false);
@@ -291,7 +293,6 @@ function MenuPageContent() {
     setCouponsLoadedCircleId(null);
     setAppliedCoupons(selectedCircleId ? getCouponsForCircle(selectedCircleId) : []);
     setEnabledCouponSlugs(new Set());
-    setSelectedMenuCategory(null);
     // 2026-10-08: クーポンは localStorage から同期取得するため、対象サークル分の読込後に下書き保存を解放する。
     setCouponsLoadedCircleId(selectedCircleId);
   }, [selectedCircleId]);
@@ -487,6 +488,8 @@ function MenuPageContent() {
     refetchIntervalInBackground: false,
   });
   const eventEnded = isEventEnded(circleEvent);
+  const preOrderAcceptanceEnabled = parseCircleSettings(circleData?.settings).preOrderEnabled;
+  const preOrderAcceptanceDisabled = !isMobileOrderRoute && !!circleData && !preOrderAcceptanceEnabled;
   const orderEntryDisabled = eventEnded || isCircleEventLoading || isCircleEventError;
   const orderEntryDisabledLabel = eventEnded
     ? "開催終了"
@@ -807,9 +810,11 @@ function MenuPageContent() {
   });
 
   useEffect(() => {
+    const hasSavedDraft = draftIdentityRef.current?.key === draftKey && draftIdentityRef.current.updatedAt !== null;
     if (
       isMobileOrderRoute || !draftKey || hydratedDraftKey !== draftKey || !userId || !visitorLoaded ||
-      couponsLoadedCircleId !== selectedCircleId || isPreOrderEnabled()
+      couponsLoadedCircleId !== selectedCircleId || isPreOrderEnabled() ||
+      (!preOrderAcceptanceEnabled && !(cart.length === 0 && hasSavedDraft))
     ) return;
 
     if (suppressNextDraftSaveRef.current) {
@@ -828,6 +833,7 @@ function MenuPageContent() {
   }, [
     draftKey, hydratedDraftKey, userId, visitorLoaded, couponsLoadedCircleId,
     selectedCircleId, draftPayload, saveDraft, draftSaveRetry, isMobileOrderRoute,
+    preOrderAcceptanceEnabled, cart.length,
   ]);
 
   // 外部モッド用グローバルAPIの公開
@@ -1030,6 +1036,12 @@ function MenuPageContent() {
           </p>
         </section>
       )}
+      {preOrderAcceptanceDisabled && !orderEntryDisabled && (
+        <section className="border-heavy border-warning bg-warning/10 p-4" role="status" aria-live="polite">
+          <p className="text-sm font-black">事前注文の受付を停止しています</p>
+          <p className="mt-1 text-xs leading-relaxed text-foreground">メニューは確認できます。注文を受け付ける場合は、サークル設定の「注文受付」から事前注文を有効にしてください。</p>
+        </section>
+      )}
 
       {/* メニュー一覧。常設のクーポンセクションは置かず、各カードの中でトッピング選択の
           すぐ下に関係するクーポンを出す (2026-09-16、モーダル案は撤回してカード内に戻した)。 */}
@@ -1050,8 +1062,8 @@ function MenuPageContent() {
                 enabledCouponSlugs={enabledCouponSlugs}
                 onToggleCoupon={toggleCoupon}
                 onAdd={addLine}
-                orderingDisabled={orderEntryDisabled}
-                orderingDisabledLabel={orderEntryDisabledLabel}
+                orderingDisabled={orderEntryDisabled || preOrderAcceptanceDisabled}
+                orderingDisabledLabel={preOrderAcceptanceDisabled ? "事前注文は受付停止中" : orderEntryDisabledLabel}
               />
             ))}
           </div>

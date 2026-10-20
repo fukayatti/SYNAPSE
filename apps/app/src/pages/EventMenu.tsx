@@ -282,11 +282,16 @@ function EventMenuContent({
                     <PublicRatingSummary summary={reviewSummaryByCircle.get(circle.id)!} />
                   )}
                   <div className="mt-1 inline-flex flex-wrap items-center gap-1 text-[9px] font-black uppercase tracking-wider sm:text-[10px]">
-                    メニューを見る
+                    {parseCircleSettings(circle.settings).preOrderEnabled ? "事前注文" : "メニューを見る"}
                     <ArrowRight className="h-3 w-3 transition-transform group-hover:translate-x-1" />
                   </div>
                 </div>
                 </button>
+                {parseCircleSettings(circle.settings).preOrderEnabled && parseCircleSettings(circle.settings).mobileOrderEnabled && (
+                  <p className="border-t-thin border-border pt-1 text-center text-[9px] font-bold text-muted-foreground sm:text-[10px]">
+                    事前注文とモバイル注文から選べます
+                  </p>
+                )}
                 {parseCircleSettings(circle.settings).mobileOrderEnabled && (
                   <Link
                     to={`/visitor/order/${circle.id}`}
@@ -332,7 +337,6 @@ function EventMenuContent({
 
 function PublicRatingSummary({ summary }: { summary: VisitorReviewStoreSummary }) {
   const average = summary.averageRating;
-  const maxCount = Math.max(summary.reviewCount, 1);
 
   return (
     <div className="mt-2 space-y-1.5 border-t-thin border-border pt-2" role="group" aria-label={
@@ -342,37 +346,21 @@ function PublicRatingSummary({ summary }: { summary: VisitorReviewStoreSummary }
     }>
       <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5">
         <span className="text-sm font-black tabular-nums leading-none">{average == null ? "—" : average.toFixed(1)}</span>
-        <span className="inline-flex items-center" aria-hidden="true">
-          {Array.from({ length: 5 }, (_, index) => (
-            <Star key={index} className={`h-2.5 w-2.5 ${average != null && index < Math.round(average) ? "fill-primary text-primary" : "text-muted-foreground"}`} />
-          ))}
+        <span className="relative inline-flex items-center" aria-hidden="true">
+          <span className="inline-flex text-muted-foreground">
+            {Array.from({ length: 5 }, (_, index) => <Star key={index} className="h-3 w-3 fill-current" />)}
+          </span>
+          {average != null && (
+            <span className="absolute inset-y-0 left-0 overflow-hidden text-primary" style={{ width: `${Math.max(0, Math.min(100, (average / 5) * 100))}%` }}>
+              <span className="inline-flex w-max">
+                {Array.from({ length: 5 }, (_, index) => <Star key={index} className="h-3 w-3 shrink-0 fill-current" />)}
+              </span>
+            </span>
+          )}
         </span>
         <span className="text-[9px] text-muted-foreground">{summary.reviewCount}件</span>
       </div>
-      {summary.reviewCount > 0 ? (
-        <div className="space-y-0.5" aria-label="星ごとの評価件数">
-          {[5, 4, 3, 2, 1].map((star) => {
-            const count = summary.ratingDistribution[star - 1] ?? 0;
-            return (
-              <div
-                key={star}
-                className="grid grid-cols-[1.5rem_minmax(0,1fr)_1rem] items-center gap-1 text-[8px] leading-none text-muted-foreground"
-                role="meter"
-                aria-label={`${star}つ星`}
-                aria-valuemin={0}
-                aria-valuemax={maxCount}
-                aria-valuenow={count}
-              >
-                <span className="inline-flex items-center gap-0.5">{star}<Star className="h-2 w-2 fill-current" aria-hidden="true" /></span>
-                <span className="h-1.5 overflow-hidden bg-muted">
-                  <span className="block h-full bg-primary" style={{ width: `${Math.min(100, (count / maxCount) * 100)}%` }} />
-                </span>
-                <span className="text-right tabular-nums">{count}</span>
-              </div>
-            );
-          })}
-        </div>
-      ) : (
+      {summary.reviewCount === 0 && (
         <p className="text-[9px] leading-snug text-muted-foreground">レビューはまだありません</p>
       )}
     </div>

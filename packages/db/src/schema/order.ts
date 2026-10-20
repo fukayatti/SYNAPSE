@@ -73,6 +73,8 @@ export const order = sqliteTable(
       .default(false)
       .notNull(),
     completedAt: integer("completed_at", { mode: "timestamp_ms" }),
+    // 2026-10-21: 厨房の「完成」と来場者への実際の受け渡しを分けて記録する。
+    receivedAt: integer("received_at", { mode: "timestamp_ms" }),
     estimatedTime: integer("estimated_time"), // 完成までの予想時間（分）
     cashierId: text("cashier_id"),
     // 支払い方法 (2026-07-12): レジで選択された方法。集計・日次締めに使う。

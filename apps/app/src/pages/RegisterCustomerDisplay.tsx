@@ -5,6 +5,7 @@ import { registerDisplaySnapshotSchema, type RegisterDisplaySnapshot } from "@fe
 import { orderApi } from "@/lib/api";
 import { ApiError } from "@/lib/api-error";
 import { REGISTER_DISPLAY_CHANNEL } from "@/features/orders/register-display-sync";
+import { displayOrderNumber } from "@/lib/order-number";
 
 function yen(value: number) {
   return `¥${value.toLocaleString("ja-JP")}`;
@@ -127,7 +128,7 @@ export default function RegisterCustomerDisplay() {
         {snapshot?.displayState === "submitted" && (
           <section aria-label="注文番号" className="mb-4 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 border-thick border-foreground bg-success px-4 py-3 text-white sm:mb-6 sm:px-6 sm:py-4">
             <span className="font-mono text-sm font-bold uppercase sm:text-lg">注文番号</span>
-            <strong className="break-all font-mono text-2xl font-black tabular-nums sm:text-4xl">{snapshot.orderNumber ?? "確認中"}</strong>
+            <strong className="break-all font-mono text-2xl font-black tabular-nums sm:text-4xl">{snapshot.orderNumber ? displayOrderNumber(snapshot.orderNumber) : "確認中"}</strong>
           </section>
         )}
         <section aria-label="カート内の商品" className="min-h-0 flex-1 overflow-y-auto">

@@ -77,9 +77,11 @@ orderRoutes.get("/projector", async (c) => {
   const rows = await c.get("db").select({
     orderNumber: order.orderNumber,
     status: order.status,
+    receivedAt: order.receivedAt,
+    createdAt: order.createdAt,
   }).from(order).where(and(
     eq(order.circleId, circleId),
-    inArray(order.status, ["pending", "preparing", "ready"]),
+    inArray(order.status, ["pending", "preparing", "ready", "completed"]),
   )).orderBy(order.createdAt);
   return c.json(rows);
 });
@@ -200,9 +202,13 @@ orderRoutes.get("/", async (c) => {
   const query = db
     .select()
     .from(order)
-    .where(status
-      ? and(eq(order.circleId, circleId), eq(order.status, status))
-      : eq(order.circleId, circleId))
+    .where(status === "received"
+      ? and(eq(order.circleId, circleId), inArray(order.status, ["ready", "completed"]), isNotNull(order.receivedAt))
+      : status === "pickup"
+        ? and(eq(order.circleId, circleId), inArray(order.status, ["ready", "completed"]), isNull(order.receivedAt))
+        : status
+          ? and(eq(order.circleId, circleId), eq(order.status, status))
+          : eq(order.circleId, circleId))
     .orderBy(desc(order.createdAt));
 
   const orders = await query;
@@ -337,6 +343,7 @@ orderRoutes.get("/user/:code", async (c) => {
     circleName: circles.find((ci) => ci.id === o.circleId)?.name ?? null,
     createdAt: o.createdAt,
     completedAt: o.completedAt,
+    receivedAt: o.receivedAt,
     estimatedTime: o.estimatedTime,
     items: items
       .filter((i) => i.orderId === o.id)
@@ -952,6 +959,36 @@ orderRoutes.post("/:id/complete", async (c) => {
     }).catch(() => console.warn("order_completion_notification_failed")));
   }
 
+  return c.json({ success: true });
+});
+
+// 2026-10-21: 完成と受け渡しを別々に残し、受け取り待ちの注文だけを厨房で確定できるようにする。
+orderRoutes.post("/:id/received", async (c) => {
+  const db = c.get("db");
+  const id = c.req.param("id");
+  const rows = await db.select({
+    id: order.id,
+    circleId: order.circleId,
+    status: order.status,
+    receivedAt: order.receivedAt,
+  }).from(order).where(eq(order.id, id)).limit(1);
+  const target = rows[0];
+  if (!target) apiError("NOT_FOUND", "注文が見つかりません");
+  if (!(await hasPermission(c, target.circleId, "order:write"))) apiError("FORBIDDEN", "権限がありません");
+  if (target.receivedAt) return c.json({ success: true });
+  if (target.status !== "ready" && target.status !== "completed") apiError("CONFLICT", "完成した注文だけ受け渡し済みにできます");
+
+  const updated = await db.update(order).set({ receivedAt: new Date() }).where(and(
+    eq(order.id, id),
+    inArray(order.status, ["ready", "completed"]),
+    isNull(order.receivedAt),
+  )).returning({ id: order.id });
+  if (updated.length === 0) {
+    const latest = await db.select({ status: order.status, receivedAt: order.receivedAt }).from(order).where(eq(order.id, id)).limit(1);
+    if (!latest[0] || (latest[0].status !== "ready" && latest[0].status !== "completed") || !latest[0].receivedAt) {
+      apiError("CONFLICT", "注文の状態が更新されました。最新状態を読み直してください");
+    }
+  }
   return c.json({ success: true });
 });
 

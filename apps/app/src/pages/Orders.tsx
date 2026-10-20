@@ -10,6 +10,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { ArrowLeft, Clock, CheckCircle2, Receipt, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { getMobileOrderOutboxEntries, retryMobileOrder, type MobileOrderOutboxEntry } from "@/features/orders/mobile-order-outbox";
+import { displayOrderNumber } from "@/lib/order-number";
 
 type MobileOrderReceipt = {
   orderId: string;
@@ -34,10 +35,11 @@ type MobileOrderReceipt = {
  */
 
 // 注文ステータス → 表示バッジ。order.status は pending/preparing/ready/completed/cancelled。
-function orderStatusBadge(status: string) {
+function orderStatusBadge(status: string, receivedAt: string | null) {
+  if (receivedAt) return { cls: "bg-success text-primary-foreground", icon: CheckCircle2, label: "受け取り済み" };
   switch (status) {
     case "completed":
-      return { cls: "bg-success text-primary-foreground", icon: CheckCircle2, label: "受取完了" };
+      return { cls: "bg-info text-primary-foreground", icon: Clock, label: "受け取り待ち" };
     case "ready":
       return { cls: "bg-info text-primary-foreground", icon: CheckCircle2, label: "受取可能" };
     case "preparing":
@@ -202,7 +204,7 @@ export default function OrdersPage() {
           <div className="flex flex-wrap items-end justify-between gap-4 border-y-thick border-border py-3">
             <div>
               <p className="text-xs font-bold">呼出番号</p>
-              <p className="font-headline text-4xl leading-none tabular-nums sm:text-5xl">#{receipt.orderNumber}</p>
+              <p className="font-headline text-4xl leading-none tabular-nums sm:text-5xl">#{displayOrderNumber(receipt.orderNumber)}</p>
               <p className="mt-2 text-sm font-bold">{receipt.circleName}</p>
             </div>
             <p className="text-2xl font-black tabular-nums">¥{receipt.totalPrice.toLocaleString()}</p>
@@ -252,7 +254,7 @@ export default function OrdersPage() {
                   <p className="text-[11px] text-muted-foreground">{new Date(order.createdAt).toLocaleString("ja-JP")}</p>
                 </div>
                 <span className={`border-thin border-border px-2 py-1 text-xs font-black ${order.state === "attention" ? "bg-destructive text-destructive-foreground" : order.state === "confirmed" ? "bg-success text-success-foreground" : "bg-warning text-foreground"}`}>
-                  {order.state === "attention" ? "受付状態を確認してください" : order.state === "confirmed" ? `受付済み · 呼出番号 ${order.result?.orderNumber ?? "確認中"}` : "受付確認待ち"}
+                  {order.state === "attention" ? "受付状態を確認してください" : order.state === "confirmed" ? `受付済み · 呼出番号 ${order.result?.orderNumber ? displayOrderNumber(order.result.orderNumber) : "確認中"}` : "受付確認待ち"}
                 </span>
               </div>
               <ul className="space-y-1 text-xs">
@@ -351,7 +353,7 @@ export default function OrdersPage() {
           ) : (
             <div className="space-y-4">
               {displayedHistory.map((o) => {
-                const badge = orderStatusBadge(o.status);
+                const badge = orderStatusBadge(o.status, o.receivedAt);
                 const Icon = badge.icon;
                 return (
                   <div
@@ -370,7 +372,7 @@ export default function OrdersPage() {
                       <div className="flex flex-wrap items-end justify-between gap-3 sm:justify-end">
                         <div>
                           <span className="block text-[10px] font-bold uppercase">呼出番号</span>
-                          <span className="block font-headline text-3xl leading-none tabular-nums">#{o.orderNumber}</span>
+                          <span className="block font-headline text-3xl leading-none tabular-nums">#{displayOrderNumber(o.orderNumber)}</span>
                         </div>
                         <span className="text-xl font-black">
                           ¥{o.totalPrice.toLocaleString()}

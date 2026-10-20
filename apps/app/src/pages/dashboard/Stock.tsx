@@ -16,6 +16,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { toast } from "sonner";
 import { AlertTriangle, Package, Search, Plus, Minus, XCircle, RotateCcw, Coins } from "lucide-react";
 import { resolveAssetUrl } from "@/lib/asset-url";
+import { useSessionState } from "@/hooks/useSessionState";
 
 const DEFAULT_LOW = 10;
 
@@ -81,8 +82,9 @@ function StockManagementContent() {
   const circleName = authCircleName ?? "サークルダッシュボード";
   const queryClient = useQueryClient();
 
-  const [search, setSearch] = useState("");
-  const [onlyIssues, setOnlyIssues] = useState(false);
+  // 2026-10-21: 在庫画面を離れても検索と要対応フィルターを保持する。
+  const [search, setSearch] = useSessionState<string>(`fesflow:stock-search:${circleId}`, "");
+  const [onlyIssues, setOnlyIssues] = useSessionState<boolean>(`fesflow:stock-issues:${circleId}`, false);
   // 僅少しきい値。サークル設定は circle:write が必要でスタッフが変更できないため、端末(localStorage)に保存する。
   const [lowThreshold, setLowThreshold] = useState<number>(DEFAULT_LOW);
 
