@@ -10,13 +10,14 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAuth } from "@/hooks/useCircleAuth";
 import { circleApi, parseCircleSettings, type OrderNumberDisplayMedia, type OrderNumberDisplaySettings } from "@/lib/api";
-import { deleteLocalDisplayMedia, saveLocalDisplayMedia } from "@/lib/local-display-media";
+import { deleteLocalDisplayMedia, estimateAvailableLocalStorageBytes, saveLocalDisplayMedia } from "@/lib/local-display-media";
 import { toast } from "sonner";
 
 const DEFAULT_SETTINGS: OrderNumberDisplaySettings = {
   showPreparingNumbers: true,
   showPickupNumbers: true,
   overflowPriority: "latest",
+  mediaPercent: 35,
   media: [],
 };
 
@@ -77,8 +78,9 @@ function OrderDisplayContent() {
       const video = ["mp4", "webm", "mov"].includes(ext);
       const image = ["jpg", "jpeg", "png", "gif", "webp"].includes(ext);
       if (!video && !image) { toast.error(file.name + ": 対応形式の画像・動画を選んでください"); return false; }
-      if (file.size > (video ? 30 : 10) * 1024 * 1024) {
-        toast.error(file.name + ": " + (video ? "動画は30MB" : "画像は10MB") + "以下にしてください");
+      // 2026-10-21: ファイルは端末内にだけ保存するため、小さな通信向け容量制限を置かず100GBを上限とする。
+      if (file.size > 100 * 1024 * 1024 * 1024) {
+        toast.error(file.name + ": 1ファイル100GB以下にしてください");
         return false;
       }
       return true;
@@ -91,10 +93,15 @@ function OrderDisplayContent() {
     setStoringMedia(true);
     const added: OrderNumberDisplayMedia[] = [];
     try {
+      let availableBytes = await estimateAvailableLocalStorageBytes();
       for (const file of accepted) {
+        if (availableBytes !== null && file.size > availableBytes) {
+          throw new Error(`${file.name}: この端末のブラウザーに空き容量が足りません。保存済みメディアを削除するか、小さいファイルを選んでください`);
+        }
         const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
         const id = crypto.randomUUID();
         await saveLocalDisplayMedia(id, file);
+        if (availableBytes !== null) availableBytes = Math.max(0, availableBytes - file.size);
         added.push({
           id,
           name: file.name,
@@ -173,14 +180,33 @@ function OrderDisplayContent() {
 
           <Card className="rounded-none border-thick border-border shadow-none">
             <CardHeader className="flex flex-col gap-3 border-b-thick border-border sm:flex-row sm:items-center sm:justify-between">
-              <div><CardTitle className="flex items-center gap-2 text-sm font-black"><Film className="h-4 w-4" />表示メディア</CardTitle><CardDescription className="mt-1 text-xs">番号表示画面の右側で、選んだメディアを順番に繰り返し再生します。</CardDescription></div>
+              <div><CardTitle className="flex items-center gap-2 text-sm font-black"><Film className="h-4 w-4" />表示メディア</CardTitle><CardDescription className="mt-1 text-xs">番号表示画面で、選んだメディアを順番に繰り返し再生します。</CardDescription></div>
               <label className="inline-flex min-h-11 cursor-pointer items-center justify-center border-thick border-border bg-primary px-4 text-xs font-black text-primary-foreground hover:bg-background hover:text-foreground">
                 <FolderOpen className="mr-2 h-4 w-4" />{storingMedia ? "端末に追加中…" : "画像・動画を選ぶ"}
                 <input type="file" multiple accept="image/jpeg,image/png,image/gif,image/webp,video/mp4,video/webm,video/quicktime" className="sr-only" disabled={storingMedia || settings.media.length >= 20} onChange={(event) => void addMedia(event)} />
               </label>
             </CardHeader>
             <CardContent className="space-y-3 pt-4">
-              <p className="text-[10px] text-muted-foreground">ファイルはこの端末のブラウザー内に保存し、サーバーへ送信しません。再生する端末ごとに選択してください。画像は2〜60秒、動画は再生終了後に次へ進みます。JPG、PNG、GIF、WebP、MP4、WebM、MOV。画像10MB・動画30MBまで。</p>
+              <p className="text-[10px] text-muted-foreground">ファイルはこの端末のブラウザー内に保存し、サーバーへ送信しません。再生する端末ごとに選択してください。1ファイル最大100GBですが、実際に保存できる量はOSとブラウザーがこの端末に割り当てた空き容量までです。画像は2〜60秒、動画は再生終了後に次へ進みます。JPG、PNG、GIF、WebP、MP4、WebM、MOV。</p>
+              <fieldset className="space-y-2 border-thin border-border p-3" disabled={settings.media.length === 0}>
+                <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+                  <legend className="text-xs font-black">番号とメディアの表示比率</legend>
+                  <span className="text-[10px] font-bold tabular-nums">番号 {100 - settings.mediaPercent}% · メディア {settings.mediaPercent}%</span>
+                </div>
+                <label htmlFor="order-display-media-percent" className="sr-only">メディアに使う画面の割合</label>
+                <input
+                  id="order-display-media-percent"
+                  type="range"
+                  min={20}
+                  max={80}
+                  step={5}
+                  value={settings.mediaPercent}
+                  onChange={(event) => setSettings((current) => ({ ...current, mediaPercent: Number(event.target.value) }))}
+                  className="w-full accent-primary disabled:opacity-50"
+                  aria-valuetext={`メディア${settings.mediaPercent}パーセント、番号${100 - settings.mediaPercent}パーセント`}
+                />
+                <p className="text-[10px] leading-snug text-muted-foreground">表示端末とメディアの縦横比を比べ、横並びまたは上下に自動調整します。メディア未登録時は追加後に調整できます。</p>
+              </fieldset>
               {settings.media.length === 0 ? (
                 <div className="flex min-h-36 flex-col items-center justify-center gap-2 border-thick border-dashed border-border p-4 text-center text-xs text-muted-foreground"><ImageIcon className="h-6 w-6" />表示する画像・動画はまだありません</div>
               ) : (

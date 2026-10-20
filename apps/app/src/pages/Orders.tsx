@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { preOrderApi, orderApi, circleApi, type VisitorOrderHistory } from "@/lib/api";
 import { useVisitor } from "@/hooks/useVisitor";
 import { ModSandbox } from "@/components/ModSandbox";
@@ -11,6 +11,7 @@ import { ArrowLeft, Clock, CheckCircle2, Receipt, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { getMobileOrderOutboxEntries, retryMobileOrder, type MobileOrderOutboxEntry } from "@/features/orders/mobile-order-outbox";
 import { displayOrderNumber } from "@/lib/order-number";
+import { toast } from "sonner";
 
 type MobileOrderReceipt = {
   orderId: string;
@@ -57,6 +58,7 @@ export default function OrdersPage() {
   const receipt = (location.state as { mobileOrderReceipt?: MobileOrderReceipt } | null)?.mobileOrderReceipt;
   const { userId: visitorUserId, isLoaded } = useVisitor();
   const userId = visitorUserId ?? "";
+  const queryClient = useQueryClient();
 
   const [modHooks, setModHooks] = useState<{ id: string; hook: any }[]>([]);
 
@@ -71,6 +73,26 @@ export default function OrdersPage() {
     enabled: isLoaded && !!userId,
     networkMode: "always",
     retry: false,
+  });
+
+  const markReceivedMutation = useMutation({
+    mutationFn: ({ orderId }: { orderId: string }) => orderApi.markReceivedByVisitor(userId, orderId),
+    // 2026-10-21: 来場者の受け取り操作も先に履歴へ反映し、通信失敗時は元の状態へ戻す。
+    onMutate: async ({ orderId }) => {
+      const queryKey = ["myOrders", userId];
+      await queryClient.cancelQueries({ queryKey });
+      const previousOrders = queryClient.getQueryData<VisitorOrderHistory[]>(queryKey);
+      queryClient.setQueryData<VisitorOrderHistory[]>(queryKey, (current) => current?.map((order) =>
+        order.id === orderId ? { ...order, receivedAt: new Date().toISOString() } : order,
+      ));
+      return { previousOrders };
+    },
+    onSuccess: () => toast.success("受け取り済みにしました"),
+    onError: (error: any, _variables, context) => {
+      if (context?.previousOrders) queryClient.setQueryData(["myOrders", userId], context.previousOrders);
+      toast.error(error?.message || "受け取り済みにできませんでした");
+    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ["myOrders", userId] }),
   });
 
   useEffect(() => {
@@ -379,6 +401,19 @@ export default function OrdersPage() {
                         </span>
                       </div>
                     </div>
+                    {(o.status === "ready" || o.status === "completed") && !o.receivedAt && (
+                      <div className="flex justify-end">
+                        <Button
+                          type="button"
+                          onClick={() => markReceivedMutation.mutate({ orderId: o.id })}
+                          disabled={markReceivedMutation.isPending && markReceivedMutation.variables?.orderId === o.id}
+                          className="min-h-11 border-thick border-border"
+                        >
+                          <CheckCircle2 className="mr-2 h-4 w-4" />
+                          {markReceivedMutation.isPending && markReceivedMutation.variables?.orderId === o.id ? "更新中…" : "受け取り済みにする"}
+                        </Button>
+                      </div>
+                    )}
 
                     <div className="text-sm font-bold flex items-center gap-2">
                       <span className="text-muted-foreground font-normal">店舗:</span>

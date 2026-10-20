@@ -84,7 +84,7 @@ export function CircleCreateWizard({
       acceptedPayments,
       storeAreaId: storeAreaId || null,
       reviewPublication: { publishReviews: false, showAverageRating: false, showStars: false, showComments: false },
-      orderNumberDisplay: { showPreparingNumbers: true, showPickupNumbers: true, overflowPriority: "latest", media: [] },
+      orderNumberDisplay: { showPreparingNumbers: true, showPickupNumbers: true, overflowPriority: "latest", mediaPercent: 35, media: [] },
     };
     try {
       const result = await circleApi.create({

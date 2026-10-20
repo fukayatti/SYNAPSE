@@ -43,9 +43,24 @@ export async function saveLocalDisplayMedia(id: string, file: File): Promise<voi
     const transaction = database.transaction(MEDIA_STORE, "readwrite");
     transaction.objectStore(MEDIA_STORE).put({ id, blob: file } satisfies LocalDisplayMediaRecord);
     transaction.oncomplete = () => resolve();
-    transaction.onerror = () => reject(transaction.error ?? new Error("端末内メディアを保存できませんでした"));
-    transaction.onabort = () => reject(transaction.error ?? new Error("端末内メディアの保存を中止しました"));
+    const getError = (fallback: string) => transaction.error?.name === "QuotaExceededError"
+      ? new Error("ブラウザーが許可する端末保存容量を超えました。空き容量を作るか、小さいファイルを選んでください")
+      : transaction.error ?? new Error(fallback);
+    transaction.onerror = () => reject(getError("端末内メディアを保存できませんでした"));
+    transaction.onabort = () => reject(getError("端末内メディアの保存を中止しました"));
   });
+}
+
+// 2026-10-21: 端末ごとのブラウザー保存枠を事前表示に使い、固定の小さな動画上限を避ける。
+export async function estimateAvailableLocalStorageBytes(): Promise<number | null> {
+  if (typeof navigator === "undefined" || !navigator.storage?.estimate) return null;
+  try {
+    const { quota, usage } = await navigator.storage.estimate();
+    if (typeof quota !== "number" || typeof usage !== "number") return null;
+    return Math.max(0, quota - usage);
+  } catch {
+    return null;
+  }
 }
 
 export async function getLocalDisplayMedia(id: string): Promise<Blob | null> {

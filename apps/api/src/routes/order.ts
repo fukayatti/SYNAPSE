@@ -992,6 +992,36 @@ orderRoutes.post("/:id/received", async (c) => {
   return c.json({ success: true });
 });
 
+// 2026-10-21: 来場者が自分の受け取り待ち注文だけを確定できるよう、匿名ベアラーIDと注文所有者を照合する。
+orderRoutes.post("/user/:code/:id/received", async (c) => {
+  const db = c.get("db");
+  const userId = c.req.param("code");
+  const id = c.req.param("id");
+  const rows = await db.select({
+    id: order.id,
+    userId: order.userId,
+    status: order.status,
+    receivedAt: order.receivedAt,
+  }).from(order).where(and(eq(order.id, id), eq(order.userId, userId))).limit(1);
+  const target = rows[0];
+  if (!target) apiError("NOT_FOUND", "注文が見つかりません");
+  if (target.receivedAt) return c.json({ success: true });
+  if (target.status !== "ready" && target.status !== "completed") apiError("CONFLICT", "受け取り可能な注文だけ確定できます");
+
+  const updated = await db.update(order).set({ receivedAt: new Date() }).where(and(
+    eq(order.id, id),
+    eq(order.userId, userId),
+    inArray(order.status, ["ready", "completed"]),
+    isNull(order.receivedAt),
+  )).returning({ id: order.id });
+  if (updated.length === 0) {
+    const latest = await db.select({ status: order.status, receivedAt: order.receivedAt }).from(order)
+      .where(and(eq(order.id, id), eq(order.userId, userId))).limit(1);
+    if (!latest[0] || !latest[0].receivedAt) apiError("CONFLICT", "注文の状態が更新されました。最新状態を読み直してください");
+  }
+  return c.json({ success: true });
+});
+
 // 予想待ち時間設定
 orderRoutes.patch(
   "/:id/estimated-time",

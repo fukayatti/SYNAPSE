@@ -136,10 +136,13 @@ function AdminLayout() {
 	}, []);
 
 	return (
-		<div className="grid grid-cols-1 grid-rows-[auto_auto_1fr] min-h-svh">
-			<ConnectionStatusBanner />
-			<Header />
-			<SystemBanner />
+		<div className="grid grid-cols-1 grid-rows-[auto_1fr] min-h-svh">
+			{/* 2026-10-21: 接続/運営バナーを含む上部全体を固定し、高さ変化で本文や左メニューがずれないようにする。 */}
+			<div data-app-chrome className="sticky top-0 z-50">
+				<ConnectionStatusBanner />
+				<Header />
+				<SystemBanner />
+			</div>
 			{/* 2026-09-27: Grid item の自動最小幅で子テーブルが画面全体を押し広げないよう縮小を許可する。 */}
       <main className="min-w-0 w-full">
         <Suspense fallback={<RoutePageLoading />}>

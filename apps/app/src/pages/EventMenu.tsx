@@ -346,17 +346,20 @@ function PublicRatingSummary({ summary }: { summary: VisitorReviewStoreSummary }
     }>
       <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5">
         <span className="text-sm font-black tabular-nums leading-none">{average == null ? "—" : average.toFixed(1)}</span>
-        <span className="relative inline-flex items-center" aria-hidden="true">
-          <span className="inline-flex text-muted-foreground">
-            {Array.from({ length: 5 }, (_, index) => <Star key={index} className="h-3 w-3 fill-current" />)}
-          </span>
-          {average != null && (
-            <span className="absolute inset-y-0 left-0 overflow-hidden text-primary" style={{ width: `${Math.max(0, Math.min(100, (average / 5) * 100))}%` }}>
-              <span className="inline-flex w-max">
-                {Array.from({ length: 5 }, (_, index) => <Star key={index} className="h-3 w-3 shrink-0 fill-current" />)}
+        <span className="inline-flex items-center gap-0.5" aria-hidden="true">
+          {Array.from({ length: 5 }, (_, index) => {
+            const fill = average == null ? 0 : Math.max(0, Math.min(1, average - index));
+            return (
+              <span key={index} className="relative inline-flex h-3.5 w-3.5 shrink-0 items-center">
+                <Star className="h-3.5 w-3.5 fill-current text-muted-foreground/30" />
+                {fill > 0 && (
+                  <span className="absolute inset-y-0 left-0 overflow-hidden" style={{ width: `${fill * 100}%` }}>
+                    <Star className="h-3.5 w-3.5 max-w-none shrink-0 fill-current text-primary" />
+                  </span>
+                )}
               </span>
-            </span>
-          )}
+            );
+          })}
         </span>
         <span className="text-[9px] text-muted-foreground">{summary.reviewCount}件</span>
       </div>

@@ -377,6 +377,11 @@ export const orderApi = {
     fetchApi<{ success: boolean }>(`/api/orders/${id}/received`, {
       method: "POST",
     }),
+  // 2026-10-21: 来場者用は本人のeventUser IDを送り、サーバーで注文所有者を照合する。
+  markReceivedByVisitor: (code: string, id: string) =>
+    fetchApi<{ success: boolean }>(`/api/orders/user/${encodeURIComponent(code)}/${encodeURIComponent(id)}/received`, {
+      method: "POST",
+    }),
   setEstimatedTime: (id: string, estimatedMinutes: number) =>
     fetchApi<{ success: boolean }>(`/api/orders/${id}/estimated-time`, {
       method: "PATCH",
@@ -1113,6 +1118,8 @@ export interface OrderNumberDisplaySettings {
   showPreparingNumbers: boolean;
   showPickupNumbers: boolean;
   overflowPriority: "latest" | "oldest";
+  // 2026-10-21: 番号表示とローカルメディアに割り当てる画面比率を共有設定へ保存する。
+  mediaPercent: number;
   media: OrderNumberDisplayMedia[];
 }
 
@@ -1157,6 +1164,7 @@ export function parseCircleSettings(raw?: string | null): CircleSettings {
       showPreparingNumbers: true,
       showPickupNumbers: true,
       overflowPriority: "latest",
+      mediaPercent: 35,
       media: [],
     },
   };
@@ -1214,6 +1222,9 @@ export function parseCircleSettings(raw?: string | null): CircleSettings {
           showPreparingNumbers: showPreparingNumbers || !showPickupNumbers,
           showPickupNumbers,
           overflowPriority: rawDisplay?.overflowPriority === "oldest" ? "oldest" as const : "latest" as const,
+          mediaPercent: typeof rawDisplay?.mediaPercent === "number" && Number.isFinite(rawDisplay.mediaPercent)
+            ? Math.max(20, Math.min(80, Math.round(rawDisplay.mediaPercent / 5) * 5))
+            : 35,
           media,
         };
       })(),

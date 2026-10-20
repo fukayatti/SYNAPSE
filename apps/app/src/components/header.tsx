@@ -757,7 +757,7 @@ export default function Header() {
   );
 
   return (
-    <header data-app-header className="sticky top-0 z-50 bg-background border-b-thick border-border pt-[env(safe-area-inset-top)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] text-foreground font-mono">
+    <header data-app-header className="relative bg-background border-b-thick border-border pt-[env(safe-area-inset-top)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] text-foreground font-mono">
       {/* 2026-10-21: モバイルナビの背後を暗くするスクリーン面は header の stacking context 外へ置く。 */}
       {mobileNavOpen && createPortal(
         <div

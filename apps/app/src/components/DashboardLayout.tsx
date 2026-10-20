@@ -165,16 +165,17 @@ export default function DashboardLayout({
   });
   const circleSettings = parseCircleSettings(circle?.settings);
 
-  // 2026-10-21: 左メニューだけをヘッダー下へ固定し、長いメニューは左側だけでスクロールさせる。
+  // 2026-10-21: 上部バナーを含む固定領域の高さを測り、左メニューがヘッダーへ重ならないよう追従する。
   useEffect(() => {
-    const header = document.querySelector<HTMLElement>("[data-app-header]");
-    if (!header) return;
+    const chrome = document.querySelector<HTMLElement>("[data-app-chrome]")
+      ?? document.querySelector<HTMLElement>("[data-app-header]");
+    if (!chrome) return;
     const updateHeaderHeight = () => {
-      document.documentElement.style.setProperty("--app-header-height", `${header.getBoundingClientRect().height}px`);
+      document.documentElement.style.setProperty("--app-chrome-height", `${chrome.getBoundingClientRect().height}px`);
     };
     updateHeaderHeight();
     const observer = new ResizeObserver(updateHeaderHeight);
-    observer.observe(header);
+    observer.observe(chrome);
     return () => observer.disconnect();
   }, []);
 
@@ -496,7 +497,7 @@ export default function DashboardLayout({
         {/* 2026-10-21: 長いサイドメニューはヘッダー下に固定し、右のページとは独立してスクロールさせる。 */}
         <aside
           ref={sidebarScrollRef}
-          className="sticky top-[calc(var(--app-header-height,4rem)+1rem)] hidden w-full shrink-0 overflow-y-auto overscroll-contain border-thick border-border bg-background p-2 pb-5 shadow-none md:mb-6 md:block md:max-h-[calc(100dvh-var(--app-header-height,4rem)-2rem)] md:w-64 md:self-start"
+          className="sticky top-[calc(var(--app-chrome-height,4rem)+1rem)] hidden w-full shrink-0 overflow-y-auto overscroll-contain border-thick border-border bg-background p-2 pb-5 shadow-none md:mb-6 md:block md:max-h-[calc(100dvh-var(--app-chrome-height,4rem)-2rem)] md:w-64 md:self-start"
         >
           <nav className="flex md:flex-col gap-1">
             {renderMenuGroups(false)}

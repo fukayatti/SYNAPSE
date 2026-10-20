@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/useCircleAuth";
 import { circleApi, orderApi, parseCircleSettings, type OrderNumberDisplayMedia, type ProjectorOrder } from "@/lib/api";
@@ -46,12 +46,13 @@ function NumberColumn({
   );
 }
 
-function DisplayMedia({ media }: { media: OrderNumberDisplayMedia[] }) {
+function DisplayMedia({ media, onAspectRatioChange }: { media: OrderNumberDisplayMedia[]; onAspectRatioChange: (ratio: number) => void }) {
   const [index, setIndex] = useState(0);
   const [mediaUrl, setMediaUrl] = useState<string | null>(null);
   const [mediaMissing, setMediaMissing] = useState(false);
   const current = media[index];
   useEffect(() => setIndex(0), [media]);
+  useEffect(() => onAspectRatioChange(16 / 9), [current?.id, onAspectRatioChange]);
   useEffect(() => {
     let active = true;
     let objectUrl: string | null = null;
@@ -90,9 +91,15 @@ function DisplayMedia({ media }: { media: OrderNumberDisplayMedia[] }) {
           </p>
         ) : current.kind === "video" ? (
           // 2026-10-21: 動画が1本だけの設定でも再生終了後にループする。
-          <video key={current.id} src={mediaUrl} autoPlay muted playsInline loop={media.length === 1} onEnded={next} onError={() => setMediaMissing(true)} className="h-full w-full object-contain" aria-label={current.name} />
+          <video key={current.id} src={mediaUrl} autoPlay muted playsInline loop={media.length === 1} onLoadedMetadata={(event) => {
+            const { videoWidth, videoHeight } = event.currentTarget;
+            if (videoWidth > 0 && videoHeight > 0) onAspectRatioChange(videoWidth / videoHeight);
+          }} onEnded={next} onError={() => setMediaMissing(true)} className="h-full w-full object-contain" aria-label={current.name} />
         ) : (
-          <img src={mediaUrl} alt={current.name} onError={() => setMediaMissing(true)} className="h-full w-full object-contain" />
+          <img src={mediaUrl} alt={current.name} onLoad={(event) => {
+            const { naturalWidth, naturalHeight } = event.currentTarget;
+            if (naturalWidth > 0 && naturalHeight > 0) onAspectRatioChange(naturalWidth / naturalHeight);
+          }} onError={() => setMediaMissing(true)} className="h-full w-full object-contain" />
         )}
       </div>
       <p className="mt-2 truncate text-center font-mono text-[10px] font-bold sm:text-xs">{current.name}</p>
@@ -105,6 +112,9 @@ export default function OrderNumberDisplay() {
   const circleId = authCircleId ?? "";
   const [isOnline, setIsOnline] = useState(() => navigator.onLine);
   const [clock, setClock] = useState(() => new Date());
+  const displayAreaRef = useRef<HTMLDivElement>(null);
+  const [displayAreaSize, setDisplayAreaSize] = useState({ width: 0, height: 0 });
+  const [mediaAspectRatio, setMediaAspectRatio] = useState(16 / 9);
   const circleQuery = useQuery({
     queryKey: ["circle", circleId],
     queryFn: () => circleApi.get(circleId),
@@ -114,6 +124,9 @@ export default function OrderNumberDisplay() {
     () => parseCircleSettings(circleQuery.data?.settings).orderNumberDisplay,
     [circleQuery.data?.settings],
   );
+  const updateMediaAspectRatio = useCallback((ratio: number) => {
+    if (Number.isFinite(ratio) && ratio > 0) setMediaAspectRatio(ratio);
+  }, []);
   const ordersQuery = useQuery({
     queryKey: ["projector-orders", circleId],
     queryFn: () => orderApi.projector(circleId),
@@ -137,7 +150,23 @@ export default function OrderNumberDisplay() {
     };
   }, []);
 
+  // 2026-10-21: 実際の表示枠と再生中メディアの比率を測り、投影画面に合う配置を選ぶ。
+  useEffect(() => {
+    const element = displayAreaRef.current;
+    if (!element) return;
+    const updateSize = () => {
+      const { width, height } = element.getBoundingClientRect();
+      setDisplayAreaSize((current) => current.width === width && current.height === height ? current : { width, height });
+    };
+    const observer = new ResizeObserver(updateSize);
+    observer.observe(element);
+    updateSize();
+    return () => observer.disconnect();
+  }, []);
+
   const orders = ordersQuery.data ?? [];
+  const displayAspectRatio = displayAreaSize.width / Math.max(1, displayAreaSize.height);
+  const placeMediaBesideNumbers = displaySettings.media.length > 0 && displayAspectRatio >= mediaAspectRatio;
   // 2026-10-21: 完成と受け渡しを分け、未受け渡しの完成注文を番号表示に残す。
   const preparingOrders = orders.filter((order) => order.status === "pending" || order.status === "preparing");
   const readyOrders = orders.filter((order) => (order.status === "ready" || order.status === "completed") && !order.receivedAt);
@@ -166,12 +195,23 @@ export default function OrderNumberDisplay() {
         </p>
       )}
 
-      <div className={`grid min-h-0 flex-1 gap-3 p-3 sm:gap-4 sm:p-5 ${displaySettings.media.length > 0 ? "xl:grid-cols-[minmax(0,2fr)_minmax(16rem,1fr)]" : "md:grid-cols-2"}`}>
-        <div className={`grid min-h-0 gap-3 ${displaySettings.showPreparingNumbers && displaySettings.showPickupNumbers ? "md:grid-cols-2" : "grid-cols-1"}`}>
+      <div
+        ref={displayAreaRef}
+        className="grid min-h-0 flex-1 gap-3 p-3 sm:gap-4 sm:p-5"
+        style={{
+          gridTemplateColumns: placeMediaBesideNumbers
+            ? `minmax(0, ${100 - displaySettings.mediaPercent}fr) minmax(0, ${displaySettings.mediaPercent}fr)`
+            : "minmax(0, 1fr)",
+          gridTemplateRows: displaySettings.media.length > 0 && !placeMediaBesideNumbers
+            ? `minmax(0, ${100 - displaySettings.mediaPercent}fr) minmax(0, ${displaySettings.mediaPercent}fr)`
+            : "minmax(0, 1fr)",
+        }}
+      >
+        <div className={`grid min-h-0 min-w-0 gap-3 ${displaySettings.showPreparingNumbers && displaySettings.showPickupNumbers ? "md:grid-cols-2" : "grid-cols-1"}`}>
           {displaySettings.showPreparingNumbers && <NumberColumn title="作成中" orders={preparingOrders} tone="preparing" priority={displaySettings.overflowPriority} />}
           {displaySettings.showPickupNumbers && <NumberColumn title="受け取り待ち" orders={readyOrders} tone="ready" priority={displaySettings.overflowPriority} />}
         </div>
-        {displaySettings.media.length > 0 && <DisplayMedia media={displaySettings.media} />}
+        {displaySettings.media.length > 0 && <DisplayMedia media={displaySettings.media} onAspectRatioChange={updateMediaAspectRatio} />}
       </div>
       <footer className="border-t-thin border-foreground px-4 py-2 text-right font-mono text-xs text-muted-foreground sm:px-8">
         自動更新 · 最終更新 {lastUpdated} · {clock.toLocaleDateString("ja-JP", { month: "numeric", day: "numeric" })}
