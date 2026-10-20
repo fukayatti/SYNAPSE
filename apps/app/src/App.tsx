@@ -281,6 +281,7 @@ function RouteScrollRestoration() {
 			observer?.disconnect();
 			window.clearTimeout(fallbackTimer);
 			window.removeEventListener("wheel", cancelRestore, true);
+			window.removeEventListener("pointerdown", cancelRestore, true);
 			window.removeEventListener("touchstart", cancelRestore, true);
 			window.removeEventListener("keydown", cancelForScrollKey, true);
 		};
@@ -290,6 +291,16 @@ function RouteScrollRestoration() {
 			if (maxTop + 1 < top) return;
 			window.scrollTo({ top, behavior: "auto" });
 			if (Math.abs(window.scrollY - top) <= 1) finish();
+		};
+		const retryWithoutResizeObserver = () => {
+			if (!active || restored) return;
+			const maxTop = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+			if (maxTop + 1 >= top) {
+				window.scrollTo({ top, behavior: "auto" });
+				finish();
+				return;
+			}
+			fallbackTimer = window.setTimeout(retryWithoutResizeObserver, 250);
 		};
 		const cancelRestore = () => finish();
 		const cancelForScrollKey = (event: KeyboardEvent) => {
@@ -305,27 +316,25 @@ function RouteScrollRestoration() {
 			return () => { active = false; restoringRef.current = false; };
 		}
 		window.addEventListener("wheel", cancelRestore, true);
+		window.addEventListener("pointerdown", cancelRestore, true);
 		window.addEventListener("touchstart", cancelRestore, true);
 		window.addEventListener("keydown", cancelForScrollKey, true);
 		if (typeof ResizeObserver !== "undefined") {
 			observer = new ResizeObserver(restoreWhenReady);
 			observer.observe(document.documentElement);
 			observer.observe(document.body);
+		} else {
+			// ResizeObserverのない環境では、コンテンツの高さが増えるまで軽く再確認する。
+			fallbackTimer = window.setTimeout(retryWithoutResizeObserver, 250);
 		}
 		frame = window.requestAnimationFrame(restoreWhenReady);
-		// ResizeObserverが無効な環境でも、データ描画後の位置へ復元できるよう期限付きで再確認する。
-		fallbackTimer = window.setTimeout(() => {
-			if (!active || restored) return;
-			const maxTop = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
-			if (maxTop >= top) window.scrollTo({ top, behavior: "auto" });
-			finish();
-		}, 8000);
 		return () => {
 			active = false;
 			window.cancelAnimationFrame(frame);
 			observer?.disconnect();
 			window.clearTimeout(fallbackTimer);
 			window.removeEventListener("wheel", cancelRestore, true);
+			window.removeEventListener("pointerdown", cancelRestore, true);
 			window.removeEventListener("touchstart", cancelRestore, true);
 			window.removeEventListener("keydown", cancelForScrollKey, true);
 			restoringRef.current = false;
