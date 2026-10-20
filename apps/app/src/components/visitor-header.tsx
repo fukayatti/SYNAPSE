@@ -1,13 +1,24 @@
 import { Link, useLocation } from "react-router-dom";
 import { PRODUCT_NAME } from "@fesflow/config";
 import { QrCode, Receipt, Ticket, UtensilsCrossed } from "lucide-react";
+import { Bell } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { visitorApi } from "@/lib/api";
 import { useVisitor } from "@/hooks/useVisitor";
 import { ConnectionStatusBanner } from "@/components/ConnectionStatus";
 
 // 2026-10-16: モバイルでも行き先が分かるよう、ナビ項目はアイコンだけにせず名称を表示する。
 export default function VisitorHeader() {
   const { pathname } = useLocation();
-  const { isEntered, session } = useVisitor();
+  const { isEntered, session, userId } = useVisitor();
+  const notificationQuery = useQuery({
+    queryKey: ["visitorNotifications", userId],
+    queryFn: () => visitorApi.notifications(userId!),
+    enabled: Boolean(userId),
+    refetchInterval: 30_000,
+    retry: false,
+  });
+  const unreadCount = notificationQuery.data?.filter((item) => !item.readAt).length ?? 0;
 
   const links = [
     { to: "/visitor/events", label: "お店", icon: UtensilsCrossed, match: ["/visitor/events", "/visitor/menu"] },
@@ -37,6 +48,21 @@ export default function VisitorHeader() {
             </span>
           )}
         </Link>
+
+        {userId && (
+          <Link
+            to="/visitor/notifications"
+            aria-current={pathname.startsWith("/visitor/notifications") ? "page" : undefined}
+            aria-label={unreadCount ? `通知、未読${unreadCount}件` : "通知"}
+            className={`flex min-h-11 shrink-0 items-center gap-1.5 border-thick border-border px-2 text-[10px] font-bold ${pathname.startsWith("/visitor/notifications") ? "bg-primary text-primary-foreground" : "bg-background hover:bg-muted"}`}
+          >
+            <span className="relative">
+              <Bell className="h-4 w-4" aria-hidden="true" />
+              {unreadCount > 0 && <span className="absolute -right-2 -top-2 flex h-4 min-w-4 items-center justify-center border border-background bg-destructive px-1 text-[8px] text-destructive-foreground">{unreadCount > 99 ? "99+" : unreadCount}</span>}
+            </span>
+            <span>通知</span>
+          </Link>
+        )}
 
         <nav aria-label="来場者メニュー" className="flex w-full min-w-0 gap-1 sm:ml-auto sm:w-auto sm:justify-end">
           {links.map(({ to, label, icon: Icon, match }) => {

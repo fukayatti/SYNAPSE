@@ -59,6 +59,7 @@ const pageImports = {
 	Orders: () => import("@/pages/Orders"),
 	VisitorStampRally: () => import("@/pages/VisitorStampRally"),
 	VisitorReviews: () => import("@/pages/VisitorReviews"),
+	VisitorNotifications: () => import("@/pages/VisitorNotifications"),
 	EventMenu: () => import("@/pages/EventMenu"),
 	CouponRedeem: () => import("@/pages/CouponRedeem"),
 };
@@ -101,6 +102,7 @@ const VisitorAccount = lazy(pageImports.VisitorAccount);
 const Orders = lazy(pageImports.Orders);
 const VisitorStampRally = lazy(pageImports.VisitorStampRally);
 const VisitorReviews = lazy(pageImports.VisitorReviews);
+const VisitorNotifications = lazy(pageImports.VisitorNotifications);
 const EventMenu = lazy(pageImports.EventMenu);
 const CouponRedeem = lazy(pageImports.CouponRedeem);
 
@@ -228,6 +230,7 @@ export default function App() {
 						<Route path="/visitor/orders" element={<Orders />} />
 						<Route path="/visitor/stamps" element={<VisitorStampRally />} />
 						<Route path="/visitor/reviews" element={<VisitorReviews />} />
+						<Route path="/visitor/notifications" element={<VisitorNotifications />} />
 					</Route>
 
 					{/* Visitor event / menu routes */}

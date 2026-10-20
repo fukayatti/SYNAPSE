@@ -28,8 +28,12 @@ import { validateToppingCategorySelection } from "../utils/topping-wizard";
 import { calculateDiscount } from "../utils/discount";
 import type { AppEnv } from "../types";
 import { registerDisplaySnapshotSchema } from "@fesflow/config/register-display-contract";
+import { notifyCircleLowStock, notifyVisitorOrderComplete } from "../services/web-push";
 
 const orderRoutes = new Hono<AppEnv>();
+
+// 2026-10-21: 在庫画面の既定警告ラインに合わせ、残り2点以下へ入った時に一度だけ知らせる。
+const LOW_STOCK_ALERT_THRESHOLD = 2;
 
 // 2026-07-05: 注文ステータスの許可された遷移表。
 // completed/cancelled は終端状態でありそこからの遷移は禁止する。
@@ -798,6 +802,34 @@ const handleCreateOrder = async (
           }),
         })),
       });
+
+      // 2026-10-21: 在庫減算が確定した後だけ、少量在庫に入った商品のスタッフ通知を送る。
+      const lowStockItems = [
+        ...[...stockNeeded.entries()].flatMap(([menuId, quantity]) => {
+          const item = menus.find((row) => row.id === menuId);
+          if (!item || !item.inventoryEnabled || item.stockQuantity <= LOW_STOCK_ALERT_THRESHOLD) return [];
+          const remaining = item.stockQuantity - quantity;
+          return remaining <= LOW_STOCK_ALERT_THRESHOLD ? [{ name: item.name, remaining }] : [];
+        }),
+        ...[...toppingStockNeeded.entries()].flatMap(([toppingId, quantity]) => {
+          const item = toppings.find((row) => row.id === toppingId);
+          if (!item || item.stockQuantity <= LOW_STOCK_ALERT_THRESHOLD) return [];
+          const remaining = item.stockQuantity - quantity;
+          return remaining <= LOW_STOCK_ALERT_THRESHOLD ? [{ name: item.name, remaining }] : [];
+        }),
+      ];
+      if (lowStockItems.length > 0) {
+        c.executionCtx.waitUntil(notifyCircleLowStock(c.get("db"), c.env, input.circleId, lowStockItems)
+          .catch(() => console.warn("low_stock_notification_failed")));
+      }
+      if (orderFlowMode === "completed" && input.userId) {
+        c.executionCtx.waitUntil(notifyVisitorOrderComplete(c.get("db"), c.env, {
+          eventId,
+          visitorId: input.userId,
+          orderId: committed.id,
+          orderNumber: committed.orderNumber,
+        }).catch(() => console.warn("order_completion_notification_failed")));
+      }
       return c.json(committed satisfies CreateOrderResult, 201);
     } catch (error) {
       // Phase4: apiError/AppError による意図的な 4xx (NOT_FOUND/BAD_REQUEST/FORBIDDEN 等) を
@@ -835,6 +867,7 @@ orderRoutes.patch(
         id: order.id,
         circleId: order.circleId,
         userId: order.userId,
+        orderNumber: order.orderNumber,
         status: order.status,
         eventId: circle.eventId,
       })
@@ -871,6 +904,15 @@ orderRoutes.patch(
       apiError("CONFLICT", "他の操作で注文状態が更新されました。最新の状態を読み直してください");
     }
 
+    if (input.status === "completed" && targetOrder.userId && targetOrder.eventId) {
+      c.executionCtx.waitUntil(notifyVisitorOrderComplete(c.get("db"), c.env, {
+        eventId: targetOrder.eventId,
+        visitorId: targetOrder.userId,
+        orderId: targetOrder.id,
+        orderNumber: targetOrder.orderNumber,
+      }).catch(() => console.warn("order_completion_notification_failed")));
+    }
+
     return c.json({ success: true });
   }
 );
@@ -880,7 +922,14 @@ orderRoutes.post("/:id/complete", async (c) => {
   const db = c.get("db");
   const id = c.req.param("id");
 
-  const existingOrder = await db.select().from(order).where(eq(order.id, id));
+  const existingOrder = await db.select({
+    id: order.id,
+    circleId: order.circleId,
+    eventId: circle.eventId,
+    userId: order.userId,
+    orderNumber: order.orderNumber,
+    status: order.status,
+  }).from(order).leftJoin(circle, eq(circle.id, order.circleId)).where(eq(order.id, id));
   if (existingOrder.length === 0) apiError("NOT_FOUND", "見つかりません");
   
   const targetOrder = existingOrder[0]!;
@@ -893,6 +942,15 @@ orderRoutes.post("/:id/complete", async (c) => {
     .update(order)
     .set({ status: "completed", completed: true, completedAt: new Date() })
     .where(eq(order.id, id));
+
+  if (targetOrder.status !== "completed" && targetOrder.userId && targetOrder.eventId) {
+    c.executionCtx.waitUntil(notifyVisitorOrderComplete(db, c.env, {
+      eventId: targetOrder.eventId,
+      visitorId: targetOrder.userId,
+      orderId: targetOrder.id,
+      orderNumber: targetOrder.orderNumber,
+    }).catch(() => console.warn("order_completion_notification_failed")));
+  }
 
   return c.json({ success: true });
 });

@@ -281,6 +281,20 @@
       "when": 1792517353500,
       "tag": "0039_low_moon_knight",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "6",
+      "when": 1792518383821,
+      "tag": "0040_overconfident_bedlam",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "6",
+      "when": 1792518586205,
+      "tag": "0041_typical_grandmaster",
+      "breakpoints": true
     }
   ]
 }

@@ -14,6 +14,7 @@ import couponRoutes from "./coupon";
 import discountRoutes from "./discount";
 import reviewRoutes from "./review";
 import { systemRoutes, adminRoutes } from "./system";
+import notificationRoutes from "./notification";
 
 export {
   eventRoutes,
@@ -33,4 +34,5 @@ export {
   reviewRoutes,
   systemRoutes,
   adminRoutes,
+  notificationRoutes,
 };

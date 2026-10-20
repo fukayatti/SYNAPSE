@@ -24,6 +24,7 @@ import { ulid } from "ulidx";
 import { getAdminSession, getSession, hasPermission } from "../utils/auth";
 import type { AppEnv } from "../types";
 import { VISITOR_AGE_GROUPS } from "@fesflow/config/visitor-profile";
+import { notifyVisitors, sendPushToTargets } from "../services/web-push";
 
 const eventRoutes = new Hono<AppEnv>();
 
@@ -785,8 +786,9 @@ eventRoutes.post(
     }
 
     // 送信履歴を記録する (2026-07-16)。理由は eventAnnouncement テーブル定義のコメントを参照。
+    const announcementId = ulid();
     await db.insert(eventAnnouncement).values({
-      id: ulid(),
+      id: announcementId,
       eventId,
       title: input.title,
       message: input.message,
@@ -794,6 +796,32 @@ eventRoutes.post(
       recipientCount: sent,
       createdAt: new Date(),
     });
+
+    // 2026-10-21: スタッフの既存通知に加えて来場者の履歴とPushへ配信する。外部Pushの遅延は告知APIを待たせない。
+    const fanout = async () => {
+      const visitors = await db.select({ id: eventUser.id, eventId: eventUser.eventId })
+        .from(eventUser)
+        .where(and(eq(eventUser.eventId, eventId), eq(eventUser.status, "available")));
+      await notifyVisitors(db, c.env, visitors, {
+        type: "event_announcement",
+        title: input.title,
+        message: input.message,
+        href: "/visitor/notifications",
+        dedupeKey: (visitorId) => `event-announcement:${announcementId}:${visitorId}`,
+      }, {
+        title: input.title,
+        body: input.message,
+        url: "/visitor/notifications",
+        tag: `event-announcement-${announcementId}`,
+      });
+      await sendPushToTargets(db, c.env, [...emails].map((ownerId) => ({ ownerType: "staff" as const, ownerId })), {
+        title: input.title,
+        body: input.message,
+        url: "/",
+        tag: `event-announcement-${announcementId}`,
+      });
+    };
+    c.executionCtx.waitUntil(fanout().catch(() => console.warn("event_announcement_fanout_failed")));
 
     return c.json({ sent });
   }

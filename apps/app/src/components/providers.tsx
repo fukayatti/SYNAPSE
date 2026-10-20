@@ -11,6 +11,7 @@ import { UploadTray } from "./upload-tray";
 import { useState } from "react";
 import { handleApiErrorToast } from "@/lib/api-error";
 import { ConnectionStatusProvider } from "@/components/ConnectionStatus";
+import PwaLifecycle from "@/components/PwaLifecycle";
 
 export default function Providers({ children }: { children: React.ReactNode }) {
   // 2026-07-06: 例外は必ずトーストで可視化する。
@@ -56,6 +57,7 @@ export default function Providers({ children }: { children: React.ReactNode }) {
         <ReactQueryDevtools />
       </ThemeProvider>
       <Toaster />
+      <PwaLifecycle />
       {/* 2026-10-05 Issue #97: モーダルを閉じても続くアップロードの進行表示 */}
       <UploadTray />
       </ConnectionStatusProvider>

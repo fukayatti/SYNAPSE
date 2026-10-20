@@ -535,6 +535,34 @@ export const notificationApi = {
     ),
 };
 
+export const pushApi = {
+  configuration: () => fetchApi<{ enabled: boolean; publicKey: string | null }>("/api/notifications/config"),
+  status: (input: { endpoint: string; visitorId?: string }) =>
+    fetchApi<{ subscribed: boolean }>("/api/notifications/subscriptions/status", { method: "POST", body: input }),
+  subscribe: (input: { visitorId?: string; subscription: BrowserPushSubscription }) =>
+    fetchApi<{ success: boolean }>("/api/notifications/subscriptions", { method: "POST", body: input }),
+  unsubscribe: (input: { visitorId?: string; endpoint: string }) =>
+    fetchApi<{ success: boolean }>("/api/notifications/subscriptions", { method: "DELETE", body: input }),
+};
+
+export interface BrowserPushSubscription {
+  endpoint: string;
+  expirationTime: number | null;
+  keys: { p256dh: string; auth: string };
+}
+
+export interface VisitorNotification {
+  id: string;
+  eventId: string;
+  eventUserId: string;
+  type: string;
+  title: string;
+  message: string;
+  href: string;
+  readAt: string | null;
+  createdAt: string;
+}
+
 // 画像アップロード
 export const uploadImage = async (
   file: File
@@ -1716,6 +1744,10 @@ export const visitorApi = {
       method: "POST",
       body: { userId, allergies },
     }),
+  notifications: (userId: string) =>
+    fetchApi<VisitorNotification[]>(`/api/notifications/visitor/${encodeURIComponent(userId)}`),
+  markNotificationRead: (userId: string, notificationId: string) =>
+    fetchApi<{ success: boolean }>(`/api/notifications/visitor/${encodeURIComponent(userId)}/${encodeURIComponent(notificationId)}/read`, { method: "POST" }),
 };
 
 

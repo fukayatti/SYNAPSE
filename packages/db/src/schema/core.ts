@@ -24,6 +24,8 @@ export const event = sqliteTable("event", {
   officialWebsiteUrl: text("official_website_url"),
   startDate: integer("start_date", { mode: "timestamp_ms" }),
   endDate: integer("end_date", { mode: "timestamp_ms" }),
+  // 2026-10-21: Cron はこの時刻を使い、イベント終了後のレビュー依頼を重複配信しない。
+  reviewReminderSentAt: integer("review_reminder_sent_at", { mode: "timestamp_ms" }),
 
   // 開催ライフサイクル状態 (2026-07-15)。契約(billingStatus)とは独立した「開催の進行」。
   //   upcoming = 開催前 (準備中。注文は受け付けない)

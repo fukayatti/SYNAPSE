@@ -55,6 +55,33 @@ export const eventUser = sqliteTable(
   ]
 );
 
+// 2026-10-21: 来場者向け通知を端末のPush購読と独立して保存し、圏外中も復帰後に履歴を確認できるようにする。
+export const visitorNotification = sqliteTable(
+  "visitor_notification",
+  {
+    id: text("id").primaryKey().$defaultFn(() => ulid()),
+    eventId: text("event_id")
+      .notNull()
+      .references(() => event.id, { onDelete: "cascade" }),
+    eventUserId: text("event_user_id")
+      .notNull()
+      .references(() => eventUser.id, { onDelete: "cascade" }),
+    dedupeKey: text("dedupe_key").notNull().unique(),
+    type: text("type").notNull(),
+    title: text("title").notNull(),
+    message: text("message").notNull(),
+    href: text("href").notNull().default("/visitor/notifications"),
+    readAt: integer("read_at", { mode: "timestamp_ms" }),
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+      .notNull(),
+  },
+  (table) => [
+    index("visitor_notification_user_created_idx").on(table.eventUserId, table.createdAt),
+    index("visitor_notification_event_created_idx").on(table.eventId, table.createdAt),
+  ],
+);
+
 // リストバンド管理テーブル (ユーザーとリストバンドの1:N紐付け)
 export const wristband = sqliteTable(
   "wristband",

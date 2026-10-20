@@ -41,6 +41,7 @@ import {
   normalizeRetentionDays,
   RETENTION_SETTING_KEY,
 } from "../services/cleanup";
+import { notifyVisitors, sendPushToTargets } from "../services/web-push";
 
 // ── 公開システム設定 (メンテナンス/お知らせ) ────────────────────────────
 // 全アプリが起動時に読む。認証不要。value は JSON 文字列で保存。
@@ -212,11 +213,55 @@ adminRoutes.get("/announcements", async (c) => {
   return c.json(rows);
 });
 
+async function notifyPublishedSystemAnnouncement(
+  db: AppEnv["Variables"]["db"],
+  env: WorkerEnv,
+  input: { id: string; title: string; body: string },
+) {
+  const staffRows = await db.select({ userEmail: membership.userEmail }).from(membership)
+    .where(eq(membership.isActive, true));
+  const staffEmails = [...new Set(staffRows.map((row) => row.userEmail.toLowerCase()))];
+  const visitorRows = await db.select({ id: eventUser.id, eventId: eventUser.eventId })
+    .from(eventUser)
+    .innerJoin(event, eq(event.id, eventUser.eventId))
+    .where(and(
+      eq(event.lifecycleStatus, "live"),
+      eq(eventUser.status, "available"),
+      isNull(event.deletedAt),
+    ));
+  const message = input.body || "新しいシステムのお知らせがあります。";
+  await notifyVisitors(db, env, visitorRows, {
+    type: "system_announcement",
+    title: input.title,
+    message,
+    href: "/visitor/notifications",
+    dedupeKey: (visitorId) => `system-announcement:${input.id}:${visitorId}`,
+  }, {
+    title: input.title,
+    body: message,
+    url: "/visitor/notifications",
+    tag: `system-announcement-${input.id}`,
+  });
+  await sendPushToTargets(db, env, staffEmails.map((ownerId) => ({ ownerType: "staff" as const, ownerId })), {
+    title: input.title,
+    body: message,
+    url: "/",
+    tag: `system-announcement-${input.id}`,
+  });
+}
+
 adminRoutes.post("/announcements", zBody(announcementInput), async (c) => {
   const db = c.get("db");
   const input = c.req.valid("json");
   const id = ulid();
   await db.insert(announcement).values({ id, ...input });
+  if (input.published) {
+    c.executionCtx.waitUntil(notifyPublishedSystemAnnouncement(db, c.env, {
+      id,
+      title: input.title,
+      body: input.body,
+    }).catch(() => console.warn("system_announcement_fanout_failed")));
+  }
   return c.json({ success: true, id });
 });
 
@@ -227,10 +272,19 @@ adminRoutes.patch(
     const db = c.get("db");
     const id = c.req.param("id");
     const input = c.req.valid("json");
+    const existingRows = await db.select().from(announcement).where(eq(announcement.id, id)).limit(1);
+    const previous = existingRows[0];
     await db
       .update(announcement)
       .set({ ...input, updatedAt: new Date() })
       .where(eq(announcement.id, id));
+    if (previous && !previous.published && input.published === true) {
+      c.executionCtx.waitUntil(notifyPublishedSystemAnnouncement(db, c.env, {
+        id,
+        title: input.title ?? previous.title,
+        body: input.body ?? previous.body,
+      }).catch(() => console.warn("system_announcement_fanout_failed")));
+    }
     return c.json({ success: true });
   },
 );

@@ -31,4 +31,6 @@ GitHub Actions `Quality / verify` はBun 1.3.13 / Node 22を使い、frozen-lock
 
 ## 運用判断
 
+PWAのキャッシュ範囲、通知鍵の設定、オフライン時の制約は[PWA運用資料](PWA.md)を参照する。
+
 イベントデータの保持期間は365日を既定とし、システム管理画面で30〜3,650日に調整できる。削除対象、学校・会計規程、イベント終了後の業務記録保存、開催再開時の時計は正式確認待ち（[#83](https://github.com/shikosai34/SYNAPSE/issues/83)）。本番の `CLEANUP_ENABLED` は承認とbackup復元演習が済むまで設定しない。詳細は[運用・承認待ち](OPERATIONS.md)、システム境界は[アーキテクチャ](ARCHITECTURE.md)を参照。

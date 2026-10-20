@@ -1,0 +1,1 @@
+ALTER TABLE `event` ADD `review_reminder_sent_at` integer;

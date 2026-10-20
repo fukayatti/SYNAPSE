@@ -33,6 +33,7 @@ import {
 } from "@/hooks/useCircleAuth";
 import { roleLabel, roleBadge } from "@/lib/roles";
 import { authClient } from "@/lib/auth-client";
+import { PushNotificationControl } from "@/components/PushNotificationControl";
 
 // 2026-07-07 単一ドメイン化: register の circle/event/sys はすべて同一オリジンの同一SPA。
 // 旧来のスタッフ/管理サブドメイン (staff./admin.) 分離とクロスドメイン遷移は撤去した。
@@ -631,6 +632,7 @@ export default function Header() {
             お知らせ・通知はありません
           </div>
         )}
+      <PushNotificationControl ownerType="staff" />
     </div>
   );
 

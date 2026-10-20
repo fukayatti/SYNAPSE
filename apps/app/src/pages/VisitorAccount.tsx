@@ -14,6 +14,7 @@ import { Modal } from "@/components/ui/Modal";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useVisitor } from "@/hooks/useVisitor";
 import { type WristbandLookupResult, visitorApi, wristbandApi } from "@/lib/api";
+import { PushNotificationControl } from "@/components/PushNotificationControl";
 
 type Wristband = WristbandLookupResult["familyWristbands"][number];
 
@@ -322,6 +323,14 @@ export default function VisitorAccountPage() {
             </div>
           </div>
         </Modal>
+      </section>
+
+      <section aria-labelledby="notification-settings-title" className="space-y-3 border-t-thick border-border pt-5">
+        <header className="space-y-1">
+          <h2 id="notification-settings-title" className="text-base font-black">通知設定</h2>
+          <p className="text-xs leading-relaxed text-muted-foreground">注文の完成やイベントからのお知らせを、この端末で受け取れます。</p>
+        </header>
+        <PushNotificationControl ownerType="visitor" />
       </section>
 
       <QrScannerModal

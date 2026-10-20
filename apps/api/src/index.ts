@@ -44,6 +44,7 @@ import { apiError, registerErrorHandlers } from "./http-error";
 import type { AppEnv } from "./types";
 import { requestObservability } from "./middleware/observability";
 import { cleanupMustDryRun, runCleanup } from "./services/cleanup";
+import { sendEndedEventReviewReminders } from "./services/review-reminders";
 
 // Hono REST ルート
 import {
@@ -64,6 +65,7 @@ import {
   reviewRoutes,
   systemRoutes,
   adminRoutes,
+  notificationRoutes,
 } from "./routes";
 
 const app = new Hono<AppEnv>();
@@ -253,6 +255,7 @@ app.route("/api/discounts", discountRoutes);
 app.route("/api/reviews", reviewRoutes);
 app.route("/api/system", systemRoutes);
 app.route("/api/admin", adminRoutes);
+app.route("/api/notifications", notificationRoutes);
 
 // 画像・フォントアップロード (fs → R2/MinIO)
 // 2026-07-05: SVG は同一オリジン配信時にスクリプトを実行し得る (保存型XSS) ため
@@ -363,5 +366,7 @@ export default {
   async scheduled(_eventInfo: unknown, env: WorkerEnv, ctx: { waitUntil: (promise: Promise<void>) => void }) {
     // 2026-10-03 (#83): 規程確認後に明示的に有効化されるまで、scheduledでは候補確認だけを行う。
     ctx.waitUntil(runCleanup(env.DB, { dryRun: cleanupMustDryRun(env) }).then(() => undefined));
+    // 2026-10-21: 終了イベントごとの送信済み印を使い、受取済み来場者へレビュー依頼を一度だけ送る。
+    ctx.waitUntil(sendEndedEventReviewReminders(env).catch(() => console.warn("review_reminder_job_failed")));
   }
 };
