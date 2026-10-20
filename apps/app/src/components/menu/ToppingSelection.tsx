@@ -147,7 +147,9 @@ export function ToppingSelection({
                     }}
                     className={cn(
                       "flex min-h-11 w-full items-center gap-2 px-2 py-2 text-left text-xs font-bold transition-colors disabled:cursor-not-allowed disabled:opacity-40",
-                      isSelected ? "bg-primary text-primary-foreground" : "bg-background hover:bg-muted",
+                      topping.soldOut
+                        ? "bg-error/10 text-destructive"
+                        : isSelected ? "bg-primary text-primary-foreground" : "bg-background hover:bg-muted",
                     )}
                   >
                     <span aria-hidden="true" className="flex h-5 w-5 shrink-0 items-center justify-center border-thick border-current">{isSelected ? "✓" : ""}</span>
@@ -160,7 +162,8 @@ export function ToppingSelection({
                         {topping.price >= 0 ? `+¥${topping.price}` : `-¥${Math.abs(topping.price)}`}
                       </span>
                     )}
-                    {topping.soldOut && <span className="text-error">売切</span>}
+                    {/* 2026-10-21: 無効化された行でも売切の赤ラベルを識別できるよう、状態色を面で示す。 */}
+                    {topping.soldOut && <span className="shrink-0 border-thin border-error bg-error px-1 text-background">売り切れ</span>}
                   </button>
                 );
               })}

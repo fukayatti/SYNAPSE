@@ -1,0 +1,1 @@
+ALTER TABLE `lottery_prize` ADD `is_archived` integer DEFAULT false NOT NULL;

@@ -212,7 +212,8 @@ export function ToppingFormModal({ circleId, isOpen, onClose, topping, onDelete 
             <div className="border-thick border-border bg-muted/30 p-3 text-xs font-mono text-muted-foreground">
               このサークルは<strong className="text-foreground">在庫管理</strong>がONのため、売り切れは在庫数から自動判定されます。
               売切の切り替えは「在庫管理」から行ってください。
-              <div className="mt-1.5 font-bold text-foreground">
+              {/* 2026-10-21: 在庫から自動判定される売切も、手動設定と同じ赤で区別する。 */}
+              <div className={cn("mt-1.5 font-bold", form.soldOut ? "text-destructive" : "text-success")}>
                 現在: {form.soldOut ? "売り切れ" : "販売中"}
               </div>
             </div>

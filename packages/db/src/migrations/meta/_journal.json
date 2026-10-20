@@ -267,6 +267,13 @@
       "when": 1792508991097,
       "tag": "0037_absurd_dragon_man",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "6",
+      "when": 1792510370515,
+      "tag": "0038_happy_puck",
+      "breakpoints": true
     }
   ]
 }

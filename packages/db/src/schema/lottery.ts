@@ -45,6 +45,8 @@ export const lotteryPrize = sqliteTable(
       .references(() => lottery.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
     quantity: integer("quantity").notNull().default(1),
+    // 2026-10-21: 当選者から参照される景品は物理削除せず、抽選候補から外す。
+    isArchived: integer("is_archived", { mode: "boolean" }).default(false).notNull(),
   },
   (table) => [index("lottery_prize_lottery_idx").on(table.lotteryId)]
 );
