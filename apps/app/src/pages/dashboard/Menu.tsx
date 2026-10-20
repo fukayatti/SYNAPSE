@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { CircleAuthGuard, PermissionGuard, useAuth } from "@/hooks/useCircleAuth";
-import { menuApi, toppingApi, circleApi, parseCircleSettings } from "@/lib/api";
+import { menuApi, toppingApi } from "@/lib/api";
 import DashboardLayout from "@/components/DashboardLayout";
 import { CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -32,6 +32,7 @@ function MenuManagementContent() {
 
   const [isToppingOpen, setIsToppingOpen] = useState(false);
   const [selectedTopping, setSelectedTopping] = useState<any | null>(null);
+  const [isReorderingMenus, setIsReorderingMenus] = useState(false);
   const [isReorderingToppings, setIsReorderingToppings] = useState(false);
 
 
@@ -61,15 +62,6 @@ function MenuManagementContent() {
     enabled: !!circleId,
   });
 
-  // 在庫管理拡張がONか (ONなら売切はメニュー管理から変更不可、在庫で自動制御)
-  const { data: circleData } = useQuery({
-    queryKey: ["circle", circleId],
-    queryFn: () => circleApi.get(circleId),
-    enabled: !!circleId,
-  });
-  // 2026-09-27: Keep the legacy circle switch only for topping stock; menu inventory is per-product.
-  const toppingStockManaged = parseCircleSettings(circleData?.settings).extensions.stock;
-
   // カードから売切をワンタップで切り替える (在庫管理OFF時のみ) (2026-07-14)
   const toggleSoldOut = useMutation({
     mutationFn: (menu: any) => menuApi.update(menu.id, { soldOut: !menu.soldOut }),
@@ -80,7 +72,7 @@ function MenuManagementContent() {
     onError: (e: any) => toast.error(e?.message || "更新に失敗しました"),
   });
 
-  // トッピングの売切をワンタップで切り替える (在庫管理OFF時のみ。ON時は在庫連動) (2026-07-15)
+  // 2026-10-21: 在庫残数とは別に一時提供停止を即時操作できるよう、手動売切を在庫管理中も許可する。
   const toggleToppingSoldOut = useMutation({
     mutationFn: (topping: any) => toppingApi.update(topping.id, { soldOut: !topping.soldOut }),
     onSuccess: (_d, topping) => {
@@ -134,6 +126,25 @@ function MenuManagementContent() {
   const handleOpenToppingEdit = (topping: any) => {
     setSelectedTopping(topping);
     setIsToppingOpen(true);
+  };
+
+  // 2026-10-21: カテゴリ内で順番を入れ替え、来場者画面でも使う表示順として保存する。
+  const moveMenu = async (category: string, index: number, offset: -1 | 1) => {
+    if (!menus || isReorderingMenus) return;
+    const categoryMenus = menus.filter((menu) => (menu.category?.trim() || "未分類") === category);
+    const target = index + offset;
+    if (target < 0 || target >= categoryMenus.length) return;
+    const reordered = [...categoryMenus];
+    [reordered[index], reordered[target]] = [reordered[target]!, reordered[index]!];
+    setIsReorderingMenus(true);
+    try {
+      await Promise.all(reordered.map((menu, sortOrder) => menuApi.update(menu.id, { sortOrder })));
+    } catch (error: any) {
+      toast.error(error?.message || "順番を保存できませんでした");
+    } finally {
+      void queryClient.invalidateQueries({ queryKey: ["menus", circleId] });
+      setIsReorderingMenus(false);
+    }
   };
 
   // 2026-10-16: 既存データも含めて連番へ正規化し、上下操作後に順番が安定して保存されるようにする。
@@ -207,9 +218,12 @@ function MenuManagementContent() {
               {/* 2026-10-16: メニューはカテゴリ単位の横幅を使う行表示にし、編集フォームへ設定を集約する。 */}
               {[...new Set(menus.map((menu) => menu.category?.trim() || "未分類"))].sort((a, b) => a.localeCompare(b, "ja")).map((category) => (
                 <section key={category} className="space-y-2">
-                  <h3 className="border-b-thin border-border pb-2 text-xs font-bold uppercase">{category}</h3>
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-b-thin border-border pb-2">
+                    <h3 className="text-xs font-bold uppercase">{category}</h3>
+                    <span className="text-[9px] font-bold text-muted-foreground">カテゴリ内の順番</span>
+                  </div>
                   <div className="w-full divide-y-thin divide-border border-y-thin border-border">
-              {menus.filter((menu) => (menu.category?.trim() || "未分類") === category).map((menu) => (
+              {menus.filter((menu) => (menu.category?.trim() || "未分類") === category).map((menu, index, categoryMenus) => (
                 <div key={menu.id} className="flex w-full flex-col gap-3 py-3 sm:flex-row sm:items-center">
                   {menu.imagePath ? <img src={resolveAssetUrl(menu.imagePath)} alt="" className="h-16 w-20 shrink-0 border-thin border-border object-cover" /> : <div className="flex h-16 w-20 shrink-0 items-center justify-center bg-muted text-[9px] uppercase">No Image</div>}
                   <div className="min-w-0 flex-1">
@@ -222,6 +236,9 @@ function MenuManagementContent() {
                   </div>
                   {/* 2026-10-16: 操作ボタンは狭い画面で折り返し、商品名と重ならないようにする。 */}
                   <div className="flex shrink-0 flex-wrap gap-2">
+                    <span className="w-full self-center text-[9px] font-bold uppercase text-muted-foreground sm:w-auto">順番</span>
+                    <Button type="button" variant="outline" size="icon" title="上へ移動" aria-label={`${menu.name}を上へ`} disabled={isReorderingMenus || index === 0} onClick={() => moveMenu(category, index, -1)}><ArrowUp className="h-4 w-4" /></Button>
+                    <Button type="button" variant="outline" size="icon" title="下へ移動" aria-label={`${menu.name}を下へ`} disabled={isReorderingMenus || index === categoryMenus.length - 1} onClick={() => moveMenu(category, index, 1)}><ArrowDown className="h-4 w-4" /></Button>
                     {/* 2026-10-21: 売切中の操作も状態色に合わせ、販売再開対象を一覧で見つけやすくする。 */}
                     {!menu.inventoryEnabled && <Button type="button" variant={menu.soldOut ? "destructive" : "outline"} size="sm" onClick={() => toggleSoldOut.mutate(menu)} disabled={toggleSoldOut.isPending}>{menu.soldOut ? "販売再開" : "売り切れ"}</Button>}
                     <Button variant="outline" size="sm" onClick={() => handleOpenMenuEdit(menu)}><Edit className="mr-1 h-3 w-3" />編集</Button>
@@ -272,7 +289,8 @@ function MenuManagementContent() {
                     <span className="w-full text-[9px] font-bold uppercase text-muted-foreground sm:w-auto">順番</span>
                     <Button type="button" variant="outline" size="icon" title="上へ移動" aria-label={`${topping.name}を上へ`} disabled={isReorderingToppings || index === 0} onClick={() => moveTopping(index, -1)}><ArrowUp className="h-4 w-4" /></Button>
                     <Button type="button" variant="outline" size="icon" title="下へ移動" aria-label={`${topping.name}を下へ`} disabled={isReorderingToppings || index === toppings.length - 1} onClick={() => moveTopping(index, 1)}><ArrowDown className="h-4 w-4" /></Button>
-                    {!toppingStockManaged && <Button type="button" variant={topping.soldOut ? "destructive" : "outline"} size="sm" onClick={() => toggleToppingSoldOut.mutate(topping)}>{topping.soldOut ? "販売再開" : "売り切れ"}</Button>}
+                    {/* 2026-10-21: 在庫数とは別に一時的な提供停止を行えるよう、在庫管理中も手動切替を表示する。 */}
+                    <Button type="button" variant={topping.soldOut ? "destructive" : "outline"} size="sm" onClick={() => toggleToppingSoldOut.mutate(topping)} disabled={toggleToppingSoldOut.isPending}>{topping.soldOut ? "販売再開" : "売り切れ"}</Button>
                     <Button variant="outline" size="sm" onClick={() => handleOpenToppingEdit(topping)}><Edit className="mr-1 h-3 w-3" />編集</Button>
                   </div>
                 </div>

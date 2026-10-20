@@ -1383,6 +1383,7 @@ export interface CreateMenuInput {
 export interface UpdateMenuInput {
   name?: string;
   category?: string;
+  sortOrder?: number;
   price?: number;
   description?: string;
   allergens?: JapaneseAllergen[];
