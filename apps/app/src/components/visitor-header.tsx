@@ -2,6 +2,7 @@ import { Link, useLocation } from "react-router-dom";
 import { PRODUCT_NAME } from "@fesflow/config";
 import { QrCode, Receipt, Ticket, UtensilsCrossed } from "lucide-react";
 import { useVisitor } from "@/hooks/useVisitor";
+import { ConnectionStatusBanner } from "@/components/ConnectionStatus";
 
 // 2026-10-16: モバイルでも行き先が分かるよう、ナビ項目はアイコンだけにせず名称を表示する。
 export default function VisitorHeader() {
@@ -19,6 +20,7 @@ export default function VisitorHeader() {
 
   return (
     <header className="sticky top-0 z-50 border-b-thick border-border bg-background text-foreground font-mono">
+      <ConnectionStatusBanner />
       <div className="mx-auto flex max-w-3xl flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2 sm:flex-nowrap sm:px-4">
         <Link
           to="/visitor"

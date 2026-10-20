@@ -10,6 +10,7 @@ import { Toaster } from "./ui/sonner";
 import { UploadTray } from "./upload-tray";
 import { useState } from "react";
 import { handleApiErrorToast } from "@/lib/api-error";
+import { ConnectionStatusProvider } from "@/components/ConnectionStatus";
 
 export default function Providers({ children }: { children: React.ReactNode }) {
   // 2026-07-06: 例外は必ずトーストで可視化する。
@@ -22,6 +23,16 @@ export default function Providers({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(
     () =>
       new QueryClient({
+        // 2026-10-21: 圏外でも既存データを保ち、画面を無期限ローディングにせず通信失敗へ進める。
+        // 更新操作は汎用キューへ積まず即時失敗させ、古い権限・在庫・状態を復帰後に再送しない。
+        defaultOptions: {
+          queries: {
+            networkMode: "always",
+            gcTime: 24 * 60 * 60 * 1000,
+            retry: (failureCount) => typeof navigator === "undefined" || (navigator.onLine && failureCount < 1),
+          },
+          mutations: { networkMode: "always", retry: false },
+        },
         queryCache: new QueryCache({
           onError: (error) => {
             handleApiErrorToast(error, { toastId: "query-error" });
@@ -39,6 +50,7 @@ export default function Providers({ children }: { children: React.ReactNode }) {
 
   return (
     <QueryClientProvider client={queryClient}>
+      <ConnectionStatusProvider>
       <ThemeProvider>
         {children}
         <ReactQueryDevtools />
@@ -46,6 +58,7 @@ export default function Providers({ children }: { children: React.ReactNode }) {
       <Toaster />
       {/* 2026-10-05 Issue #97: モーダルを閉じても続くアップロードの進行表示 */}
       <UploadTray />
+      </ConnectionStatusProvider>
     </QueryClientProvider>
   );
 }

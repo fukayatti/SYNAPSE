@@ -125,7 +125,7 @@ function BackyardPageContent() {
     );
   }
 
-  if (isError) {
+  if (isError && !orders) {
     return (
       <div className="container mx-auto p-4">
         <ErrorState error={error} onRetry={() => refetch()} />
@@ -141,6 +141,13 @@ function BackyardPageContent() {
           更新
         </Button>
       </div>
+
+      {isError && orders && (
+        <div role="status" className="flex flex-wrap items-center justify-between gap-2 border-thick border-warning bg-warning/10 p-3 text-xs font-bold">
+          <span>通信に失敗しました。表示中の注文は前回取得した内容です。</span>
+          <Button onClick={() => refetch()} variant="outline" className="min-h-10 border-thick border-border">再接続して更新</Button>
+        </div>
+      )}
 
       {/* ステータスフィルター */}
       <div className="flex gap-2 flex-wrap">

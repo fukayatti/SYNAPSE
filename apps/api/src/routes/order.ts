@@ -628,6 +628,11 @@ const handleCreateOrder = async (
         appliedDiscount = { ...appliedDiscount, discountApplied };
       }
 
+      // 2026-10-21: 端末に保存した注文の再送時は価格が変わっていないことを確かめ、差額を黙って確定しない。
+      if (source === "mobile" && input.expectedTotalPrice !== undefined && totalPrice !== input.expectedTotalPrice) {
+        apiError("CONFLICT", "メニュー価格が変更されています。最新の価格を確認してから注文し直してください");
+      }
+
       // 2026-10-03: 在庫減算は注文/明細と同じD1 batchで実施する。逐次補償は不要。
       // 支払い方法の解決 (2026-07-12): 明示指定を優先し、無ければサークルの対応方法が
       // ちょうど1つのときだけそれを補完する (単一方法はレジで選択させないため)。

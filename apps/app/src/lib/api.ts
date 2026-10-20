@@ -63,8 +63,11 @@ async function fetchApi<T>(
     response = await fetch(`${baseUrl}${endpoint}`, config);
   } catch (err) {
     // fetch 自体の失敗 (オフライン・DNS解決失敗等)。ApiError.code = "NETWORK" として区別する。
+    if (typeof window !== "undefined") window.dispatchEvent(new Event("fesflow:api-network-failure"));
     throw networkApiError(err);
   }
+
+  if (typeof window !== "undefined") window.dispatchEvent(new Event("fesflow:api-network-success"));
 
   if (!response.ok) {
     throw await apiErrorFromResponse(response);
@@ -92,8 +95,10 @@ async function fetchApiBlob(endpoint: string): Promise<Blob> {
   try {
     response = await fetch(`${getApiBaseUrl()}${endpoint}`, { headers, credentials: "include" });
   } catch (err) {
+    if (typeof window !== "undefined") window.dispatchEvent(new Event("fesflow:api-network-failure"));
     throw networkApiError(err);
   }
+  if (typeof window !== "undefined") window.dispatchEvent(new Event("fesflow:api-network-success"));
   if (!response.ok) throw await apiErrorFromResponse(response);
   return response.blob();
 }

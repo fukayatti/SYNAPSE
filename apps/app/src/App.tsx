@@ -14,6 +14,8 @@ import Loader from "@/components/loader";
 
 import { CircleAuthGuard, SystemAdminGuard, EventAdminGuard } from "@/hooks/useCircleAuth";
 import { ImpersonationBanner } from "@/components/system/ImpersonationBanner";
+import { ConnectionStatusBanner } from "@/components/ConnectionStatus";
+import { MobileOrderOutboxSync } from "@/features/orders/MobileOrderOutboxSync";
 
 // 2026-07-15: オフライン対応（スタッフ側）のためのプリロード対象および lazy 定義。
 // 来場者とスタッフ画面を切り分けるため、インポート用関数をオブジェクトにまとめて管理する。
@@ -128,6 +130,7 @@ function AdminLayout() {
 
 	return (
 		<div className="grid grid-cols-1 grid-rows-[auto_auto_1fr] min-h-svh">
+			<ConnectionStatusBanner />
 			<Header />
 			<SystemBanner />
 			{/* 2026-09-27: Grid item の自動最小幅で子テーブルが画面全体を押し広げないよう縮小を許可する。 */}
@@ -142,6 +145,7 @@ function VisitorLayout() {
 	return (
 		<SystemGate>
 			<div className="grid grid-rows-[auto_1fr] min-h-svh">
+				<MobileOrderOutboxSync />
 				<VisitorHeader />
 				<main>
 					<Outlet />
@@ -223,6 +227,7 @@ export default function App() {
 					<Route path="/visitor/events" element={<EventMenu />} />
 					<Route path="/visitor/events/:eventId" element={<EventMenu />} />
 					<Route path="/visitor/menu" element={<Menu />} />
+					<Route path="/visitor/order/:circleId" element={<Menu />} />
 
 					{/* クーポン合言葉入力ページ (issue #50)。オンボーディング必須ゲートは掛けない
 					    (ニックネーム未入力でも合言葉検証自体はできて良いため。入場(userId)の有無は
