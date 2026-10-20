@@ -6,10 +6,18 @@ import { ModSandbox } from "@/components/ModSandbox";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState } from "@/components/ui/ErrorState";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { ArrowLeft, Clock, CheckCircle2, Receipt, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { getMobileOrderOutboxEntries, retryMobileOrder, type MobileOrderOutboxEntry } from "@/features/orders/mobile-order-outbox";
+
+type MobileOrderReceipt = {
+  orderId: string;
+  orderNumber: string;
+  circleName: string;
+  totalPrice: number;
+  items: NonNullable<MobileOrderOutboxEntry["displayItems"]>;
+};
 
 /**
  * 来場者の注文履歴 (2026-07-11 マイページから分離 / 2026-07-13 サーバ実注文ベースへ再構成)。
@@ -43,6 +51,8 @@ function orderStatusBadge(status: string) {
 
 export default function OrdersPage() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const receipt = (location.state as { mobileOrderReceipt?: MobileOrderReceipt } | null)?.mobileOrderReceipt;
   const { userId: visitorUserId, isLoaded } = useVisitor();
   const userId = visitorUserId ?? "";
 
@@ -80,6 +90,13 @@ export default function OrdersPage() {
     networkMode: "always",
     retry: false,
   });
+
+  // 2026-10-21: オフライン注文の同期完了後、番号が付いた注文を表示するため履歴を再取得する。
+  useEffect(() => {
+    const refreshHistory = () => void refetchHistory();
+    window.addEventListener("fesflow:mobile-order-synced", refreshHistory);
+    return () => window.removeEventListener("fesflow:mobile-order-synced", refreshHistory);
+  }, [refetchHistory]);
 
   // 事前オーダー(未受取) 取得
   const {
@@ -143,7 +160,8 @@ export default function OrdersPage() {
   }
 
   const history: VisitorOrderHistory[] = orderHistory ?? [];
-  const hasHistory = history.length > 0;
+  const displayedHistory = history.filter((order) => order.id !== receipt?.orderId);
+  const hasHistory = displayedHistory.length > 0;
   const hasPreOrders = !!preOrders && preOrders.length > 0;
 
   return (
@@ -166,6 +184,36 @@ export default function OrdersPage() {
         </p>
       </div>
 
+      {receipt && (
+        <section aria-labelledby="mobile-order-receipt-heading" role="status" className="space-y-3 border-heavy border-success bg-success/10 p-4 sm:p-6">
+          <div>
+            <h2 id="mobile-order-receipt-heading" className="text-lg font-black">注文を受け付けました</h2>
+            <p className="mt-1 text-sm">店頭では、この番号をお伝えください。</p>
+          </div>
+          <div className="flex flex-wrap items-end justify-between gap-4 border-y-thick border-border py-3">
+            <div>
+              <p className="text-xs font-bold">呼出番号</p>
+              <p className="font-headline text-4xl leading-none tabular-nums sm:text-5xl">#{receipt.orderNumber}</p>
+              <p className="mt-2 text-sm font-bold">{receipt.circleName}</p>
+            </div>
+            <p className="text-2xl font-black tabular-nums">¥{receipt.totalPrice.toLocaleString()}</p>
+          </div>
+          <ul className="space-y-2 text-sm">
+            {receipt.items.map((item, index) => (
+              <li key={`${item.menuName}-${index}`} className="border-b-thin border-border pb-2 last:border-0">
+                <div className="flex justify-between gap-3">
+                  <span className="font-bold">{item.menuName} ×{item.quantity}</span>
+                  <span className="shrink-0">¥{(item.unitPrice * item.quantity).toLocaleString()}</span>
+                </div>
+                {item.toppings && item.toppings.length > 0 && (
+                  <p className="mt-1 text-xs text-muted-foreground">トッピング: {item.toppings.join("、")}</p>
+                )}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
       {queuedOrders.length > 0 && (
         <section aria-labelledby="queued-orders-heading" className="space-y-3">
           <h2 id="queued-orders-heading" className="flex items-center gap-2 border-b-thick border-border pb-2 text-lg font-black uppercase">
@@ -186,9 +234,12 @@ export default function OrdersPage() {
                 </span>
               </div>
               <ul className="space-y-1 text-xs">
-                {(order.displayItems ?? order.input.items.map((item) => ({ menuName: `メニュー ${item.menuId.slice(-6)}`, quantity: item.quantity, unitPrice: 0 }))).map((item, index) => (
+                {(order.displayItems ?? order.input.items.map((item) => ({ menuName: `メニュー ${item.menuId.slice(-6)}`, quantity: item.quantity, unitPrice: 0, toppings: [] }))).map((item, index) => (
                   <li key={`${item.menuName}-${index}`} className="flex justify-between gap-2">
-                    <span className="truncate">{item.menuName}</span>
+                    <span className="min-w-0">
+                      <span className="block truncate">{item.menuName}</span>
+                      {item.toppings && item.toppings.length > 0 && <span className="block text-[10px] text-muted-foreground">トッピング: {item.toppings.join("、")}</span>}
+                    </span>
                     <span className="shrink-0">×{item.quantity} · ¥{(item.unitPrice * item.quantity).toLocaleString()}</span>
                   </li>
                 ))}
@@ -277,7 +328,7 @@ export default function OrdersPage() {
             <ErrorState error={historyErrorObj} onRetry={() => refetchHistory()} />
           ) : (
             <div className="space-y-4">
-              {history.map((o) => {
+              {displayedHistory.map((o) => {
                 const badge = orderStatusBadge(o.status);
                 const Icon = badge.icon;
                 return (
@@ -285,21 +336,24 @@ export default function OrdersPage() {
                     key={o.id}
                     className="border-thick border-border bg-background p-5 space-y-3"
                   >
-                    <div className="flex justify-between items-start border-b-[2px] border-border pb-2">
-                      <div className="flex items-center gap-2 flex-wrap">
+                    <div className="flex flex-col gap-3 border-b-thick border-border pb-3 sm:flex-row sm:items-end sm:justify-between">
+                      <div className="flex flex-col items-start gap-2">
                         <span className={`px-2 py-0.5 text-xs font-black uppercase flex items-center gap-1 ${badge.cls}`}>
                           <Icon className="h-3.5 w-3.5" /> {badge.label}
-                        </span>
-                        <span className="bg-foreground text-background px-2 py-0.5 text-xs font-black uppercase">
-                          呼出 #{o.orderNumber}
                         </span>
                         <span className="text-xs text-muted-foreground">
                           {new Date(o.createdAt).toLocaleTimeString("ja-JP")}
                         </span>
                       </div>
-                      <span className="text-xl font-black">
-                        ¥{o.totalPrice.toLocaleString()}
-                      </span>
+                      <div className="flex flex-wrap items-end justify-between gap-3 sm:justify-end">
+                        <div>
+                          <span className="block text-[10px] font-bold uppercase">呼出番号</span>
+                          <span className="block font-headline text-3xl leading-none tabular-nums">#{o.orderNumber}</span>
+                        </div>
+                        <span className="text-xl font-black">
+                          ¥{o.totalPrice.toLocaleString()}
+                        </span>
+                      </div>
                     </div>
 
                     <div className="text-sm font-bold flex items-center gap-2">

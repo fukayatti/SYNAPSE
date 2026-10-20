@@ -8,7 +8,7 @@ export type MobileOrderOutboxEntry = {
   fingerprint: string;
   input: CreateOrderInput;
   circleName: string;
-  displayItems?: { menuName: string; quantity: number; unitPrice: number }[];
+  displayItems?: { menuName: string; quantity: number; unitPrice: number; toppings?: string[] }[];
   createdAt: number;
   attemptCount: number;
   nextAttemptAt: number;

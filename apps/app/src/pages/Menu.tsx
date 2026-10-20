@@ -556,11 +556,13 @@ function MenuPageContent() {
     menuName: line.menuName,
     quantity: line.quantity,
     unitPrice: line.menuPrice + line.toppings.reduce((sum, topping) => sum + topping.toppingPrice, 0),
+    toppings: line.toppings.map((topping) => topping.toppingName),
   })));
   mobileOrderDisplayItems.current = cart.map((line) => ({
     menuName: line.menuName,
     quantity: line.quantity,
     unitPrice: line.menuPrice + line.toppings.reduce((sum, topping) => sum + topping.toppingPrice, 0),
+    toppings: line.toppings.map((topping) => topping.toppingName),
   }));
   const submitOrder = useOrderSubmission(orderInput, (input, key) =>
     submitMobileOrder(input, circleNameForSubmission.current, mobileOrderDisplayItems.current, key),
@@ -584,8 +586,18 @@ function MenuPageContent() {
       clearSavedMobileCart();
       toast.success(`注文を受け付けました！呼出番号: ${orderData.orderNumber}`);
       setCart([]);
-      // 注文直後は注文履歴に遷移し、店頭注文の状態(呼出番号・受取状況)を確認できるようにする (2026-07-11)
-      navigate("/visitor/orders");
+      // 2026-10-21: 注文履歴で今回の注文を注文票として強調し、番号・内容・金額を店頭で伝えられるようにする。
+      navigate("/visitor/orders", {
+        state: isMobileOrderRoute ? {
+          mobileOrderReceipt: {
+            orderId: orderData.id,
+            orderNumber: orderData.orderNumber,
+            circleName: circleNameForSubmission.current,
+            totalPrice: cartTotal(cart),
+            items: mobileOrderDisplayItems.current,
+          },
+        } : undefined,
+      });
     },
     onError: (error: any) => {
       if (error instanceof ApiError && (error.code === "NETWORK" || error.status === 429 || error.status >= 500)) {
