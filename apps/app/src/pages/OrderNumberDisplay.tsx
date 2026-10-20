@@ -165,8 +165,16 @@ export default function OrderNumberDisplay() {
   }, []);
 
   const orders = ordersQuery.data ?? [];
-  const displayAspectRatio = displayAreaSize.width / Math.max(1, displayAreaSize.height);
-  const placeMediaBesideNumbers = displaySettings.media.length > 0 && displayAspectRatio >= mediaAspectRatio;
+  const mediaShare = displaySettings.mediaPercent / 100;
+  const containedMediaArea = (width: number, height: number) => {
+    const containedWidth = Math.min(width, height * mediaAspectRatio);
+    const containedHeight = containedWidth / mediaAspectRatio;
+    return containedWidth * containedHeight;
+  };
+  const sideBySideMediaArea = containedMediaArea(displayAreaSize.width * mediaShare, displayAreaSize.height);
+  const stackedMediaArea = containedMediaArea(displayAreaSize.width, displayAreaSize.height * mediaShare);
+  // 2026-10-21: メディアと番号の実分割枠で object-contain 時の表示面積を比べ、縦長素材でも向きを誤らない。
+  const placeMediaBesideNumbers = displaySettings.media.length > 0 && sideBySideMediaArea >= stackedMediaArea;
   // 2026-10-21: 完成と受け渡しを分け、未受け渡しの完成注文を番号表示に残す。
   const preparingOrders = orders.filter((order) => order.status === "pending" || order.status === "preparing");
   const readyOrders = orders.filter((order) => (order.status === "ready" || order.status === "completed") && !order.receivedAt);
