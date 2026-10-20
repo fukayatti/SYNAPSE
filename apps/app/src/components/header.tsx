@@ -742,7 +742,8 @@ export default function Header() {
     <header data-app-header className="sticky top-0 z-50 bg-background border-b-thick border-border text-foreground font-mono">
       <div className="flex items-center justify-between px-2 sm:px-4 py-2 max-w-7xl mx-auto gap-2 sm:gap-4">
         <div className="flex min-w-0 shrink-0 items-center gap-1.5">
-          {pathname.startsWith("/event/dashboard") && (
+          {/* 2026-10-20: 共有ドロワーを使うシステム/サークル管理画面でも、狭い幅から開けるトリガーを表示する。 */}
+          {(pathname.startsWith("/event/dashboard") || pathname.startsWith("/sys/dashboard") || pathname.startsWith("/circle/dashboard")) && (
             <button
               type="button"
               aria-label={dashboardMenuOpen ? "管理画面メニューを閉じる" : "管理画面メニューを開く"}
