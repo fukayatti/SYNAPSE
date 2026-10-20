@@ -1,5 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
+import { Package, Save, Store } from "lucide-react";
 import { toppingApi, circleApi, parseCircleSettings, type Topping } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { ImageUpload } from "@/components/image-upload";
@@ -13,9 +14,10 @@ import {
 } from "@/components/ui/FormField";
 import { UnsavedChangesDialog } from "@/components/ui/UnsavedChangesDialog";
 import { useEntityForm } from "@/hooks/useEntityForm";
-import { Save } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { AllergenSelector } from "@/components/menu/AllergenSelector";
+import { SignedPriceField } from "@/components/menu/SignedPriceField";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { parseJapaneseAllergens, type JapaneseAllergen } from "@fesflow/config/allergens";
 
 interface ToppingFormModalProps {
@@ -31,9 +33,14 @@ interface ToppingFormModalProps {
 type ToppingForm = { name: string; category: string; price: number; imagePath: string; description: string; allergens: JapaneseAllergen[] | null; soldOut: boolean };
 
 export function ToppingFormModal({ circleId, isOpen, onClose, topping, onDelete }: ToppingFormModalProps) {
+  // 2026-10-21: 商品情報と販売状態を分け、長い編集欄を目的別に見渡せるようにする。
+  const [activeSection, setActiveSection] = useState("product");
   const [newCategory, setNewCategory] = useState("");
   useEffect(() => {
-    if (isOpen) setNewCategory("");
+    if (isOpen) {
+      setNewCategory("");
+      setActiveSection("product");
+    }
   }, [isOpen, topping?.id]);
 
   const { data: toppings } = useQuery({
@@ -115,7 +122,38 @@ export function ToppingFormModal({ circleId, isOpen, onClose, topping, onDelete 
       >
         {isEdit && <EditModeBanner saveStatus={saveStatus} />}
 
-        <div className="grid grid-cols-2 gap-4">
+        {/* 2026-10-21: 商品名・金額・販売状態を編集前後で一目で比較できる要約。 */}
+        <div className="flex min-w-0 items-center gap-3 border-b-thin border-border pb-3">
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center border-thick border-border bg-muted/30">
+            <Package className="h-6 w-6" aria-hidden="true" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-bold">{form.name || "トッピング名未設定"}</p>
+            <p className={`font-mono text-xl font-bold ${form.price < 0 ? "text-destructive" : ""}`}>
+              ¥{form.price.toLocaleString("ja-JP")}
+            </p>
+          </div>
+          <div className={`shrink-0 border-thick px-2 py-1 text-[10px] font-bold ${form.soldOut ? "border-destructive bg-destructive/10 text-destructive" : "border-success bg-success/10 text-success"}`}>
+            {form.soldOut ? "売り切れ" : "販売中"}
+          </div>
+        </div>
+
+        <Tabs value={activeSection} onValueChange={setActiveSection} className="w-full">
+          <TabsList className="sticky top-0 z-10 grid h-auto grid-cols-2 gap-1 border-0 bg-background p-0">
+            <TabsTrigger value="product" className="h-auto min-h-14 flex-col gap-1 border-thick border-border px-1 py-2 text-[10px] sm:text-xs">
+              <span className="flex items-center gap-1"><Package className="h-4 w-4" aria-hidden="true" />商品</span>
+              <span className="max-w-full truncate text-[9px] font-normal normal-case tracking-normal">名前・価格・カテゴリ</span>
+            </TabsTrigger>
+            <TabsTrigger value="availability" className="h-auto min-h-14 flex-col gap-1 border-thick border-border px-1 py-2 text-[10px] sm:text-xs">
+              <span className="flex items-center gap-1"><Store className="h-4 w-4" aria-hidden="true" />販売</span>
+              <span className={`max-w-full truncate text-[9px] font-normal normal-case tracking-normal ${form.soldOut ? "text-destructive" : "text-success"}`}>
+                {form.soldOut ? "売り切れ" : "販売中"}
+              </span>
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="product" className="space-y-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <FormField
             id="toppingName"
             label="トッピング名"
@@ -125,19 +163,20 @@ export function ToppingFormModal({ circleId, isOpen, onClose, topping, onDelete 
             onBlur={triggerAutoSave}
             placeholder="例: チーズ増量"
           />
-          <FormField
+          <SignedPriceField
             id="toppingPrice"
             label="価格"
-            required
-            type="number"
-            // 割引トッピング用に負値を許可 (FormField 既定の min=0 クランプを外す)
-            min={-1000000}
             value={form.price}
             onChange={(e) => {
               const n = Number(e.target.value);
               setForm({ ...form, price: Number.isNaN(n) ? 0 : n });
             }}
             onBlur={triggerAutoSave}
+            onToggleSign={() => {
+              const next = { ...form, price: form.price < 0 ? Math.abs(form.price) : -Math.abs(form.price) };
+              setForm(next);
+              if (isEdit) saveNow(next);
+            }}
           />
         </div>
 
@@ -194,6 +233,9 @@ export function ToppingFormModal({ circleId, isOpen, onClose, topping, onDelete 
           onBlur={triggerAutoSave}
           placeholder="トッピングの説明"
         />
+          </TabsContent>
+
+          <TabsContent value="availability" className="space-y-4">
 
         <AllergenSelector
           value={form.allergens}
@@ -236,6 +278,8 @@ export function ToppingFormModal({ circleId, isOpen, onClose, topping, onDelete 
             </button>
           )}
         </div>
+          </TabsContent>
+        </Tabs>
 
         {!isEdit && (
           <FormSubmitButton
