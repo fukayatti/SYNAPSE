@@ -298,7 +298,7 @@ export function ToppingFormModal({ circleId, isOpen, onClose, topping, onDelete 
 
         <FormField
           id="toppingDescription"
-          label="説明"
+          label="説明（任意）"
           value={form.description}
           onChange={(e) => setForm({ ...form, description: e.target.value })}
           onBlur={triggerAutoSave}

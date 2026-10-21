@@ -141,6 +141,7 @@ menuRoutes.post(
       category: z.string().max(100).optional(),
       // 価格は負値も許可 (割引メニュー等を表現するため。2026-07-07 に min(0) を撤廃)。
       price: z.number(),
+      // 2026-10-22: 説明は任意項目として、未入力でもメニューを登録できる。
       description: z.string().optional(),
       // 画像は任意。未指定でメニュー追加できるようにする (2026-07-06: 画像なしだと
       // imagePath が送られず 400 Bad Request になっていた不具合の修正)。
@@ -223,7 +224,8 @@ menuRoutes.put(
       category: z.string().max(100).optional(),
       sortOrder: z.number().int().min(0).optional(),
       price: z.number().optional(), // 負値許可 (割引メニュー)
-      description: z.string().optional(),
+      // 2026-10-22: 説明は任意で、null により編集時に空欄へ戻せるようにする。
+      description: z.string().nullable().optional(),
       imagePath: z.string().optional(),
       additionalInfo: z.string().optional(),
       allergens: allergensSchema.optional(),

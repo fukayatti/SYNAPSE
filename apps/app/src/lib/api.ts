@@ -1486,7 +1486,7 @@ export interface UpdateMenuInput {
   category?: string;
   sortOrder?: number;
   price?: number;
-  description?: string;
+  description?: string | null;
   allergens?: JapaneseAllergen[];
   imagePath?: string | null;
   imageUrl?: string;

@@ -1,7 +1,4 @@
 # Agents.md
-// テンプレートを以下に貼り付けたので、書き換えること
-// 書き換えたらこの指示は消して良い
-
 ## Project goal
 以下のシステムのモノレポ構成です。
 - 文化祭の模擬店向けシステム
@@ -37,6 +34,7 @@
 - Deploy: 各アプリで `bunx wrangler deploy` (or `bun run deploy`)
 
 ## Working rules
+- 2026-10-22: 今後の開発は `main` を基準にする。作業ブランチは `origin/main` から作成し、PR のマージ先も `main` にする。`dev` は開発・リリースに使用しない。
 - 変更前に関連ファイルを読む。
 - 既存の設計・命名に合わせる。
 - 大きな変更は小さな差分に分ける。
@@ -91,7 +89,7 @@ PRには以下を書く。
   - issueを立てているか
 
 Issueに紐づくPRでは、完了条件をすべて満たす場合のみ本文に `Closes #<issue番号>` を書く。部分対応や調査のみの場合は `Refs #<issue番号>` を使い、Issueを完了扱いにしない。
-既定ブランチ `main` へのPRはGitHub標準機能でマージ時に自動クローズされる。通常のマージ先 `dev` では標準機能が働かないため、`Closes #...` を含むPRが `dev` にマージされた時は `.github/workflows/close-issues-on-dev-merge.yml` がIssueへ根拠コメントを残して自動クローズする。
+PR のマージ先は `main` とする。完了条件を満たす Issue 対応PRには `Closes #<issue番号>` を記載し、部分対応や調査のみの場合は `Refs #<issue番号>` を使う。
 
 ## about this project
 
@@ -115,3 +113,6 @@ docs/DEVELOPMENT.md
 を参考にしながら行なってください。
 
 ## 作業終了時
+
+- 通常チェックアウトは `main` のクリーンな状態に戻す。既存のユーザー変更がある場合は内容を保持し、必要に応じて名前付き stash に退避してから移動する。
+- `main` は安全に fast-forward できる場合のみ `origin/main` に揃える。終了時にブランチ名、clean 状態、退避した変更の有無を報告する。
