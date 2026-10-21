@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { PRODUCT_NAME } from "@fesflow/config";
+import BrandLogo from "@/components/BrandLogo";
 import { QrCode, Receipt, Ticket, UtensilsCrossed } from "lucide-react";
 import { Bell } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
@@ -51,11 +52,10 @@ export default function VisitorHeader() {
         <Link
           to="/visitor"
           aria-label={`${PRODUCT_NAME} 来場者トップ`}
-          className="flex min-h-10 min-w-0 flex-1 items-center text-sm font-black uppercase tracking-[2px] hover:opacity-80"
+          className="flex min-h-10 min-w-0 flex-1 items-center gap-2 text-sm font-black uppercase tracking-[2px] hover:opacity-80"
         >
-          <span className="border-thick border-border bg-primary px-2 py-1 text-primary-foreground">
-            {PRODUCT_NAME.toUpperCase()}
-          </span>
+          {/* 2026-10-22: Keep the visitor navigation on the shared icon-and-name lockup. */}
+          <BrandLogo size="small" />
           {isEntered && session?.displayId != null && (
             <span className="ml-2 border-thin border-border bg-muted px-2 py-1 text-[11px] font-bold">
               来場者 <span className="tabular-nums">#{session.displayId}</span>
