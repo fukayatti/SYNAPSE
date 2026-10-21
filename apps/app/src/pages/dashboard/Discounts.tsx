@@ -13,6 +13,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { discountApi, type DiscountKind } from "@/lib/api";
 import { useAuth, CircleAuthGuard, PermissionGuard } from "@/hooks/useCircleAuth";
 import { useUnsavedChanges } from "@/components/UnsavedNavigationGuard";
+import { queryCachePolicy } from "@/lib/query-cache-policy";
 
 type DiscountForm = { title: string; kind: DiscountKind; value: number };
 const initialForm: DiscountForm = { title: "", kind: "percentage", value: 10 };
@@ -31,6 +32,7 @@ function DiscountsContent() {
     queryKey: ["discounts", circleId],
     queryFn: () => discountApi.listByCircle(circleId),
     enabled: !!circleId,
+    ...queryCachePolicy.live,
   });
 
   const createMutation = useMutation({
@@ -83,11 +85,12 @@ function DiscountsContent() {
       )}
     >
       <div className="space-y-5 font-mono">
+        {isError && discounts !== undefined && <p role="status" className="border-thick border-warning bg-warning/10 p-3 text-xs">最新の割引一覧を取得できません。前回取得した内容を表示しています。</p>}
         <p className="text-xs leading-relaxed text-muted-foreground">
           割引率または金額引きを設定できます。作成した割引はサークルのレジ会計でのみ利用できます。
         </p>
         {isLoading ? <div className="space-y-3"><Skeleton className="h-24" /><Skeleton className="h-24" /></div>
-          : isError ? <div role="alert" className="space-y-2 text-sm"><p>割引を読み込めませんでした。</p><Button variant="outline" onClick={() => refetch()}>再読み込み</Button></div>
+          : isError && discounts === undefined ? <div role="alert" className="space-y-2 text-sm"><p>割引を読み込めませんでした。</p><Button variant="outline" onClick={() => refetch()}>再読み込み</Button></div>
           : !discounts?.length ? <EmptyState icon={Tag} message="割引はまだありません" />
           : <div className="space-y-3">{discounts.map((item) => (
             <Card key={item.id} className={item.status === "disabled" ? "opacity-60" : ""}>

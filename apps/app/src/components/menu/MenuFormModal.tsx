@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { menuApi, toppingApi, type MenuWithToppings } from "@/lib/api";
+import { menuApi, toppingApi, type CreateMenuInput, type MenuWithToppings, type Topping, type UpdateMenuInput } from "@/lib/api";
+import { updateCachedLists } from "@/lib/optimistic-query";
 import { cn } from "@/lib/utils";
 import { ImageUpload } from "@/components/image-upload";
 import { Modal } from "@/components/ui/Modal";
@@ -13,11 +14,13 @@ import {
 } from "@/components/ui/FormField";
 import { UnsavedChangesDialog } from "@/components/ui/UnsavedChangesDialog";
 import { useEntityForm } from "@/hooks/useEntityForm";
-import { Save } from "lucide-react";
+import { Package, Save, SlidersHorizontal, Store } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { parseToppingCategoryMaximums, parseToppingCategoryMinimums } from "@/components/menu/ToppingSelection";
 import { AllergenSelector } from "@/components/menu/AllergenSelector";
+import { SignedPriceField } from "@/components/menu/SignedPriceField";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { parseJapaneseAllergens, type JapaneseAllergen } from "@fesflow/config/allergens";
 
 interface MenuFormModalProps {
@@ -57,10 +60,15 @@ function parseDefaultToppingIds(raw?: string): string[] {
 }
 
 export function MenuFormModal({ circleId, isOpen, onClose, menu, onDelete }: MenuFormModalProps) {
+  // 2026-10-21: 長い設定を目的別に分け、再表示時は毎回最初の手順から始める。
+  const [activeSection, setActiveSection] = useState("product");
   // 2026-10-16: 既存カテゴリから選ぶ操作と同じ画面での新規カテゴリ登録に使う。
   const [newCategory, setNewCategory] = useState("");
   useEffect(() => {
-    if (isOpen) setNewCategory("");
+    if (isOpen) {
+      setNewCategory("");
+      setActiveSection("product");
+    }
   }, [isOpen, menu?.id]);
   const { data: menus } = useQuery({
     queryKey: ["menus", circleId],
@@ -75,6 +83,49 @@ export function MenuFormModal({ circleId, isOpen, onClose, menu, onDelete }: Men
   });
 
   const queryClient = useQueryClient();
+
+  const createInput = (data: MenuForm): CreateMenuInput => {
+    if (data.allergens === null) throw new Error("メニューを登録する前にアレルゲンを選択してください。");
+    return {
+      circleId,
+      name: data.name,
+      category: data.category.trim(),
+      price: data.price,
+      imagePath: data.imagePath || undefined,
+      description: data.description || undefined,
+      allergens: data.allergens,
+      // 2026-09-27: 在庫管理は商品ごとに選び、新規商品の既定はOFF。
+      inventoryEnabled: data.inventoryEnabled,
+      stockQuantity: data.stockQuantity,
+      soldOut: data.soldOut,
+      toppingIds: data.toppingIds,
+      defaultToppingIds: data.defaultToppingIds,
+      toppingWizardEnabled: data.toppingWizardEnabled,
+      toppingCategoryMinimums: data.toppingCategoryMinimums,
+      toppingCategoryMaximums: data.toppingCategoryMaximums,
+    };
+  };
+  const updateInput = (data: MenuForm): UpdateMenuInput => {
+    if (data.allergens === null) throw new Error("メニューを保存する前にアレルゲンを選択してください。");
+    return {
+      name: data.name,
+      category: data.category.trim(),
+      price: data.price,
+      // 2026-10-07 Issue #48: 空文字は画像削除の明示値として PUT に渡す。
+      imagePath: data.imagePath,
+      description: data.description || undefined,
+      allergens: data.allergens,
+      soldOut: data.soldOut,
+      toppingIds: data.toppingIds,
+      inventoryEnabled: data.inventoryEnabled,
+      stockQuantity: data.stockQuantity,
+      defaultToppingIds: data.defaultToppingIds,
+      toppingWizardEnabled: data.toppingWizardEnabled,
+      toppingCategoryMinimums: data.toppingCategoryMinimums,
+      toppingCategoryMaximums: data.toppingCategoryMaximums,
+    };
+  };
+
   const {
     form, setForm, isEdit, isConfirmOpen, setIsConfirmOpen, isCreating, saveStatus,
     triggerAutoSave, saveNow, handleOverlayClose, handleSaveAndClose, handleDiscardAndClose,
@@ -102,46 +153,80 @@ export function MenuFormModal({ circleId, isOpen, onClose, menu, onDelete }: Men
     onClose,
     toastId: "menu-auto-save",
     invalidateKeys: [["menus", circleId]],
-    create: (data) => {
-      if (data.allergens === null) throw new Error("メニューを登録する前にアレルゲンを選択してください。");
-      return menuApi.create({
+    create: (data) => menuApi.create(createInput(data)),
+    // 2026-10-21: 追加操作の直後に一覧へ仮表示し、サーバーIDが返ったら仮IDを置き換える。
+    onOptimisticCreate: async (data) => {
+      const input = createInput(data);
+      const optimisticId = `optimistic-menu-${crypto.randomUUID()}`;
+      const selectedToppings = input.toppingIds?.flatMap((id) => {
+        const selected = toppings?.find((item) => item.id === id);
+        return selected ? [selected] : [];
+      }) ?? [];
+      const optimisticMenu: MenuWithToppings = {
+        id: optimisticId,
         circleId,
-        name: data.name,
-        category: data.category.trim(),
-        price: data.price,
-        imagePath: data.imagePath || undefined,
-        description: data.description || undefined,
-        allergens: data.allergens,
-        // 2026-09-27: 在庫管理は商品ごとに選び、新規商品の既定はOFF。
-        inventoryEnabled: data.inventoryEnabled,
-        stockQuantity: data.stockQuantity,
-        soldOut: data.soldOut,
-        toppingIds: data.toppingIds,
-        defaultToppingIds: data.defaultToppingIds,
-        toppingWizardEnabled: data.toppingWizardEnabled,
-        toppingCategoryMinimums: data.toppingCategoryMinimums,
-        toppingCategoryMaximums: data.toppingCategoryMaximums,
-      });
+        name: input.name,
+        category: input.category ?? "",
+        price: input.price,
+        description: input.description ?? null,
+        allergens: JSON.stringify(input.allergens),
+        imagePath: input.imagePath ?? null,
+        stockQuantity: input.stockQuantity ?? 0,
+        inventoryEnabled: input.inventoryEnabled ?? false,
+        soldOut: input.soldOut ?? false,
+        isArchived: false,
+        defaultToppingIds: JSON.stringify(input.defaultToppingIds ?? []),
+        toppingWizardEnabled: input.toppingWizardEnabled ?? false,
+        toppingCategoryMinimums: JSON.stringify(input.toppingCategoryMinimums ?? {}),
+        toppingCategoryMaximums: JSON.stringify(input.toppingCategoryMaximums ?? {}),
+        toppings: selectedToppings,
+      };
+      const transaction = await updateCachedLists<MenuWithToppings>(
+        queryClient,
+        ["menus", circleId],
+        (current) => [...current, optimisticMenu],
+      );
+      return {
+        rollback: transaction.rollback,
+        commit: (result) => {
+          const id = (result as { id?: string } | null)?.id;
+          if (id) transaction.commit((current) => current.map((item) => item.id === optimisticId ? { ...item, id } : item));
+        },
+      };
     },
     update: async (m, data) => {
-      if (data.allergens === null) throw new Error("メニューを保存する前にアレルゲンを選択してください。");
-      await menuApi.update(m.id, {
-        name: data.name,
-        category: data.category.trim(),
-        price: data.price,
-        // 2026-10-07 Issue #48: 空文字は画像削除の明示値として PUT に渡す。
-        imagePath: data.imagePath,
-        description: data.description || undefined,
-        allergens: data.allergens,
-        soldOut: data.soldOut,
-        toppingIds: data.toppingIds,
-        inventoryEnabled: data.inventoryEnabled,
-        stockQuantity: data.stockQuantity,
-        defaultToppingIds: data.defaultToppingIds,
-        toppingWizardEnabled: data.toppingWizardEnabled,
-        toppingCategoryMinimums: data.toppingCategoryMinimums,
-        toppingCategoryMaximums: data.toppingCategoryMaximums,
-      });
+      await menuApi.update(m.id, updateInput(data));
+    },
+    // 2026-10-21: 編集フォームの変更を管理一覧へ先行反映し、通信失敗時は直前の値へ戻す。
+    onOptimisticUpdate: async (menu, data) => {
+      const input = updateInput(data);
+      const selectedToppings = input.toppingIds?.flatMap((id) => {
+        const selected = toppings?.find((item) => item.id === id) ?? menu.toppings.find((item) => item.id === id);
+        return selected ? [selected] : [];
+      }) ?? menu.toppings;
+      const updatedMenu: MenuWithToppings = {
+        ...menu,
+        name: input.name ?? menu.name,
+        category: input.category ?? menu.category,
+        price: input.price ?? menu.price,
+        imagePath: input.imagePath || null,
+        description: input.description ?? menu.description,
+        allergens: JSON.stringify(input.allergens),
+        soldOut: input.soldOut ?? menu.soldOut,
+        inventoryEnabled: input.inventoryEnabled ?? menu.inventoryEnabled,
+        stockQuantity: input.stockQuantity ?? menu.stockQuantity,
+        defaultToppingIds: JSON.stringify(input.defaultToppingIds ?? []),
+        toppingWizardEnabled: input.toppingWizardEnabled ?? menu.toppingWizardEnabled,
+        toppingCategoryMinimums: JSON.stringify(input.toppingCategoryMinimums ?? {}),
+        toppingCategoryMaximums: JSON.stringify(input.toppingCategoryMaximums ?? {}),
+        toppings: selectedToppings,
+      };
+      const transaction = await updateCachedLists<MenuWithToppings>(
+        queryClient,
+        ["menus", circleId],
+        (current) => current.map((item) => item.id === menu.id ? updatedMenu : item),
+      );
+      return { rollback: transaction.rollback };
     },
     validate: (data) => !data.name
       ? "メニュー名を入力してください"
@@ -185,13 +270,49 @@ export function MenuFormModal({ circleId, isOpen, onClose, menu, onDelete }: Men
         isOpen={isOpen}
         onClose={handleOverlayClose}
         title={isEdit ? `[メニュー編集: ${menu?.name}]` : "[新規メニュー追加]"}
+        dialogClassName="h-[min(82dvh,52rem)]"
       >
         {isEdit && <EditModeBanner saveStatus={saveStatus} />}
         {isEdit && menu?.id && (
           <p className="border-b-thin border-border pb-2 font-mono text-[10px] text-muted-foreground">ID: {menu.id}</p>
         )}
 
-        <div className="grid grid-cols-2 gap-4">
+        {/* 2026-10-21: 編集内容を開く前に商品・金額・販売状態がひと目で分かる要約。 */}
+        <div className="flex min-w-0 items-center gap-3 border-b-thin border-border pb-3">
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center border-thick border-border bg-muted/30">
+            <Package className="h-6 w-6" aria-hidden="true" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-bold">{form.name || "商品名未設定"}</p>
+            <p className={`font-mono text-xl font-bold ${form.price < 0 ? "text-destructive" : ""}`}>
+              ¥{form.price.toLocaleString("ja-JP")}
+            </p>
+          </div>
+          <div className={`shrink-0 border-thick px-2 py-1 text-[10px] font-bold ${form.soldOut ? "border-destructive bg-destructive/10 text-destructive" : "border-success bg-success/10 text-success"}`}>
+            {form.soldOut ? "売り切れ" : "販売中"}
+          </div>
+        </div>
+
+        <Tabs value={activeSection} onValueChange={setActiveSection} className="w-full">
+          <TabsList className="sticky top-0 z-10 grid h-auto grid-cols-3 gap-1 border-0 bg-background p-0">
+            <TabsTrigger value="product" className="h-auto min-h-14 flex-col gap-1 border-thick border-border px-1 py-2 text-[10px] sm:text-xs">
+              <span className="flex items-center gap-1"><Package className="h-4 w-4" aria-hidden="true" />商品</span>
+              <span className="max-w-full truncate text-[9px] font-normal normal-case tracking-normal">名前・価格・画像</span>
+            </TabsTrigger>
+            <TabsTrigger value="availability" className="h-auto min-h-14 flex-col gap-1 border-thick border-border px-1 py-2 text-[10px] sm:text-xs">
+              <span className="flex items-center gap-1"><Store className="h-4 w-4" aria-hidden="true" />販売</span>
+              <span className={`max-w-full truncate text-[9px] font-normal normal-case tracking-normal ${form.soldOut ? "text-destructive" : "text-success"}`}>
+                {form.inventoryEnabled ? `在庫 ${form.stockQuantity} 個` : form.soldOut ? "売り切れ" : "販売中"}
+              </span>
+            </TabsTrigger>
+            <TabsTrigger value="ordering" className="h-auto min-h-14 flex-col gap-1 border-thick border-border px-1 py-2 text-[10px] sm:text-xs">
+              <span className="flex items-center gap-1"><SlidersHorizontal className="h-4 w-4" aria-hidden="true" />注文設定</span>
+              <span className="max-w-full truncate text-[9px] font-normal normal-case tracking-normal">トッピング {form.toppingIds.length} 件</span>
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="product" className="space-y-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <FormField
             id="menuName"
             label="メニュー名"
@@ -201,19 +322,20 @@ export function MenuFormModal({ circleId, isOpen, onClose, menu, onDelete }: Men
             onBlur={triggerAutoSave}
             placeholder="例: ハンバーガー"
           />
-          <FormField
+          <SignedPriceField
             id="menuPrice"
             label="価格"
-            required
-            type="number"
-            // 割引メニュー用に負値を許可 (FormField 既定の min=0 クランプを外す)
-            min={-1000000}
             value={form.price}
             onChange={(e) => {
               const n = Number(e.target.value);
               setForm({ ...form, price: Number.isNaN(n) ? 0 : n });
             }}
             onBlur={triggerAutoSave}
+            onToggleSign={() => {
+              const next = { ...form, price: form.price < 0 ? Math.abs(form.price) : -Math.abs(form.price) };
+              setForm(next);
+              if (isEdit) saveNow(next);
+            }}
           />
         </div>
 
@@ -255,6 +377,9 @@ export function MenuFormModal({ circleId, isOpen, onClose, menu, onDelete }: Men
           onBlur={triggerAutoSave}
           placeholder="商品の説明"
         />
+          </TabsContent>
+
+          <TabsContent value="availability" className="space-y-4">
 
         <AllergenSelector
           value={form.allergens}
@@ -349,7 +474,9 @@ export function MenuFormModal({ circleId, isOpen, onClose, menu, onDelete }: Men
             </button>
           )}
         </div>
+          </TabsContent>
 
+          <TabsContent value="ordering" className="space-y-4">
         {/* 既定トッピング: レジで追加時に自動で入るトッピング */}
         {toppings && toppings.length > 0 && (
           <div className="space-y-1.5">
@@ -501,6 +628,9 @@ export function MenuFormModal({ circleId, isOpen, onClose, menu, onDelete }: Men
             </div>
           )}
         </div>
+
+          </TabsContent>
+        </Tabs>
 
         {!isEdit && (
           <FormSubmitButton

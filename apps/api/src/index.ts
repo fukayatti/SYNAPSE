@@ -44,6 +44,7 @@ import { apiError, registerErrorHandlers } from "./http-error";
 import type { AppEnv } from "./types";
 import { requestObservability } from "./middleware/observability";
 import { cleanupMustDryRun, runCleanup } from "./services/cleanup";
+import { sendEndedEventReviewReminders } from "./services/review-reminders";
 
 // Hono REST ルート
 import {
@@ -64,6 +65,7 @@ import {
   reviewRoutes,
   systemRoutes,
   adminRoutes,
+  notificationRoutes,
 } from "./routes";
 
 const app = new Hono<AppEnv>();
@@ -194,6 +196,9 @@ app.use("/api/*", async (c, next) => {
   }
 });
 
+// 2026-10-21: SPAは業務APIの利用が途切れても疎通を判定できるよう、DBを読まない監視先を用意する。
+app.get("/api/health", (c) => c.json({ status: "ok" }));
+
 // Better Auth ハンドラ
 // 2026-10-03 (#94): 共有NATの1人を理由に同じIPの他の利用者を拒否しないよう、
 // IPバケットは使わず、要求から特定できるメール/パスキー識別子だけをHMAC keyで制限する。
@@ -253,6 +258,7 @@ app.route("/api/discounts", discountRoutes);
 app.route("/api/reviews", reviewRoutes);
 app.route("/api/system", systemRoutes);
 app.route("/api/admin", adminRoutes);
+app.route("/api/notifications", notificationRoutes);
 
 // 画像・フォントアップロード (fs → R2/MinIO)
 // 2026-07-05: SVG は同一オリジン配信時にスクリプトを実行し得る (保存型XSS) ため
@@ -268,7 +274,11 @@ const ALLOWED_EXTS = [
   "otf",
   "woff",
   "woff2",
+  "mp4",
+  "webm",
+  "mov",
 ];
+const VIDEO_EXTS = ["mp4", "webm", "mov"];
 
 // Phase4: 従来は try/catch で握りつぶして 500 に丸めていたが、AppError による
 // 早期 return (401/403/400) を onError に委譲するため try/catch を廃止した。
@@ -305,18 +315,23 @@ app.post("/api/upload", async (c) => {
   if (!ALLOWED_EXTS.includes(ext)) {
     apiError(
       "BAD_REQUEST",
-      "許可されていないファイル形式です (画像: jpg, png, webp / フォント: ttf, otf, woff, woff2)",
+      "許可されていないファイル形式です (画像: jpg, png, webp / 動画: mp4, webm, mov / フォント: ttf, otf, woff, woff2)",
     );
   }
 
-  if (file.size > 10 * 1024 * 1024) {
-    apiError("BAD_REQUEST", "ファイルサイズは10MB以下にしてください");
+  const isVideo = VIDEO_EXTS.includes(ext);
+  if ((isVideo && file.type && !file.type.startsWith("video/")) || (!isVideo && file.type.startsWith("video/"))) {
+    apiError("BAD_REQUEST", "ファイルの種類と拡張子が一致しません");
+  }
+
+  if (file.size > (isVideo ? 30 : 10) * 1024 * 1024) {
+    apiError("BAD_REQUEST", isVideo ? "動画は30MB以下にしてください" : "ファイルサイズは10MB以下にしてください");
   }
 
   const key = `uploads/${nanoid()}.${ext}`;
   const storage = createStorage(c.env as WorkerEnv);
   await storage.put(key, await file.arrayBuffer(), {
-    contentType: file.type || undefined,
+    contentType: file.type || (ext === "mp4" ? "video/mp4" : ext === "webm" ? "video/webm" : ext === "mov" ? "video/quicktime" : undefined),
     cacheControl: "public, max-age=31536000, immutable",
   });
 
@@ -363,5 +378,7 @@ export default {
   async scheduled(_eventInfo: unknown, env: WorkerEnv, ctx: { waitUntil: (promise: Promise<void>) => void }) {
     // 2026-10-03 (#83): 規程確認後に明示的に有効化されるまで、scheduledでは候補確認だけを行う。
     ctx.waitUntil(runCleanup(env.DB, { dryRun: cleanupMustDryRun(env) }).then(() => undefined));
+    // 2026-10-21: 終了イベントごとの送信済み印を使い、受取済み来場者へレビュー依頼を一度だけ送る。
+    ctx.waitUntil(sendEndedEventReviewReminders(env).catch(() => console.warn("review_reminder_job_failed")));
   }
 };

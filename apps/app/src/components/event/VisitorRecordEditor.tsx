@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, Camera, Clock3, History, Loader2, Plus, Save, Trash2, Users } from "lucide-react";
+import { AlertTriangle, BadgeCheck, Ban, Camera, Clock3, History, Loader2, Plus, Save, Ticket, Trash2, Users } from "lucide-react";
 import { toast } from "sonner";
 import { useUnsavedChanges } from "@/components/UnsavedNavigationGuard";
 import { AllergenSelector } from "@/components/menu/AllergenSelector";
@@ -74,6 +74,19 @@ const WRISTBAND_STATUS_LABEL: Record<WristbandStatus, string> = {
   revoked: "停止・管理者が無効化",
 };
 
+// 2026-10-21: 状態は色とアイコンと短いラベルで表し、説明文を読まずに有効/停止を見分けられるようにする。
+function wristbandStatusClass(status: WristbandStatus): string {
+  if (status === "active" || status === "smartphone") return "border-success bg-success/10 text-success";
+  if (status === "lost" || status === "revoked") return "border-destructive bg-destructive/10 text-destructive";
+  return "border-warning bg-warning/10 text-foreground";
+}
+
+function wristbandCardBorderClass(status: WristbandStatus): string {
+  if (status === "active" || status === "smartphone") return "border-success/70";
+  if (status === "replaced") return "border-warning";
+  return "border-destructive";
+}
+
 function toLocalDateTime(value: string | Date | null | undefined): string {
   if (!value) return "";
   const date = new Date(value);
@@ -124,7 +137,8 @@ function toDraft(data: VisitorAdminEditorData): EditorDraft {
       draftKey: visit.id,
       id: visit.id,
       isNew: false,
-      isDeleted: false,
+      // 2026-10-21: 削除済みの利用実績も編集画面から戻せるよう、保存状態を読み込む。
+      isDeleted: visit.deletedAt !== null,
       circleId: visit.circleId,
       staffId: visit.staffId ?? "",
       createdAt: toLocalDateTime(visit.createdAt),
@@ -152,6 +166,7 @@ export function VisitorRecordEditor({
   const [saveError, setSaveError] = useState<string | null>(null);
   const [scannerTargetBandKey, setScannerTargetBandKey] = useState<string | null>(null);
   const [isBandScannerOpen, setIsBandScannerOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState("account");
 
   useEffect(() => {
     if (detailQuery.data && draft === null) {
@@ -326,6 +341,8 @@ export function VisitorRecordEditor({
   const validToSave = draft.profile.displayId !== "" &&
     draft.wristbands.every((band) => band.id.trim() && fromLocalDateTime(band.assignedAt)) &&
     draft.circleVisits.every((visit) => visit.isDeleted || (visit.circleId && fromLocalDateTime(visit.createdAt)));
+  const activeBandCount = draft.wristbands.filter((band) => band.status === "active" || band.status === "smartphone").length;
+  const activeVisitCount = draft.circleVisits.filter((visit) => !visit.isDeleted).length;
 
   return (
     <>
@@ -343,6 +360,28 @@ export function VisitorRecordEditor({
           <p className="text-[10px] text-muted-foreground">作成日時 {new Date(user.createdAt).toLocaleString("ja-JP")} · 更新日時 {new Date(user.updatedAt).toLocaleString("ja-JP")}</p>
         </div>
 
+        {/* 2026-10-21: 呼出番号・利用状態・紐付く記録を要約し、編集対象を最初に把握できるようにする。 */}
+        <div className="mb-4 grid grid-cols-1 gap-3 border-b-thin border-border pb-4 sm:grid-cols-3">
+          <div className="border-l-heavy border-info pl-3">
+            <p className="text-[10px] font-bold uppercase text-muted-foreground">呼出番号</p>
+            <p className="font-mono text-2xl font-bold">{draft.profile.displayId === "" ? "未設定" : `#${draft.profile.displayId}`}</p>
+            <p className="truncate text-xs">{draft.profile.nickname || "ニックネーム未登録"}</p>
+          </div>
+          <div className={`border-l-heavy pl-3 ${draft.profile.status === "banned" ? "border-destructive" : "border-success"}`}>
+            <p className="text-[10px] font-bold uppercase text-muted-foreground">アカウント</p>
+            <p className={`flex items-center gap-2 text-lg font-bold ${draft.profile.status === "banned" ? "text-destructive" : "text-success"}`}>
+              {draft.profile.status === "banned" ? <Ban className="h-5 w-5" aria-hidden="true" /> : <BadgeCheck className="h-5 w-5" aria-hidden="true" />}
+              {draft.profile.status === "banned" ? "利用禁止" : "利用可能"}
+            </p>
+            <p className="text-xs">イベント内の注文・レビュー</p>
+          </div>
+          <div className="border-l-heavy border-border pl-3">
+            <p className="text-[10px] font-bold uppercase text-muted-foreground">登録記録</p>
+            <p className="flex items-center gap-2 text-lg font-bold"><Ticket className="h-5 w-5" aria-hidden="true" />{activeBandCount} / {draft.wristbands.length} バンド有効</p>
+            <p className="text-xs">サークル利用 {activeVisitCount} 件</p>
+          </div>
+        </div>
+
         <div className="mb-4 flex items-start gap-2 border-l-heavy border-info bg-info/5 p-3 text-xs leading-relaxed">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-info" aria-hidden="true" />
           <p>この画面の「アカウント」はイベント専用の来場者アカウントです。ログイン用メールアカウントとの紐付けはありません。システムIDは履歴との対応に使うため変更できません。</p>
@@ -350,11 +389,20 @@ export function VisitorRecordEditor({
 
         {saveError && <p role="alert" className="mb-3 border-l-heavy border-error bg-error/5 p-3 text-xs text-error">{saveError}</p>}
 
-        <Tabs defaultValue="account" className="w-full">
-          <TabsList className="grid h-auto grid-cols-1 gap-1 sm:grid-cols-3">
-            <TabsTrigger value="account" className="min-h-12 px-2">アカウント</TabsTrigger>
-            <TabsTrigger value="wristbands" className="min-h-12 px-2">リストバンド・家族</TabsTrigger>
-            <TabsTrigger value="visits" className="min-h-12 px-2">サークル利用実績</TabsTrigger>
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+          <TabsList className="grid h-auto grid-cols-3 gap-1 border-0 bg-background p-0">
+            <TabsTrigger value="account" className="h-auto min-h-14 flex-col gap-1 border-thick border-border px-1 py-2 text-[10px] sm:text-xs">
+              <span className="flex items-center gap-1"><Users className="h-4 w-4" aria-hidden="true" />アカウント</span>
+              <span className="max-w-full truncate text-[9px] font-normal normal-case tracking-normal">#{draft.profile.displayId || "未設定"}</span>
+            </TabsTrigger>
+            <TabsTrigger value="wristbands" className="h-auto min-h-14 flex-col gap-1 border-thick border-border px-1 py-2 text-[10px] sm:text-xs">
+              <span className="flex items-center gap-1"><Ticket className="h-4 w-4" aria-hidden="true" />バンド</span>
+              <span className="max-w-full truncate text-[9px] font-normal normal-case tracking-normal">有効 {activeBandCount} / {draft.wristbands.length}</span>
+            </TabsTrigger>
+            <TabsTrigger value="visits" className="h-auto min-h-14 flex-col gap-1 border-thick border-border px-1 py-2 text-[10px] sm:text-xs">
+              <span className="flex items-center gap-1"><History className="h-4 w-4" aria-hidden="true" />利用実績</span>
+              <span className="max-w-full truncate text-[9px] font-normal normal-case tracking-normal">{activeVisitCount} 件</span>
+            </TabsTrigger>
           </TabsList>
 
           <TabsContent value="account" className="space-y-4">
@@ -411,19 +459,27 @@ export function VisitorRecordEditor({
               </Button>
             </div>
 
-            <div className="grid grid-cols-1 gap-2 border-thin border-border bg-muted/10 p-3 text-[10px] sm:grid-cols-2">
+            <div className="flex flex-wrap gap-2" aria-label="リストバンドの状態">
               {(Object.keys(WRISTBAND_STATUS_HELP) as WristbandStatus[]).map((status) => (
-                <p key={status}><span className="font-bold">{WRISTBAND_STATUS_LABEL[status]}:</span> {WRISTBAND_STATUS_HELP[status]}</p>
+                <span key={status} className={`inline-flex min-h-8 items-center gap-1 border-thin px-2 text-[10px] font-bold ${wristbandStatusClass(status)}`}>
+                  {status === "active" || status === "smartphone" ? <BadgeCheck className="h-3.5 w-3.5" aria-hidden="true" /> : <Ban className="h-3.5 w-3.5" aria-hidden="true" />}
+                  {WRISTBAND_STATUS_LABEL[status]}
+                </span>
               ))}
             </div>
 
             {draft.wristbands.length === 0 && <p className="py-8 text-center text-xs text-muted-foreground">紐付くバンドはありません。「家族用バンドを追加」から登録できます。</p>}
             <div className="space-y-4">
               {draft.wristbands.map((band, index) => (
-                <section key={band.draftKey} className="space-y-4 border-thick border-border p-3 sm:p-4">
+                <section key={band.draftKey} className={`space-y-4 border-thick p-3 sm:p-4 ${wristbandCardBorderClass(band.status)}`}>
                   <div className="flex flex-col gap-2 border-b-thin border-border pb-3 sm:flex-row sm:items-center sm:justify-between">
-                    <div>
+                    <div className="min-w-0">
                       <h4 className="text-xs font-bold">{band.isNew ? "新しい家族バンド" : `バンド ${index + 1}`}</h4>
+                      <p className="my-1 break-all font-mono text-lg font-bold">{band.id || "QRを読み取るかIDを入力"}</p>
+                      <span className={`inline-flex min-h-7 items-center gap-1 border-thick px-2 text-[10px] font-bold ${wristbandStatusClass(band.status)}`}>
+                        {band.status === "active" || band.status === "smartphone" ? <BadgeCheck className="h-3.5 w-3.5" aria-hidden="true" /> : <Ban className="h-3.5 w-3.5" aria-hidden="true" />}
+                        {WRISTBAND_STATUS_LABEL[band.status]}
+                      </span>
                       <p className="mt-1 text-[10px] text-muted-foreground">{WRISTBAND_STATUS_HELP[band.status]}</p>
                     </div>
                     <Button type="button" variant="outline" onClick={() => removeBand(index)} className="h-9 border-thick border-error text-xs text-error">
@@ -520,9 +576,9 @@ export function VisitorRecordEditor({
               {draft.circleVisits.map((visit, index) => (
                 <section key={visit.draftKey} className={`space-y-3 border-thick p-3 sm:p-4 ${visit.isDeleted ? "border-error bg-error/5 opacity-70" : "border-border"}`}>
                   <div className="flex items-center justify-between gap-3">
-                    <h4 className="text-xs font-bold">{visit.isNew ? "新しい利用実績" : `利用実績 ${index + 1}`}{visit.isDeleted && "（保存時に削除）"}</h4>
-                    {!visit.isDeleted && <Button type="button" variant="outline" onClick={() => removeVisit(index)} className="h-9 border-thick border-error text-xs text-error"><Trash2 className="mr-1 h-3.5 w-3.5" />削除</Button>}
-                    {visit.isDeleted && <Button type="button" variant="outline" onClick={() => editVisit(index, { isDeleted: false })} className="h-9 border-thick border-border text-xs">取り消す</Button>}
+                    <h4 className="text-xs font-bold">{visit.isNew ? "新しい利用実績" : `利用実績 ${index + 1}`}{visit.isDeleted && "（履歴を無効化）"}</h4>
+                    {!visit.isDeleted && <Button type="button" variant="outline" onClick={() => removeVisit(index)} className="h-9 border-thick border-error text-xs text-error"><Trash2 className="mr-1 h-3.5 w-3.5" />利用履歴を無効化</Button>}
+                    {visit.isDeleted && <Button type="button" variant="outline" onClick={() => editVisit(index, { isDeleted: false })} className="h-9 border-thick border-border text-xs">履歴を復元</Button>}
                   </div>
                   {!visit.isDeleted && (
                     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">

@@ -114,6 +114,12 @@ function toIsoDate(value: Date | number | null | undefined): string | null {
   return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 
+// 2026-10-21: 景品交換は終了状態・終了日時の両方で停止し、達成状況の閲覧は残す。
+function isEventEnded(eventRow: { lifecycleStatus: string | null; endDate: Date | null }): boolean {
+  return eventRow.lifecycleStatus === "ended" || eventRow.lifecycleStatus === "archived"
+    || (!!eventRow.endDate && eventRow.endDate.getTime() <= Date.now());
+}
+
 async function resolveVisitor(db: AppEnv["Variables"]["db"], eventId: string, code: string) {
   const direct = await db.select({
     id: eventUser.id,
@@ -187,6 +193,8 @@ async function getRallyProgress(db: AppEnv["Variables"]["db"], eventId: string, 
   const eventRows = await db.select({
     stampRallySettings: event.stampRallySettings,
     storeAreas: event.storeAreas,
+    lifecycleStatus: event.lifecycleStatus,
+    endDate: event.endDate,
   }).from(event).where(and(eq(event.id, eventId), isNull(event.deletedAt))).limit(1);
   const eventRow = eventRows[0];
   if (!eventRow) return null;
@@ -346,6 +354,7 @@ async function getRallyProgress(db: AppEnv["Variables"]["db"], eventId: string, 
 
   return {
     enabled: settings.enabled && validTargetAreaIds.length > 0,
+    eventEnded: isEventEnded(eventRow),
     areas,
     stampedCircleIds,
     stampedCount: stampedCircleIds.length,
@@ -373,6 +382,7 @@ async function getVisitorRally(db: AppEnv["Variables"]["db"], visitor: { id: str
   const progress = await getRallyProgress(db, visitor.eventId, visitor.id);
   return progress ?? {
     enabled: false,
+    eventEnded: false,
     areas: [],
     stampedCircleIds: [],
     stampedCount: 0,
@@ -399,6 +409,7 @@ async function recordRedemption(
   quantity: number,
 ) {
   const progress = await getRallyProgress(db, eventId, eventUserId);
+  if (progress?.eventEnded) return { error: "開催終了後は景品交換を記録できません" } as const;
   if (!progress?.enabled || !progress.eligible) {
     return { error: "この来場者は景品交換の条件を満たしていません" } as const;
   }
@@ -447,7 +458,7 @@ stampRoutes.get("/visitor/:code", async (c) => {
   const code = c.req.param("code");
   const visitor = await resolveVisitorFromCode(db, code);
   if (!visitor) {
-    return c.json({ enabled: false, areas: [], stampedCircleIds: [], stampedCount: 0, targetCircleCount: 0, qualification: { minQualifiedAreaCount: null, qualifiedAreaCount: 0, qualifiedAreaIds: [], requiredAreaIds: [], minTotalDistinctCircles: null }, eligible: false, rewardTitle: "景品交換", familyMemberCount: 0, redeemedCount: 0, remainingCount: 0, rewards: [], redemptionLocation: "", rulesUrl: "", redeemedAt: null });
+    return c.json({ enabled: false, eventEnded: false, areas: [], stampedCircleIds: [], stampedCount: 0, targetCircleCount: 0, qualification: { minQualifiedAreaCount: null, qualifiedAreaCount: 0, qualifiedAreaIds: [], requiredAreaIds: [], minTotalDistinctCircles: null }, eligible: false, rewardTitle: "景品交換", familyMemberCount: 0, redeemedCount: 0, remainingCount: 0, rewards: [], redemptionLocation: "", rulesUrl: "", redeemedAt: null });
   }
   return c.json(await getVisitorRally(db, visitor));
 });
@@ -479,6 +490,10 @@ stampRoutes.post(
     if (!(await hasPermission(c, null, "stamp-rally:operate", eventId))) {
       apiError("FORBIDDEN", "このイベントの景品交換を記録する権限がありません");
     }
+    const eventRows = await db.select({ lifecycleStatus: event.lifecycleStatus, endDate: event.endDate })
+      .from(event).where(and(eq(event.id, eventId), isNull(event.deletedAt))).limit(1);
+    if (!eventRows[0]) apiError("NOT_FOUND", "イベントが見つかりません");
+    if (isEventEnded(eventRows[0])) apiError("BAD_REQUEST", "開催終了後は景品交換を記録できません");
     const visitor = await resolveVisitor(db, eventId, c.req.valid("json").code);
     if (!visitor) apiError("NOT_FOUND", "このイベントの来場者が見つかりません");
     const session = await getSession(c);

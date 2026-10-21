@@ -156,7 +156,7 @@ export function StampRedemptionsTab({ eventId }: { eventId: string }) {
                 <p className="mt-1 text-2xl font-black tabular-nums">{lookup.progress.familyMemberCount}<span className="ml-1 text-xs">人</span></p>
               </div>
               <div className="border-thick border-border bg-muted/30 p-3" aria-live="polite">
-                <p className="text-[10px] font-bold text-muted-foreground">あと交換できる数</p>
+                <p className="text-[10px] font-bold text-muted-foreground">{lookup.progress.eventEnded ? "未使用枠" : "あと交換できる数"}</p>
                 <p className="mt-1 text-2xl font-black tabular-nums">{lookup.progress.remainingCount}<span className="ml-1 text-xs">個</span></p>
                 <p className="text-[10px] text-muted-foreground">交換済み {lookup.progress.redeemedCount} 個</p>
               </div>
@@ -164,8 +164,10 @@ export function StampRedemptionsTab({ eventId }: { eventId: string }) {
 
             <div className="flex flex-wrap items-center justify-between gap-2 border-b-thin border-border pb-2">
               <p className="text-sm font-black">#{lookup.visitor.displayId} {lookup.visitor.nickname || "ニックネーム未設定"}</p>
-              <p className={`text-xs font-bold ${lookup.progress.eligible ? "text-success" : "text-muted-foreground"}`}>
-                {lookup.progress.remainingCount === 0 ? "交換枠を利用済み" : lookup.progress.eligible ? "交換条件達成" : "条件未達成"}
+              <p className={`text-xs font-bold ${lookup.progress.eventEnded ? "text-error" : lookup.progress.eligible ? "text-success" : "text-muted-foreground"}`}>
+                {lookup.progress.eventEnded
+                  ? "開催終了・景品交換終了"
+                  : lookup.progress.remainingCount === 0 ? "交換枠を利用済み" : lookup.progress.eligible ? "交換条件達成" : "条件未達成"}
               </p>
             </div>
             <p className="text-xs">
@@ -174,7 +176,11 @@ export function StampRedemptionsTab({ eventId }: { eventId: string }) {
                 : `利用店舗 ${lookup.progress.stampedCount} / ${lookup.progress.qualification.minTotalDistinctCircles ?? 0} 店舗`}
             </p>
 
-            {lookup.progress.remainingCount > 0 && lookup.progress.eligible ? (
+            {lookup.progress.eventEnded ? (
+              <div className="border-heavy border-error bg-error/10 p-3 text-xs font-bold" role="status">
+                開催終了後のため、景品交換は記録できません。スタンプと交換状況の確認のみできます。
+              </div>
+            ) : lookup.progress.remainingCount > 0 && lookup.progress.eligible ? (
               <>
                 <section className="space-y-2" aria-labelledby="stamp-reward-choice-title">
                   <h3 id="stamp-reward-choice-title" className="text-xs font-bold">交換する景品</h3>

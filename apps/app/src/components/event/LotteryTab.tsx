@@ -8,7 +8,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
-import { Ticket, Gift, Trophy, Trash2, Dices, Save, Check } from "lucide-react";
+import { PermissionGuard } from "@/hooks/useCircleAuth";
+import { Ticket, Gift, Trophy, Trash2, Dices, Save, Check, RotateCcw } from "lucide-react";
 import { useUnsavedChanges } from "@/components/UnsavedNavigationGuard";
 
 // イベント単位の抽選管理 (2026-07-12)
@@ -30,6 +31,7 @@ export function LotteryTab({ eventId }: { eventId: string }) {
   const [savedDraft, setSavedDraft] = useState({ name: "お楽しみ抽選会", drawAt: "", cfg: { base: 1, perStamp: 0, perReview: 0 } as LotteryEntryConfig });
   const [prizeName, setPrizeName] = useState("");
   const [prizeQty, setPrizeQty] = useState(1);
+  const [showArchivedPrizes, setShowArchivedPrizes] = useState(false);
   const [confirmDraw, setConfirmDraw] = useState(false);
 
   useEffect(() => {
@@ -64,6 +66,11 @@ export function LotteryTab({ eventId }: { eventId: string }) {
     mutationFn: (prizeId: string) => lotteryApi.deletePrize(lot!.id, prizeId),
     onSuccess: () => invalidate(),
     onError: (e: any) => toast.error(e?.message || "削除に失敗しました"),
+  });
+  const restorePrize = useMutation({
+    mutationFn: (prizeId: string) => lotteryApi.restorePrize(lot!.id, prizeId),
+    onSuccess: () => { toast.success("景品を抽選候補に戻しました"); invalidate(); },
+    onError: (e: any) => toast.error(e?.message || "復元に失敗しました"),
   });
   const draw = useMutation({
     mutationFn: () => lotteryApi.draw(lot!.id),
@@ -161,15 +168,35 @@ export function LotteryTab({ eventId }: { eventId: string }) {
               {(d.prizes ?? []).map((p) => (
                 <div key={p.id} className="flex items-center justify-between border-thin border-border p-2 font-mono text-[12px]">
                   <span>{p.name} <span className="text-muted-foreground">×{p.quantity}</span></span>
-                  {!drawn && (
-                    <button onClick={() => delPrize.mutate(p.id)} className="text-muted-foreground hover:text-error">
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
-                  )}
+                  {!drawn && <PermissionGuard permission="event:write">
+                    <Button variant="outline" size="sm" onClick={() => delPrize.mutate(p.id)} disabled={delPrize.isPending} aria-label={`${p.name}を抽選候補から外す`}>
+                      <Trash2 className="mr-1 h-3.5 w-3.5" />候補から外す
+                    </Button>
+                  </PermissionGuard>}
                 </div>
               ))}
               {(d.prizes ?? []).length === 0 && <p className="font-mono text-[11px] text-muted-foreground">景品がありません。</p>}
             </div>
+            {/* 2026-10-21: 抽選候補から外した景品も、誤操作時に候補へ戻せるよう別枠で管理する。 */}
+            {(d.archivedPrizes ?? []).length > 0 && (
+              <div className="space-y-2 border-t-thin border-border pt-3">
+                <Button variant="outline" size="sm" onClick={() => setShowArchivedPrizes((value) => !value)}>
+                  {showArchivedPrizes ? "停止した景品を隠す" : `停止した景品を表示 (${d.archivedPrizes?.length ?? 0})`}
+                </Button>
+                {showArchivedPrizes && <div className="space-y-1">
+                  {(d.archivedPrizes ?? []).map((p) => (
+                    <div key={p.id} className="flex min-w-0 items-center justify-between gap-2 border-thin border-border bg-muted p-2 font-mono text-[12px]">
+                      <span className="min-w-0 break-words">{p.name} <span className="text-muted-foreground">×{p.quantity} ・ 候補外</span></span>
+                      {!drawn && <PermissionGuard permission="event:write">
+                        <Button variant="outline" size="sm" onClick={() => restorePrize.mutate(p.id)} disabled={restorePrize.isPending}>
+                          <RotateCcw className="mr-1 h-3.5 w-3.5" />候補に戻す
+                        </Button>
+                      </PermissionGuard>}
+                    </div>
+                  ))}
+                </div>}
+              </div>
+            )}
             {!drawn && (
               <div className="flex gap-2 items-end">
                 <div className="space-y-1 flex-1">

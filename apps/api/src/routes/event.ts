@@ -19,11 +19,12 @@ import {
   contractPayment,
   eventAnnouncement,
 } from "@fesflow/db";
-import { eq, and, inArray, isNull, desc } from "drizzle-orm";
+import { eq, and, inArray, isNull, isNotNull, desc } from "drizzle-orm";
 import { ulid } from "ulidx";
 import { getAdminSession, getSession, hasPermission } from "../utils/auth";
 import type { AppEnv } from "../types";
 import { VISITOR_AGE_GROUPS } from "@fesflow/config/visitor-profile";
+import { notifyVisitors, sendPushToTargets } from "../services/web-push";
 
 const eventRoutes = new Hono<AppEnv>();
 
@@ -785,8 +786,9 @@ eventRoutes.post(
     }
 
     // 送信履歴を記録する (2026-07-16)。理由は eventAnnouncement テーブル定義のコメントを参照。
+    const announcementId = ulid();
     await db.insert(eventAnnouncement).values({
-      id: ulid(),
+      id: announcementId,
       eventId,
       title: input.title,
       message: input.message,
@@ -794,6 +796,32 @@ eventRoutes.post(
       recipientCount: sent,
       createdAt: new Date(),
     });
+
+    // 2026-10-21: スタッフの既存通知に加えて来場者の履歴とPushへ配信する。外部Pushの遅延は告知APIを待たせない。
+    const fanout = async () => {
+      const visitors = await db.select({ id: eventUser.id, eventId: eventUser.eventId })
+        .from(eventUser)
+        .where(and(eq(eventUser.eventId, eventId), eq(eventUser.status, "available")));
+      await notifyVisitors(db, c.env, visitors, {
+        type: "event_announcement",
+        title: input.title,
+        message: input.message,
+        href: "/visitor/notifications",
+        dedupeKey: (visitorId) => `event-announcement:${announcementId}:${visitorId}`,
+      }, {
+        title: input.title,
+        body: input.message,
+        url: "/visitor/notifications",
+        tag: `event-announcement-${announcementId}`,
+      });
+      await sendPushToTargets(db, c.env, [...emails].map((ownerId) => ({ ownerType: "staff" as const, ownerId })), {
+        title: input.title,
+        body: input.message,
+        url: "/",
+        tag: `event-announcement-${announcementId}`,
+      });
+    };
+    c.executionCtx.waitUntil(fanout().catch(() => console.warn("event_announcement_fanout_failed")));
 
     return c.json({ sent });
   }
@@ -804,23 +832,24 @@ eventRoutes.post(
 eventRoutes.get("/:id/announcements", async (c) => {
   const db = c.get("db");
   const eventId = c.req.param("id");
+  const includeDeleted = c.req.query("includeDeleted") === "true";
   if (!(await hasPermission(c, null, "member:read", eventId))) {
     apiError("FORBIDDEN", "このイベントのアナウンス履歴を見る権限がありません");
+  }
+  if (includeDeleted && !(await hasPermission(c, null, "member:write", eventId))) {
+    apiError("FORBIDDEN", "削除済みアナウンスを表示する権限がありません");
   }
 
   const rows = await db
     .select()
     .from(eventAnnouncement)
-    .where(eq(eventAnnouncement.eventId, eventId))
+    .where(and(eq(eventAnnouncement.eventId, eventId), includeDeleted ? undefined : isNull(eventAnnouncement.deletedAt)))
     .orderBy(desc(eventAnnouncement.createdAt));
 
   return c.json(rows);
 });
 
-// 一斉アナウンス履歴の削除 (2026-07-16)。
-// 注意: これは履歴ログの削除であり、既に配信済みの notification (受信者ごとの通知) は
-// 取り消さない。受信者は自身の通知センターに残ったまま既読/未読を管理できる
-// (event_announcement テーブル定義のコメントに設計理由を記載)。event_manager (member:write) 権限。
+// 一斉アナウンス履歴の論理削除。既に配信済みの通知は受信者側に残す。event_manager (member:write) 権限。
 eventRoutes.delete("/:id/announcements/:announcementId", async (c) => {
   const db = c.get("db");
   const eventId = c.req.param("id");
@@ -829,9 +858,28 @@ eventRoutes.delete("/:id/announcements/:announcementId", async (c) => {
     apiError("FORBIDDEN", "このイベントのアナウンス履歴を削除する権限がありません");
   }
 
-  await db
-    .delete(eventAnnouncement)
-    .where(and(eq(eventAnnouncement.id, announcementId), eq(eventAnnouncement.eventId, eventId)));
+  await db.update(eventAnnouncement).set({ deletedAt: new Date() }).where(and(
+    eq(eventAnnouncement.id, announcementId),
+    eq(eventAnnouncement.eventId, eventId),
+    isNull(eventAnnouncement.deletedAt),
+  ));
+
+  return c.json({ success: true });
+});
+
+// 2026-10-21: 送信履歴を再表示しても受信者の通知状態や配信結果は変更しない。
+eventRoutes.post("/:id/announcements/:announcementId/restore", async (c) => {
+  const db = c.get("db");
+  const eventId = c.req.param("id");
+  const announcementId = c.req.param("announcementId");
+  if (!(await hasPermission(c, null, "member:write", eventId))) {
+    apiError("FORBIDDEN", "このイベントのアナウンス履歴を復元する権限がありません");
+  }
+  await db.update(eventAnnouncement).set({ deletedAt: null }).where(and(
+    eq(eventAnnouncement.id, announcementId),
+    eq(eventAnnouncement.eventId, eventId),
+    isNotNull(eventAnnouncement.deletedAt),
+  ));
 
   return c.json({ success: true });
 });

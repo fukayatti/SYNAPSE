@@ -1,10 +1,12 @@
-import { ReactNode, useEffect, useState } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { createContext, ReactNode, Suspense, useContext, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { Link, Outlet, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
 import { circleApi, eventApi, parseCircleSettings } from "@/lib/api";
 import { useAuth } from "@/hooks/useCircleAuth";
 import { useFocusTrap } from "@/hooks/useFocusTrap";
+import { useBodyScrollLock } from "@/hooks/useBodyScrollLock";
 import { useGuardedNavigation } from "@/components/UnsavedNavigationGuard";
 import {
   LayoutDashboard,
@@ -25,6 +27,7 @@ import {
   ScrollText,
   BarChart3,
   MonitorCheck,
+  MonitorPlay,
   Boxes,
   Calculator,
   CalendarCheck,
@@ -40,6 +43,11 @@ import {
   Gauge,
   ShieldAlert,
 } from "lucide-react";
+import { Skeleton } from "@/components/ui/skeleton";
+
+// 2026-10-21: サークル画面の切替で共通ナビまで再生成されないよう、親ルートが描画する枠を共有する。
+// 子ページが従来どおり DashboardLayout を使っても、ここでは中身と画面固有アクションだけを渡す。
+const CircleDashboardRouteContext = createContext<{ actionsHost: HTMLDivElement | null } | null>(null);
 
 interface MenuItem {
   title: string;
@@ -77,7 +85,20 @@ interface DashboardLayoutProps {
   eventId?: string;
 }
 
-export default function DashboardLayout({
+export default function DashboardLayout(props: DashboardLayoutProps) {
+  const routeContext = useContext(CircleDashboardRouteContext);
+  if (routeContext) {
+    return (
+      <>
+        {props.children}
+        {props.actions && routeContext.actionsHost ? createPortal(props.actions, routeContext.actionsHost) : null}
+      </>
+    );
+  }
+  return <DashboardLayoutFrame {...props} />;
+}
+
+function DashboardLayoutFrame({
   children,
   title,
   subtitle,
@@ -123,32 +144,7 @@ export default function DashboardLayout({
     };
   }, []);
 
-  // 2026-10-20: サイドバーの上下を固定ヘッダーの実寸に追従させ、画面の高さに合わせて内側だけスクロールする。
-  useEffect(() => {
-    const header = document.querySelector<HTMLElement>("[data-app-header]");
-    if (!header || typeof ResizeObserver === "undefined") return;
-    const root = document.documentElement;
-    const previousHeight = root.style.getPropertyValue("--app-header-height");
-    const updateHeight = () => root.style.setProperty("--app-header-height", `${header.getBoundingClientRect().height}px`);
-    const observer = new ResizeObserver(updateHeight);
-    observer.observe(header);
-    updateHeight();
-    return () => {
-      observer.disconnect();
-      if (previousHeight) root.style.setProperty("--app-header-height", previousHeight);
-      else root.style.removeProperty("--app-header-height");
-    };
-  }, []);
-
-  // 背景スクロールロック (Modal.tsx と同じパターン)。アンマウント/クローズ時に必ず元へ戻す。
-  useEffect(() => {
-    if (!isMobileMenuOpen) return;
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = prevOverflow;
-    };
-  }, [isMobileMenuOpen]);
+  useBodyScrollLock(isMobileMenuOpen);
 
   // Escape 閉じ・フォーカストラップは Modal.tsx と同じ共通フックを再利用する。
   const drawerFocusTrapRef = useFocusTrap<HTMLDivElement>(isMobileMenuOpen, {
@@ -162,6 +158,22 @@ export default function DashboardLayout({
   // 最新の circleId を返すため、これに乗り換えて再マウント不要で反映されるようにする。
   const { circleId: authCircleId, isCircleOwner, checkPermission, isLoading: authLoading } = useAuth();
   const circleId = type === "circle" ? (authCircleId ?? "") : "";
+  const sidebarScrollRef = useRef<HTMLElement>(null);
+  const sidebarScrollKey = `fesflow:dashboard-sidebar:${type}:${circleId || eventId || "default"}`;
+
+  useEffect(() => {
+    const sidebar = sidebarScrollRef.current;
+    if (!sidebar) return;
+    try { sidebar.scrollTop = Number(window.sessionStorage.getItem(sidebarScrollKey) ?? 0); } catch { /* 保存できなくても通常操作を続ける */ }
+    const savePosition = () => {
+      try { window.sessionStorage.setItem(sidebarScrollKey, String(sidebar.scrollTop)); } catch { /* 保存できなくても通常操作を続ける */ }
+    };
+    sidebar.addEventListener("scroll", savePosition, { passive: true });
+    return () => {
+      savePosition();
+      sidebar.removeEventListener("scroll", savePosition);
+    };
+  }, [sidebarScrollKey]);
 
   // 2026-09-27: スタッフ管理の表示判定のためサークル設定を取得。在庫管理は組み込み機能とする。
   const { data: circle } = useQuery({
@@ -170,6 +182,20 @@ export default function DashboardLayout({
     enabled: type === "circle" && !!circleId,
   });
   const circleSettings = parseCircleSettings(circle?.settings);
+
+  // 2026-10-21: 上部バナーを含む固定領域の高さを測り、左メニューがヘッダーへ重ならないよう追従する。
+  useEffect(() => {
+    const chrome = document.querySelector<HTMLElement>("[data-app-chrome]")
+      ?? document.querySelector<HTMLElement>("[data-app-header]");
+    if (!chrome) return;
+    const updateHeaderHeight = () => {
+      document.documentElement.style.setProperty("--app-chrome-height", `${chrome.getBoundingClientRect().height}px`);
+    };
+    updateHeaderHeight();
+    const observer = new ResizeObserver(updateHeaderHeight);
+    observer.observe(chrome);
+    return () => observer.disconnect();
+  }, []);
 
   // 閲覧のみモード (2026-07-16)。イベントが終了/保持中なら配下の変更操作はサーバで拒否されるため、
   // 全ダッシュボード共通のこの場所で理由を明示する (各画面に個別実装しないで済む)。
@@ -193,6 +219,7 @@ export default function DashboardLayout({
       items: [
         { title: "ダッシュボード", href: "/circle/dashboard", icon: LayoutDashboard },
         { title: "モバイルオーダーQR", href: "/circle/dashboard/qr", icon: QrCode, permission: "circle:read" },
+        { title: "番号表示", href: "/circle/dashboard/number-display", icon: MonitorPlay, permission: "circle:write" },
       ],
     },
     {
@@ -341,7 +368,7 @@ export default function DashboardLayout({
     // 2026-10-20: URL直入力でも権限外のタブを描画せず、そのスタッフが使える最初の画面へ移す。
     onTabChange(firstVisibleTab);
   }, [type, authLoading, activeItem?.tab, firstVisibleTab, onTabChange]);
-  // 2026-10-20: 管理メニューのカテゴリは常時表示し、画面高を超える分だけサイドバー内でスクロールする。
+  // 2026-10-21: 短い設定画面でサイドバーだけが画面下まで伸びたり、本文スクロールへ追従したりしないよう自然高で表示する。
   const renderMenuGroups = (isMobile: boolean) => visibleMenuGroups.map((group) => {
     return (
       <div key={group.label} className={cn("pt-3 first:pt-0", !isMobile && "md:w-full")}>
@@ -377,12 +404,12 @@ export default function DashboardLayout({
                 className={itemClass}
               >
                 <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
-                <span className="truncate">{item.title}</span>
+                <span className="min-w-0 break-words whitespace-normal">{item.title}</span>
               </Link>
             ) : (
               <button key={item.tab ?? itemIndex} type="button" onClick={handleItemClick} className={itemClass}>
                 <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
-                <span className="truncate">{item.title}</span>
+                <span className="min-w-0 break-words whitespace-normal">{item.title}</span>
               </button>
             );
           })}
@@ -392,15 +419,15 @@ export default function DashboardLayout({
   });
 
   return (
-    <div className="max-w-7xl mx-auto p-4 md:p-6 font-mono bg-background text-foreground">
+    <div className="mx-auto box-border w-full min-w-0 max-w-7xl p-3 sm:p-4 md:px-6 md:pt-6 md:pb-4 font-mono bg-background text-foreground">
       {/* 共通ヘッダー: 左にタイトル、右に画面主要アクション (actions スロット)。
           モバイルでは縦積みにしてボタンが潰れないようにする。 */}
       <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3 border-b-thick border-border pb-3 mb-6">
         <div className="min-w-0">
-          <h1 className="text-lg sm:text-2xl font-black uppercase tracking-wider font-mono flex items-center gap-2">
+          <h1 className="min-w-0 break-words text-lg sm:text-2xl font-black uppercase tracking-wider font-mono flex items-center gap-2">
             {type === "system" && <Shield className="h-6 w-6 text-foreground shrink-0" />}
             {type === "event" && <Calendar className="h-6 w-6 text-foreground shrink-0" />}
-            <span className="truncate">{title}</span>
+            <span className="min-w-0 break-words">{title}</span>
           </h1>
           {subtitle && (
             <p className="font-mono text-[10px] sm:text-xs uppercase tracking-[1px] mt-1 text-muted-foreground">
@@ -409,7 +436,7 @@ export default function DashboardLayout({
           )}
         </div>
         {actions && (
-          <div className="flex items-center gap-2 flex-wrap shrink-0">
+          <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2">
             {actions}
           </div>
         )}
@@ -431,11 +458,13 @@ export default function DashboardLayout({
         </div>
       )}
 
-      {/* モバイルメニュー ドロワー (md未満)。トリガーとは別要素として常にマウントしておき、
+      {/* 2026-10-21: 固定ヘッダーや親の overflow の重なり順から独立させるため body 直下へ描画する。
+          モバイルメニュー ドロワー (md未満)。トリガーとは別要素として常にマウントしておき、
           開閉は translate-x の CSS transition のみで行う (アンマウント方式だと閉じるアニメーションが
           出せないため)。閉じている間は `inert` で背景要素としてフォーカス/操作を無効化し、
           スライドアウト先 (画面外) にあるリンク/ボタンが Tab で拾われないようにする。
           z-index はヘッダーの sticky z-50 より上 (z-[60]) にして必ず前面に出す。 */}
+      {createPortal((
       <div
         className={cn(
           "md:hidden fixed inset-0 z-[60] transition-opacity duration-200",
@@ -458,7 +487,7 @@ export default function DashboardLayout({
           aria-modal="true"
           aria-label="メニュー"
           className={cn(
-            "absolute inset-y-0 left-0 w-[82vw] max-w-xs bg-background border-r-thick border-border shadow-none flex flex-col transition-transform duration-200 ease-out",
+            "absolute inset-y-0 left-0 w-[82vw] max-w-xs bg-background border-r-thick border-border pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] shadow-none flex flex-col transition-transform duration-200 ease-out",
             isMobileMenuOpen ? "translate-x-0" : "-translate-x-full",
           )}
         >
@@ -479,13 +508,15 @@ export default function DashboardLayout({
           </nav>
         </div>
       </div>
+      ), document.body)}
 
       {/* 2カラムレイアウト */}
       <div className="flex flex-col md:flex-row gap-6 items-start">
-        {/* 左サイドバー: 全カテゴリを表示し、画面高に収まらない項目は内側でスクロールする。 */}
+        {/* 2026-10-21: 長いサイドメニューはヘッダー下に固定し、右のページとは独立してスクロールさせる。
+            親の下端に押し上げられてヘッダーへ重ならないよう、sticky枠と外側の下余白を合計16pxに揃える。 */}
         <aside
-          className="hidden w-full shrink-0 overscroll-contain border-thick border-border bg-background p-2 shadow-none md:sticky md:block md:w-64 md:self-start md:overflow-y-auto"
-          style={{ top: "calc(var(--app-header-height, 0px) + 1rem)", height: "calc(100dvh - var(--app-header-height, 0px) - 2rem)" }}
+          ref={sidebarScrollRef}
+          className="sticky top-[calc(var(--app-chrome-height,4rem)+1rem)] hidden w-full shrink-0 overflow-y-auto overscroll-contain border-thick border-border bg-background p-2 pb-5 shadow-none md:block md:max-h-[calc(100dvh-var(--app-chrome-height,4rem)-2rem)] md:w-64 md:self-start"
         >
           <nav className="flex md:flex-col gap-1">
             {renderMenuGroups(false)}
@@ -495,7 +526,7 @@ export default function DashboardLayout({
         {/* 右メインコンテンツ */}
         {/* min-w-0: flex 子要素の既定 min-width:auto により中身が広いと縮まず、
             ビューポートを超えて横スクロール(モバイルの横幅ズレ)が発生するのを防ぐ。 */}
-        <main className="flex-1 w-full min-w-0 border-thick border-border p-4 md:p-6 bg-background rounded-none shadow-none min-h-[500px]">
+        <main className="box-border flex-1 w-full min-w-0 max-w-full border-thick border-border p-3 sm:p-4 md:p-6 bg-background rounded-none shadow-none min-h-[500px]">
           {type === "event" && !authLoading && !activeItem ? (
             <p className="border-thick border-warning bg-warning/10 p-4 text-sm" role="status">
               この画面を利用する権限がありません。利用できる管理画面へ移動しています。
@@ -504,5 +535,56 @@ export default function DashboardLayout({
         </main>
       </div>
     </div>
+  );
+}
+
+const circleDashboardSubtitles: Record<string, string> = {
+  "/circle/dashboard": "ダッシュボード概要",
+  "/circle/dashboard/circle": "サークル設定",
+  "/circle/dashboard/number-display": "厨房・プロジェクターに表示する番号とメディアを設定",
+  "/circle/dashboard/members": "メンバー管理",
+  "/circle/dashboard/menu": "メニュー・トッピング管理",
+  "/circle/dashboard/qr": "モバイルオーダーQR",
+  "/circle/dashboard/sales": "売上管理",
+  "/circle/dashboard/analytics": "統計・分析",
+  "/circle/dashboard/reviews": "来場者の評価・感想",
+  "/circle/dashboard/export": "データエクスポート",
+  "/circle/dashboard/staff": "スタッフ管理",
+  "/circle/dashboard/stock": "在庫管理",
+  "/circle/dashboard/coupons": "クーポン管理",
+  "/circle/dashboard/discounts": "割引管理",
+};
+
+function CircleDashboardRouteLoading() {
+  return (
+    <div role="status" aria-live="polite" className="space-y-4">
+      <p className="text-xs text-muted-foreground">画面を読み込んでいます…</p>
+      <Skeleton className="h-12 w-full" />
+      <Skeleton className="h-40 w-full" />
+    </div>
+  );
+}
+
+// 2026-10-21: ページチャンクの遅延読込は共通枠の内側で受け、白画面へ置換せず現在のナビを保つ。
+export function CircleDashboardRouteLayout() {
+  const location = useLocation();
+  const { circleName } = useAuth();
+  const [actionsHost, setActionsHost] = useState<HTMLDivElement | null>(null);
+  const path = location.pathname.replace(/\/+$/, "") || "/circle/dashboard";
+  const title = path === "/circle/dashboard/number-display" ? "番号表示" : circleName ?? "サークルダッシュボード";
+
+  return (
+    <CircleDashboardRouteContext.Provider value={{ actionsHost }}>
+      <DashboardLayoutFrame
+        title={title}
+        subtitle={circleDashboardSubtitles[path] ?? "サークル管理"}
+        type="circle"
+        actions={<div ref={setActionsHost} className="contents" />}
+      >
+        <Suspense fallback={<CircleDashboardRouteLoading />}>
+          <Outlet />
+        </Suspense>
+      </DashboardLayoutFrame>
+    </CircleDashboardRouteContext.Provider>
   );
 }

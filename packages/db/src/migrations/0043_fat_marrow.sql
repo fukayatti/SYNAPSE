@@ -1,0 +1,1 @@
+ALTER TABLE `orders` ADD `received_at` integer;

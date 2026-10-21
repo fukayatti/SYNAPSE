@@ -20,6 +20,9 @@
 		"./order-contract": {
 			"default": "./src/order-contract.ts"
 		},
+		"./register-display-contract": {
+			"default": "./src/register-display-contract.ts"
+		},
 		"./allergens": {
 			"default": "./src/allergens.ts"
 		},

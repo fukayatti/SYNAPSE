@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, CheckCircle2, ExternalLink, MapPin, Ticket } from "lucide-react";
 import { useNavigate } from "react-router-dom";
@@ -9,6 +8,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useVisitor } from "@/hooks/useVisitor";
 import { stampRallyApi, type StampRallyCircle } from "@/lib/api";
 import { resolveAssetUrl } from "@/lib/asset-url";
+import { useSessionState } from "@/hooks/useSessionState";
 
 function safeHttpUrl(raw: string): string | null {
   try {
@@ -30,8 +30,8 @@ function dateLabel(value: string | null): string {
 export default function VisitorStampRallyPage() {
   const navigate = useNavigate();
   const { userId, isLoaded } = useVisitor();
-  const [selectedAreaId, setSelectedAreaId] = useState<string | null>(null);
-  const [selectedCircle, setSelectedCircle] = useState<StampRallyCircle | null>(null);
+  const [selectedAreaId, setSelectedAreaId] = useSessionState<string | null>(`fesflow:visitor-stamps:${userId ?? "guest"}:area`, null);
+  const [selectedCircleId, setSelectedCircleId] = useSessionState<string | null>(`fesflow:visitor-stamps:${userId ?? "guest"}:circle`, null);
   const query = useQuery({
     queryKey: ["visitor-stamp-rally", userId],
     queryFn: () => stampRallyApi.visitor(userId!),
@@ -44,6 +44,8 @@ export default function VisitorStampRallyPage() {
   });
 
   const data = query.data;
+  const selectedCircle: StampRallyCircle | null = data?.areas.flatMap((area) => area.circles).find((circle) => circle.id === selectedCircleId) ?? null;
+  const eventEnded = data?.eventEnded ?? false;
   const stampedCount = data?.stampedCount ?? 0;
   const areaRequirement = data?.qualification.minQualifiedAreaCount ?? null;
   const areaRequirementActive = areaRequirement !== null;
@@ -72,11 +74,13 @@ export default function VisitorStampRallyPage() {
 
       {!query.isError && data?.enabled && data.areas.length > 0 && (
         <>
-          <section className={`border-heavy border-border p-3 space-y-2 ${data.eligible && data.remainingCount > 0 ? "bg-primary text-primary-foreground" : "bg-muted"}`} aria-live="polite">
+          <section className={`border-heavy border-border p-3 space-y-2 ${data.eligible && data.remainingCount > 0 && !eventEnded ? "bg-primary text-primary-foreground" : "bg-muted"}`} aria-live="polite">
             <div className="flex items-center justify-between gap-3">
               <div className="min-w-0">
                 <h2 className="text-sm font-black">
-                  {data.familyMemberCount === 0
+                  {eventEnded
+                    ? "開催終了・景品交換終了"
+                    : data.familyMemberCount === 0
                     ? "リストバンドを登録してください"
                     : data.remainingCount === 0
                       ? "家族の交換枠を利用済み"
@@ -84,7 +88,7 @@ export default function VisitorStampRallyPage() {
                         ? "景品交換できます"
                         : "景品交換まであと少し"}
                 </h2>
-                <p className={`text-xs mt-1 ${data.eligible && data.remainingCount > 0 ? "text-primary-foreground/85" : "text-muted-foreground"}`}>
+                <p className={`text-xs mt-1 ${data.eligible && data.remainingCount > 0 && !eventEnded ? "text-primary-foreground/85" : "text-muted-foreground"}`}>
                   {areaRequirementActive
                     ? `達成エリア ${qualifiedAreaCount} / ${areaRequirement} エリア`
                     : `利用店舗 ${stampedCount} / ${totalStoreRequirement ?? 0} 店舗`}
@@ -101,9 +105,10 @@ export default function VisitorStampRallyPage() {
             <div className="grid grid-cols-3 gap-2 border-t-thin border-current/40 pt-2 text-center">
               <div><p className="text-[10px] opacity-80">家族</p><p className="font-black tabular-nums">{data.familyMemberCount}人</p></div>
               <div><p className="text-[10px] opacity-80">交換済み</p><p className="font-black tabular-nums">{data.redeemedCount}個</p></div>
-              <div><p className="text-[10px] opacity-80">あと交換できる数</p><p className="font-black tabular-nums">{data.remainingCount}個</p></div>
+              <div><p className="text-[10px] opacity-80">{eventEnded ? "未使用枠" : "あと交換できる数"}</p><p className="font-black tabular-nums">{data.remainingCount}個</p></div>
             </div>
-            {data.eligible && data.remainingCount > 0 && (
+            {eventEnded && <p className="border-t-thin border-current/40 pt-2 text-xs font-bold">開催終了後のため景品交換はできません。スタンプと利用履歴は引き続き確認できます。</p>}
+            {data.eligible && data.remainingCount > 0 && !eventEnded && (
               <div className="border-t-thin border-current/40 pt-2 space-y-1">
                 <p className="font-bold text-sm">交換できる景品</p>
                 <p className="text-xs">{data.rewards.map((reward) => reward.name).join("・")}</p>
@@ -160,7 +165,7 @@ export default function VisitorStampRallyPage() {
                     <li key={circle.id} className="min-w-0">
                       <button
                         type="button"
-                        onClick={() => setSelectedCircle(circle)}
+                        onClick={() => setSelectedCircleId(circle.id)}
                         aria-label={`${circle.name}: ${circle.stamped ? "利用済み。注文内容を確認" : "未利用"}`}
                         className={`w-full text-center ${circle.stamped ? "" : "opacity-50 grayscale"}`}
                       >
@@ -187,7 +192,7 @@ export default function VisitorStampRallyPage() {
 
       <Modal
         isOpen={!!selectedCircle}
-        onClose={() => setSelectedCircle(null)}
+        onClose={() => setSelectedCircleId(null)}
         title={`「${selectedCircle?.name ?? "店舗"}」の注文履歴`}
         subtitle="受取完了した注文と注文時点の商品名を表示しています。"
         maxWidth="md"

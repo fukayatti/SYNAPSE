@@ -144,6 +144,7 @@ circleRoutes.get("/:id/analytics", async (c) => {
     .where(and(
       eq(circleVisit.circleId, circleId),
       isNotNull(eventUser.onboardedAt),
+      isNull(circleVisit.deletedAt),
       gte(circleVisit.createdAt, eventUser.onboardedAt),
     ));
   const menus = await db.select({ id: menu.id }).from(menu).where(eq(menu.circleId, circleId));
@@ -234,6 +235,7 @@ circleRoutes.post(
       // 2026-10-16 (#127): 作成時の運用設定も同時保存し、店舗エリアはイベント共有IDで参照する。
       settings: z.object({
         orderFlowMode: z.enum(["pending", "preparing", "completed"]).optional(),
+        preOrderEnabled: z.boolean().optional(),
         mobileOrderEnabled: z.boolean().optional(),
         extensions: z.object({ stock: z.boolean().optional(), staff: z.boolean().optional() }).optional(),
         acceptedPayments: z.array(z.string().trim().min(1).max(30)).max(20).optional(),
@@ -355,6 +357,7 @@ circleRoutes.post(
     const inviteUseGuardId = hostInvite ? ulid() : null;
     const circleSettings = JSON.stringify({
       orderFlowMode: input.settings?.orderFlowMode ?? "pending",
+      preOrderEnabled: input.settings?.preOrderEnabled ?? false,
       mobileOrderEnabled: input.settings?.mobileOrderEnabled ?? false,
       extensions: {
         stock: input.settings?.extensions?.stock ?? false,
@@ -505,6 +508,14 @@ circleRoutes.patch(
       apiError("NOT_FOUND", "サークルが見つかりません");
     }
 
+    let oldSettings: Record<string, unknown> = {};
+    try {
+      const parsed: unknown = JSON.parse(existingCircle[0]!.settings || "{}");
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) oldSettings = parsed as Record<string, unknown>;
+    } catch {
+      oldSettings = {};
+    }
+
     // 2026-10-16 (#127): 店舗エリアと支払方法は親イベントの定義に限定し、運営画面からの変更も作成時と同じ制約で検証する。
     if (
       Object.prototype.hasOwnProperty.call(settings, "storeAreaId") ||
@@ -563,13 +574,61 @@ circleRoutes.patch(
     ) {
       apiError("BAD_REQUEST", "モバイルオーダーの設定が正しくありません");
     }
+    if (
+      Object.prototype.hasOwnProperty.call(settings, "preOrderEnabled") &&
+      typeof settings.preOrderEnabled !== "boolean"
+    ) {
+      apiError("BAD_REQUEST", "事前注文の設定が正しくありません");
+    }
 
-    let oldSettings: Record<string, unknown> = {};
-    try {
-      const parsed: unknown = JSON.parse(existingCircle[0]!.settings || "{}");
-      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) oldSettings = parsed as Record<string, unknown>;
-    } catch {
-      oldSettings = {};
+    if (Object.prototype.hasOwnProperty.call(settings, "orderNumberDisplay")) {
+      const display = settings.orderNumberDisplay;
+      if (!display || typeof display !== "object" || Array.isArray(display)) {
+        apiError("BAD_REQUEST", "番号表示の設定が正しくありません");
+      }
+      if (typeof display.showPreparingNumbers !== "boolean" || typeof display.showPickupNumbers !== "boolean" ||
+        (!display.showPreparingNumbers && !display.showPickupNumbers) ||
+        (display.overflowPriority !== "latest" && display.overflowPriority !== "oldest") ||
+        !Array.isArray(display.media) || display.media.length > 20) {
+        apiError("BAD_REQUEST", "番号表示の設定が正しくありません");
+      }
+      const previousDisplay = oldSettings.orderNumberDisplay;
+      const previousMediaPercent = previousDisplay && typeof previousDisplay === "object" && !Array.isArray(previousDisplay)
+        ? (previousDisplay as Record<string, unknown>).mediaPercent
+        : undefined;
+      // 2026-10-21: 新旧クライアント間の設定更新で比率を失わず、スライダー範囲内の値だけを保存する。
+      const mediaPercent = display.mediaPercent === undefined
+        ? typeof previousMediaPercent === "number" && Number.isFinite(previousMediaPercent)
+          ? Math.max(20, Math.min(80, Math.round(previousMediaPercent / 5) * 5))
+          : 35
+        : display.mediaPercent;
+      if (typeof mediaPercent !== "number" || !Number.isInteger(mediaPercent) || mediaPercent < 20 || mediaPercent > 80 || mediaPercent % 5 !== 0) {
+        apiError("BAD_REQUEST", "番号とメディアの表示比率が正しくありません");
+      }
+      const media = display.media.map((item: unknown) => {
+        if (!item || typeof item !== "object" || Array.isArray(item)) apiError("BAD_REQUEST", "表示メディアが正しくありません");
+        const candidate = item as Record<string, unknown>;
+        // 2026-10-21: 動画・画像本体は選択した端末内に残し、APIには設定用メタデータだけを保存する。
+        if (typeof candidate.id !== "string" || !/^[a-zA-Z0-9-]{1,80}$/.test(candidate.id) ||
+          typeof candidate.name !== "string" || candidate.name.length > 160 ||
+          (candidate.kind !== "image" && candidate.kind !== "video") ||
+          !Number.isInteger(candidate.durationSeconds) || (candidate.durationSeconds as number) < 2 || (candidate.durationSeconds as number) > 60) {
+          apiError("BAD_REQUEST", "表示メディアが正しくありません");
+        }
+        return {
+          id: candidate.id,
+          name: candidate.name,
+          kind: candidate.kind,
+          durationSeconds: candidate.durationSeconds,
+        };
+      });
+      settings.orderNumberDisplay = {
+        showPreparingNumbers: display.showPreparingNumbers,
+        showPickupNumbers: display.showPickupNumbers,
+        overflowPriority: display.overflowPriority,
+        mediaPercent,
+        media,
+      };
     }
 
     await db

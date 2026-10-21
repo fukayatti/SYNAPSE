@@ -1,13 +1,16 @@
-import { useEffect } from "react";
+import { useId } from "react";
+import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { useFocusTrap } from "@/hooks/useFocusTrap";
+import { useBodyScrollLock } from "@/hooks/useBodyScrollLock";
 
 // 2026-07-04: 各 FormModal (Circle/Menu/Topping/Staff/EventStaff) が同一の
 // モーダル外枠 JSX をコピペしていたため共通化。RawBlock デザイン
 // (backdrop-blur / border-thick / 角丸なし / font-mono) を一箇所に集約する。
 // あわせて Escape キー閉じ・背景スクロールロック・aria 属性を付与し UX/a11y を改善。
+// 2026-10-21: 親の overflow/stacking context によるクリップを防ぐため body 直下へ描画する。
 
 const MAX_WIDTH: Record<NonNullable<ModalProps["maxWidth"]>, string> = {
   md: "max-w-md",
@@ -29,6 +32,8 @@ interface ModalProps {
   maxWidth?: "md" | "lg" | "xl" | "full";
   // 2026-10-20: 全画面一覧など、呼び出し側が残りの高さを子要素へ配分する場合に使う。
   contentClassName?: string;
+  // 2026-10-21: 編集対象を切り替えてもダイアログの外寸を一定に保つ画面向け。
+  dialogClassName?: string;
   /** 確認ダイアログ等をこのモーダルの上に重ねる場合に z-index を調整する。 */
   zIndexClassName?: string;
 }
@@ -41,31 +46,27 @@ export function Modal({
   children,
   maxWidth = "lg",
   contentClassName,
+  dialogClassName,
   zIndexClassName = "z-50",
 }: ModalProps) {
-  // 背景スクロールロック (Escape 閉じは useFocusTrap 側に統合)
-  useEffect(() => {
-    if (!isOpen) return;
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = prevOverflow;
-    };
-  }, [isOpen]);
-
+  useBodyScrollLock(isOpen);
   const focusTrapRef = useFocusTrap<HTMLDivElement>(isOpen, { onEscape: onClose });
+  const titleId = useId();
 
   if (!isOpen) return null;
 
-  return (
+  return createPortal((
     <div
       className={cn(
-        "fixed inset-0 flex items-center justify-center bg-foreground/80 backdrop-blur-sm",
-        maxWidth === "full" ? "p-2" : "p-4",
+        cn(
+          "fixed inset-0 flex items-center justify-center overflow-y-auto bg-foreground/80 backdrop-blur-sm",
+          maxWidth === "full" ? "viewport-safe-area-compact" : "viewport-safe-area",
+        ),
         zIndexClassName,
       )}
       role="dialog"
       aria-modal="true"
+      aria-labelledby={titleId}
     >
       {/* 背景タップで閉じるための透明オーバーレイ */}
       <div className="absolute inset-0" onClick={onClose} />
@@ -74,15 +75,16 @@ export function Modal({
         ref={focusTrapRef}
         tabIndex={-1}
         className={cn(
-          "relative w-full bg-background border-thick border-border shadow-none font-mono text-foreground z-10 max-h-[85vh] flex flex-col",
+          "relative min-h-0 w-full min-w-0 max-w-full bg-background border-thick border-border shadow-none font-mono text-foreground z-10 max-h-[calc(100dvh-2rem)] flex flex-col",
           // 2026-10-20: 全画面モーダルは内側の余白を縮め、縦の短い画面でも一覧の表示領域を確保する。
-          maxWidth === "full" && "p-2 sm:p-4",
+          maxWidth === "full" && "max-h-full p-2 sm:p-4",
           MAX_WIDTH[maxWidth],
+          dialogClassName,
         )}
       >
-        <CardHeader className="pb-3 border-b-thick border-border flex flex-row items-start justify-between shrink-0">
-          <div className="space-y-1">
-            <CardTitle className="text-sm font-bold uppercase">{title}</CardTitle>
+        <CardHeader className="min-w-0 pb-3 border-b-thick border-border flex flex-row items-start justify-between gap-3 shrink-0">
+          <div className="min-w-0 space-y-1">
+            <CardTitle id={titleId} className="break-words text-sm font-bold uppercase">{title}</CardTitle>
             {subtitle && <p className="text-[10px] text-muted-foreground">{subtitle}</p>}
           </div>
           <button
@@ -94,8 +96,8 @@ export function Modal({
             <X className="h-4 w-4" />
           </button>
         </CardHeader>
-        <CardContent className={cn("pt-4 space-y-4 flex-1 overflow-y-auto", contentClassName)}>{children}</CardContent>
+        <CardContent className={cn("min-h-0 min-w-0 pt-4 space-y-4 flex-1 overflow-y-auto overscroll-contain", contentClassName)}>{children}</CardContent>
       </Card>
     </div>
-  );
+  ), document.body);
 }

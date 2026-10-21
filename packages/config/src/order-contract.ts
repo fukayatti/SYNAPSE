@@ -17,6 +17,8 @@ export const createOrderSchema = z.object({
   // 店頭割引は注文時にサーバーが種別・設定値・注文小計から割引額を再計算する。
   discountId: z.string().min(1).optional(),
   notes: z.string().optional(),
+  // 2026-10-21: オフライン注文の再送時に、表示後の価格変更で意図しない金額を確定させない。
+  expectedTotalPrice: z.number().int().nonnegative().optional(),
   items: z.array(z.object({
     menuId: z.string().min(1),
     quantity: z.number().int().positive(),

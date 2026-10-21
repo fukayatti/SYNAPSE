@@ -35,6 +35,32 @@ export const notification = sqliteTable(
   ]
 );
 
+// 2026-10-21: Push endpoint は通知を受け取る端末の認可情報として扱い、所有者をひとつだけ結び付ける。
+// 共有端末で別アカウントが購読した時に前の利用者へ通知を送り続けないよう endpoint 単位で更新する。
+export const pushSubscription = sqliteTable(
+  "push_subscription",
+  {
+    id: text("id").primaryKey().$defaultFn(() => ulid()),
+    ownerType: text("owner_type").notNull(), // staff | visitor
+    ownerId: text("owner_id").notNull(), // staff=email, visitor=event_user.id
+    eventId: text("event_id"), // visitor subscription scope; staff may receive across memberships
+    endpoint: text("endpoint").notNull().unique(),
+    p256dh: text("p256dh").notNull(),
+    auth: text("auth").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+      .notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" })
+      .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (table) => [
+    index("push_subscription_owner_idx").on(table.ownerType, table.ownerId),
+    index("push_subscription_event_idx").on(table.ownerType, table.eventId),
+  ],
+);
+
 // ==========================================
 // 認証レート制限 / アカウントロックアウト (2026-07-05 追加, 監査 High: H4)
 //  - 目的: PIN 総当たり (POST /api/memberships/authenticate-pin) と
@@ -71,6 +97,8 @@ export const announcement = sqliteTable(
     // 表示レベル: info | warning | critical
     level: text("level").notNull().default("info"),
     published: integer("published", { mode: "boolean" }).notNull().default(false),
+    // 2026-10-21: 公開後も受信者通知の根拠になるため、削除操作では公開を止めて行を保持する。
+    deletedAt: integer("deleted_at", { mode: "timestamp_ms" }),
     createdAt: integer("created_at", { mode: "timestamp_ms" })
       .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
       .notNull(),

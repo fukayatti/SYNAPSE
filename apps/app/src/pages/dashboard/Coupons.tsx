@@ -185,7 +185,7 @@ function CouponsContent() {
       </DashboardLayout>
     );
   }
-  if (isError) {
+  if (isError && coupons === undefined) {
     return (
       <DashboardLayout title={circleName} subtitle="クーポン管理" type="circle">
         <ErrorState error={error} onRetry={() => refetch()} />
@@ -211,6 +211,7 @@ function CouponsContent() {
       }
     >
       <div className="space-y-6 font-mono">
+        {isError && <p role="status" className="border-thick border-warning bg-warning/10 p-3 text-xs">最新のクーポン一覧を取得できません。前回取得した内容を表示しています。</p>}
         <p className="text-[11px] text-muted-foreground leading-relaxed">
           知り合い限定で使える割引クーポンを作成できます。URL(推測されにくいランダムな文字列)と合言葉の
           両方を知っている人だけが使えます。合言葉は口頭ではなく、URLと一緒にLINE等のテキストで伝えるのが安全です。

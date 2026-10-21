@@ -1,5 +1,5 @@
-import { lazy, Suspense, useEffect } from "react";
-import { Routes, Route, Outlet, Navigate, useSearchParams } from "react-router-dom";
+import { lazy, Suspense, useEffect, useLayoutEffect, useRef } from "react";
+import { Routes, Route, Outlet, Navigate, useLocation, useSearchParams } from "react-router-dom";
 import { useVisitor } from "@/hooks/useVisitor";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import Providers from "@/components/providers";
@@ -10,10 +10,12 @@ import SystemBanner from "@/components/SystemBanner";
 
 import SystemGate from "@/components/SystemGate";
 import VisitorHeader from "@/components/visitor-header";
-import Loader from "@/components/loader";
 
 import { CircleAuthGuard, SystemAdminGuard, EventAdminGuard } from "@/hooks/useCircleAuth";
+import { CircleDashboardRouteLayout } from "@/components/DashboardLayout";
 import { ImpersonationBanner } from "@/components/system/ImpersonationBanner";
+import { ConnectionStatusBanner } from "@/components/ConnectionStatus";
+import { MobileOrderOutboxSync } from "@/features/orders/MobileOrderOutboxSync";
 
 // 2026-07-15: オフライン対応（スタッフ側）のためのプリロード対象および lazy 定義。
 // 来場者とスタッフ画面を切り分けるため、インポート用関数をオブジェクトにまとめて管理する。
@@ -23,12 +25,15 @@ const pageImports = {
 	Login: () => import("@/pages/Login"),
 	Register: () => import("@/pages/Register"),
 	Backyard: () => import("@/pages/Backyard"),
+	OrderNumberDisplay: () => import("@/pages/OrderNumberDisplay"),
+	RegisterCustomerDisplay: () => import("@/pages/RegisterCustomerDisplay"),
 	Checkin: () => import("@/pages/Checkin"),
 	Invite: () => import("@/pages/Invite"),
 	Admin: () => import("@/pages/Admin"),
 	EventDashboard: () => import("@/pages/EventDashboard"),
 	DashboardIndex: () => import("@/pages/dashboard/Index"),
 	DashboardCircle: () => import("@/pages/dashboard/Circle"),
+	DashboardOrderDisplay: () => import("@/pages/dashboard/OrderDisplay"),
 	DashboardMembers: () => import("@/pages/dashboard/Members"),
 	DashboardMenu: () => import("@/pages/dashboard/Menu"),
 	DashboardQr: () => import("@/pages/dashboard/Qr"),
@@ -55,6 +60,7 @@ const pageImports = {
 	Orders: () => import("@/pages/Orders"),
 	VisitorStampRally: () => import("@/pages/VisitorStampRally"),
 	VisitorReviews: () => import("@/pages/VisitorReviews"),
+	VisitorNotifications: () => import("@/pages/VisitorNotifications"),
 	EventMenu: () => import("@/pages/EventMenu"),
 	CouponRedeem: () => import("@/pages/CouponRedeem"),
 };
@@ -64,12 +70,15 @@ const Home = lazy(pageImports.Home);
 const Login = lazy(pageImports.Login);
 const Register = lazy(pageImports.Register);
 const Backyard = lazy(pageImports.Backyard);
+const OrderNumberDisplay = lazy(pageImports.OrderNumberDisplay);
+const RegisterCustomerDisplay = lazy(pageImports.RegisterCustomerDisplay);
 const Checkin = lazy(pageImports.Checkin);
 const Invite = lazy(pageImports.Invite);
 const Admin = lazy(pageImports.Admin);
 const EventDashboard = lazy(pageImports.EventDashboard);
 const DashboardIndex = lazy(pageImports.DashboardIndex);
 const DashboardCircle = lazy(pageImports.DashboardCircle);
+const DashboardOrderDisplay = lazy(pageImports.DashboardOrderDisplay);
 const DashboardMembers = lazy(pageImports.DashboardMembers);
 const DashboardMenu = lazy(pageImports.DashboardMenu);
 const DashboardQr = lazy(pageImports.DashboardQr);
@@ -95,6 +104,7 @@ const VisitorAccount = lazy(pageImports.VisitorAccount);
 const Orders = lazy(pageImports.Orders);
 const VisitorStampRally = lazy(pageImports.VisitorStampRally);
 const VisitorReviews = lazy(pageImports.VisitorReviews);
+const VisitorNotifications = lazy(pageImports.VisitorNotifications);
 const EventMenu = lazy(pageImports.EventMenu);
 const CouponRedeem = lazy(pageImports.CouponRedeem);
 
@@ -103,8 +113,8 @@ const CouponRedeem = lazy(pageImports.CouponRedeem);
 // 関連モジュールをバックグラウンドで一括ダウンロードする。
 export function preloadStaffPages() {
 	const staffKeys: (keyof typeof pageImports)[] = [
-		"Home", "Login", "Register", "Backyard", "Checkin", "Invite", "Admin", 
-		"EventDashboard", "DashboardIndex", "DashboardCircle", "DashboardMembers", 
+		"Home", "Login", "Register", "Backyard", "OrderNumberDisplay", "RegisterCustomerDisplay", "Checkin", "Invite", "Admin",
+		"EventDashboard", "DashboardIndex", "DashboardCircle", "DashboardOrderDisplay", "DashboardMembers",
 		"DashboardMenu", "DashboardQr", "DashboardSales", "DashboardStaff",
 		"DashboardStock", "DashboardAnalytics", "DashboardExport", "DashboardCoupons", "DashboardDiscounts", "StaffOnboarding"
 	];
@@ -127,12 +137,18 @@ function AdminLayout() {
 	}, []);
 
 	return (
-		<div className="grid grid-cols-1 grid-rows-[auto_auto_1fr] min-h-svh">
-			<Header />
-			<SystemBanner />
+		<div className="grid grid-cols-1 grid-rows-[auto_1fr] min-h-svh">
+			{/* 2026-10-21: 接続/運営バナーを含む上部全体を固定し、高さ変化で本文や左メニューがずれないようにする。 */}
+			<div data-app-chrome className="sticky top-0 z-50">
+				<ConnectionStatusBanner />
+				<Header />
+				<SystemBanner />
+			</div>
 			{/* 2026-09-27: Grid item の自動最小幅で子テーブルが画面全体を押し広げないよう縮小を許可する。 */}
-			<main className="min-w-0 w-full">
-				<Outlet />
+      <main className="min-w-0 w-full">
+        <Suspense fallback={<RoutePageLoading />}>
+          <Outlet />
+        </Suspense>
 			</main>
 		</div>
 	);
@@ -142,9 +158,12 @@ function VisitorLayout() {
 	return (
 		<SystemGate>
 			<div className="grid grid-rows-[auto_1fr] min-h-svh">
+				<MobileOrderOutboxSync />
 				<VisitorHeader />
 				<main>
-					<Outlet />
+					<Suspense fallback={<RoutePageLoading />}>
+						<Outlet />
+					</Suspense>
 				</main>
 			</div>
 		</SystemGate>
@@ -179,9 +198,150 @@ function VisitorOnboardingGate() {
 function BareLayout() {
 	return (
 		<SystemGate>
-			<Outlet />
+			<Suspense fallback={<RoutePageLoading />}>
+				<Outlet />
+			</Suspense>
 		</SystemGate>
 	);
+}
+
+function RoutePageLoading() {
+	// 2026-10-21: SPAの遅延読込では共通ヘッダーを残し、画面全体が消えたように見せない。
+	return (
+		<div className="mx-auto flex min-h-[45vh] w-full max-w-7xl items-start p-6" role="status" aria-live="polite">
+			<span className="border-l-heavy border-primary pl-3 text-sm font-bold text-muted-foreground">画面を表示しています…</span>
+		</div>
+	);
+}
+
+function RouteScrollRestoration() {
+	const location = useLocation();
+	const routeKey = `${location.pathname}${location.search}`;
+	const restoringRef = useRef(false);
+	const storageKey = (key: string) => `fesflow:scroll:${key}`;
+	const readPosition = (key: string) => {
+		try {
+			const value = Number(window.sessionStorage.getItem(storageKey(key)) ?? 0);
+			return Number.isFinite(value) && value > 0 ? value : 0;
+		} catch { return 0; }
+	};
+	const savePosition = (key: string, top: number) => {
+		try { window.sessionStorage.setItem(storageKey(key), String(Math.max(0, top))); } catch { /* 保存不可でも遷移を続ける */ }
+	};
+
+	useEffect(() => {
+		// 2026-10-21: ルート別に復元するため、履歴エントリ単位のブラウザー自動復元と競合させない。
+		const previous = window.history.scrollRestoration;
+		window.history.scrollRestoration = "manual";
+		return () => { window.history.scrollRestoration = previous; };
+	}, []);
+
+	useEffect(() => {
+		const key = routeKey;
+		let timer = 0;
+		// 2026-10-21: 遷移先が短い画面だとDOM更新時にwindow.scrollYが0へ丸められる。
+		// cleanupでその値を保存し直さないよう、最後に観測した位置をルート単位で保持する。
+		let lastKnownTop = readPosition(key);
+		const onScroll = () => {
+			if (restoringRef.current) return;
+			lastKnownTop = window.scrollY;
+			window.clearTimeout(timer);
+			timer = window.setTimeout(() => savePosition(key, lastKnownTop), 120);
+		};
+		// リンク操作はReact Routerの画面差し替え前に現在位置を同期保存する。
+		const saveBeforeNavigation = () => {
+			if (restoringRef.current) return;
+			lastKnownTop = window.scrollY;
+			savePosition(key, lastKnownTop);
+		};
+		window.addEventListener("scroll", onScroll, { passive: true });
+		window.addEventListener("click", saveBeforeNavigation, true);
+		window.addEventListener("pagehide", saveBeforeNavigation);
+		return () => {
+			window.clearTimeout(timer);
+			// 2026-10-21: ここではliveのscrollYを読まない。ReactのDOM差し替え後にcleanupされると
+			// 短い遷移先に丸められた値で、戻り先の位置を上書きしてしまう。
+			savePosition(key, lastKnownTop);
+			window.removeEventListener("scroll", onScroll);
+			window.removeEventListener("click", saveBeforeNavigation, true);
+			window.removeEventListener("pagehide", saveBeforeNavigation);
+		};
+	}, [routeKey]);
+
+	useLayoutEffect(() => {
+		const top = readPosition(routeKey);
+		let active = true;
+		let frame = 0;
+		let fallbackTimer = 0;
+		let restored = false;
+		const finish = () => {
+			if (!active || restored) return;
+			restored = true;
+			restoringRef.current = false;
+			observer?.disconnect();
+			window.clearTimeout(fallbackTimer);
+			window.removeEventListener("wheel", cancelRestore, true);
+			window.removeEventListener("pointerdown", cancelRestore, true);
+			window.removeEventListener("touchstart", cancelRestore, true);
+			window.removeEventListener("keydown", cancelForScrollKey, true);
+		};
+		const restoreWhenReady = () => {
+			if (!active || restored) return;
+			const maxTop = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+			if (maxTop + 1 < top) return;
+			window.scrollTo({ top, behavior: "auto" });
+			if (Math.abs(window.scrollY - top) <= 1) finish();
+		};
+		const retryWithoutResizeObserver = () => {
+			if (!active || restored) return;
+			const maxTop = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+			if (maxTop + 1 >= top) {
+				window.scrollTo({ top, behavior: "auto" });
+				finish();
+				return;
+			}
+			fallbackTimer = window.setTimeout(retryWithoutResizeObserver, 250);
+		};
+		const cancelRestore = () => finish();
+		const cancelForScrollKey = (event: KeyboardEvent) => {
+			if (["ArrowDown", "ArrowUp", "PageDown", "PageUp", "Home", "End", " "].includes(event.key)) finish();
+		};
+		let observer: ResizeObserver | undefined;
+
+		// 2026-10-21: 遅延読込中はスクロール可能な高さがまだないことがある。
+		// 目標位置へ届くまでページ寸法の変化を監視し、ユーザー操作が始まったら復元を止める。
+		restoringRef.current = top > 0;
+		if (top <= 0) {
+			window.scrollTo({ top: 0, behavior: "auto" });
+			return () => { active = false; restoringRef.current = false; };
+		}
+		window.addEventListener("wheel", cancelRestore, true);
+		window.addEventListener("pointerdown", cancelRestore, true);
+		window.addEventListener("touchstart", cancelRestore, true);
+		window.addEventListener("keydown", cancelForScrollKey, true);
+		if (typeof ResizeObserver !== "undefined") {
+			observer = new ResizeObserver(restoreWhenReady);
+			observer.observe(document.documentElement);
+			observer.observe(document.body);
+		} else {
+			// ResizeObserverのない環境では、コンテンツの高さが増えるまで軽く再確認する。
+			fallbackTimer = window.setTimeout(retryWithoutResizeObserver, 250);
+		}
+		frame = window.requestAnimationFrame(restoreWhenReady);
+		return () => {
+			active = false;
+			window.cancelAnimationFrame(frame);
+			observer?.disconnect();
+			window.clearTimeout(fallbackTimer);
+			window.removeEventListener("wheel", cancelRestore, true);
+			window.removeEventListener("pointerdown", cancelRestore, true);
+			window.removeEventListener("touchstart", cancelRestore, true);
+			window.removeEventListener("keydown", cancelForScrollKey, true);
+			restoringRef.current = false;
+		};
+	}, [routeKey]);
+
+	return null;
 }
 
 export default function App() {
@@ -192,11 +352,14 @@ export default function App() {
 			<DebugConsole />
 			{/* なりすまし中は全ページ最上部にバナーを出す (Phase E) */}
 			<ImpersonationBanner />
-			<Suspense fallback={<Loader />}>
+			<RouteScrollRestoration />
 				<Routes>
 				{/* ドメインルートはブランディングページ (VisitorHeader なし) */}
 				<Route element={<BareLayout />}>
 					<Route path="/" element={<Branding />} />
+					{/* 2026-10-21: 店頭表示はナビゲーションを外し、プロジェクターと顧客用端末で画面を占有する。 */}
+					<Route path="/circle/backyard/display" element={<CircleAuthGuard><OrderNumberDisplay /></CircleAuthGuard>} />
+					<Route path="/register-display/:sessionId" element={<RegisterCustomerDisplay />} />
 					{/* 2026-10-20: 入場前でも取得情報の利用目的と取扱いを確認できる公開ページ。 */}
 					<Route path="/visitor/data-use" element={<VisitorDataUseNoticePage />} />
 				</Route>
@@ -217,12 +380,14 @@ export default function App() {
 						<Route path="/visitor/orders" element={<Orders />} />
 						<Route path="/visitor/stamps" element={<VisitorStampRally />} />
 						<Route path="/visitor/reviews" element={<VisitorReviews />} />
+						<Route path="/visitor/notifications" element={<VisitorNotifications />} />
 					</Route>
 
 					{/* Visitor event / menu routes */}
 					<Route path="/visitor/events" element={<EventMenu />} />
 					<Route path="/visitor/events/:eventId" element={<EventMenu />} />
 					<Route path="/visitor/menu" element={<Menu />} />
+					<Route path="/visitor/order/:circleId" element={<Menu />} />
 
 					{/* クーポン合言葉入力ページ (issue #50)。オンボーディング必須ゲートは掛けない
 					    (ニックネーム未入力でも合言葉検証自体はできて良いため。入場(userId)の有無は
@@ -285,106 +450,32 @@ export default function App() {
 							</CircleAuthGuard>
 						}
 					/>
+					{/* 2026-10-21: サークル画面は共通レイアウトを親ルートに置き、ページ切替時の白抜けを防ぐ。 */}
 					<Route
 						path="/circle/dashboard"
-						element={
-							<CircleAuthGuard>
-								<DashboardIndex />
-							</CircleAuthGuard>
-						}
-					/>
-					<Route
-						path="/circle/dashboard/circle"
-						element={
-							<CircleAuthGuard>
-								<DashboardCircle />
-							</CircleAuthGuard>
-						}
-					/>
-					<Route
-						path="/circle/dashboard/members"
-						element={
-							<CircleAuthGuard>
-								<DashboardMembers />
-							</CircleAuthGuard>
-						}
-					/>
-					<Route
-						path="/circle/dashboard/menu"
-						element={
-							<CircleAuthGuard>
-								<DashboardMenu />
-							</CircleAuthGuard>
-						}
-					/>
-					<Route
-						path="/circle/dashboard/qr"
-						element={
-							<CircleAuthGuard>
-								<DashboardQr />
-							</CircleAuthGuard>
-						}
-					/>
-					<Route
-						path="/circle/dashboard/sales"
-						element={
-							<CircleAuthGuard>
-								<DashboardSales />
-							</CircleAuthGuard>
-						}
-					/>
-					<Route
-						path="/circle/dashboard/analytics"
-						element={
-							<CircleAuthGuard>
-								<DashboardAnalytics />
-							</CircleAuthGuard>
-						}
-					/>
-					<Route
-						path="/circle/dashboard/reviews"
-						element={<CircleAuthGuard><DashboardReviews /></CircleAuthGuard>}
-					/>
-					<Route
-						path="/circle/dashboard/export"
-						element={
-							<CircleAuthGuard>
-								<DashboardExport />
-							</CircleAuthGuard>
-						}
-					/>
-					<Route
-						path="/circle/dashboard/staff"
-						element={
-							<CircleAuthGuard>
-								<DashboardStaff />
-							</CircleAuthGuard>
-						}
-					/>
-					<Route
-						path="/circle/dashboard/stock"
-						element={
-							<CircleAuthGuard>
-								<DashboardStock />
-							</CircleAuthGuard>
-						}
-					/>
-					<Route
-						path="/circle/dashboard/coupons"
-						element={
-							<CircleAuthGuard>
-								<DashboardCoupons />
-							</CircleAuthGuard>
-						}
-					/>
-					<Route path="/circle/dashboard/discounts" element={<CircleAuthGuard><DashboardDiscounts /></CircleAuthGuard>} />
+						element={<CircleAuthGuard><CircleDashboardRouteLayout /></CircleAuthGuard>}
+					>
+						<Route index element={<DashboardIndex />} />
+						<Route path="circle" element={<CircleAuthGuard><DashboardCircle /></CircleAuthGuard>} />
+						<Route path="number-display" element={<CircleAuthGuard><DashboardOrderDisplay /></CircleAuthGuard>} />
+						<Route path="members" element={<CircleAuthGuard><DashboardMembers /></CircleAuthGuard>} />
+						<Route path="menu" element={<CircleAuthGuard><DashboardMenu /></CircleAuthGuard>} />
+						<Route path="qr" element={<CircleAuthGuard><DashboardQr /></CircleAuthGuard>} />
+						<Route path="sales" element={<CircleAuthGuard><DashboardSales /></CircleAuthGuard>} />
+						<Route path="analytics" element={<CircleAuthGuard><DashboardAnalytics /></CircleAuthGuard>} />
+						<Route path="reviews" element={<CircleAuthGuard><DashboardReviews /></CircleAuthGuard>} />
+						<Route path="export" element={<CircleAuthGuard><DashboardExport /></CircleAuthGuard>} />
+						<Route path="staff" element={<CircleAuthGuard><DashboardStaff /></CircleAuthGuard>} />
+						<Route path="stock" element={<CircleAuthGuard><DashboardStock /></CircleAuthGuard>} />
+						<Route path="coupons" element={<CircleAuthGuard><DashboardCoupons /></CircleAuthGuard>} />
+						<Route path="discounts" element={<CircleAuthGuard><DashboardDiscounts /></CircleAuthGuard>} />
+					</Route>
 
 				</Route>
 
 				{/* 2026-10-01: 未対応画面用の案内を404と誤認させないよう、未定義URLは専用ページへ送る。 */}
 				<Route path="*" element={<NotFound />} />
-			</Routes>
-			</Suspense>
+				</Routes>
 		</Providers>
 		</ErrorBoundary>
 	);

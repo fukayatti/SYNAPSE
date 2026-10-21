@@ -1,5 +1,5 @@
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { CircleAuthGuard, useAuth } from "@/hooks/useCircleAuth";
 import { orderApi, toppingApi } from "@/lib/api";
@@ -8,7 +8,10 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState } from "@/components/ui/ErrorState";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { toast } from "sonner";
+import { Monitor } from "lucide-react";
 import { SwipeableOrderStack, type KitchenOrderView } from "@/components/pos/SwipeableOrderStack";
+import { useSessionState } from "@/hooks/useSessionState";
+import { queryCachePolicy } from "@/lib/query-cache-policy";
 
 function BackyardPageContent() {
   // 2026-07-16: circleId を useState+useEffect(mount時一度きり) で固定していると、
@@ -16,9 +19,10 @@ function BackyardPageContent() {
   // useAuth() (authChange 購読で常に最新値) に統一する。
   const { circleId: authCircleId } = useAuth();
   const circleId = authCircleId ?? "";
+  const orderNumberDisplayWindow = useRef<Window | null>(null);
   // 2026-10-17: 起動時は未着手と調理中を一続きの作業キューにし、最初に対応すべき注文へ案内する。
-  const [selectedStatus, setSelectedStatus] = useState<string | undefined>("actionable");
-  const [view, setView] = useState<KitchenOrderView>("horizontal");
+  const [selectedStatus, setSelectedStatus] = useSessionState<string | undefined>(`fesflow:backyard:${circleId || "unselected"}:status`, "actionable");
+  const [view, setView] = useSessionState<KitchenOrderView>(`fesflow:backyard:${circleId || "unselected"}:view`, "horizontal");
   // 注文キャンセルの確認ダイアログ用
   const [pendingCancel, setPendingCancel] = useState<{ id: string; orderNumber: string } | null>(
     null
@@ -39,13 +43,14 @@ function BackyardPageContent() {
     queryFn: () => orderApi.list(circleId, apiStatus),
     enabled: !!circleId,
     refetchInterval: 5000, // 5秒ごとに自動更新
+    ...queryCachePolicy.live,
   });
 
   const { data: toppings } = useQuery({
-    queryKey: ["toppings", circleId],
+    queryKey: ["toppings", circleId, false],
     queryFn: () => toppingApi.list(circleId),
     enabled: !!circleId,
-    staleTime: 60_000,
+    ...queryCachePolicy.catalog,
   });
 
   const updateStatus = useMutation({
@@ -77,8 +82,34 @@ function BackyardPageContent() {
     },
   });
 
+  const markReceived = useMutation({
+    mutationFn: (input: { id: string }) => orderApi.markReceived(input.id),
+    onSuccess: () => {
+      toast.success("受け渡し済みにしました");
+      queryClient.invalidateQueries({ queryKey: ["orders"] });
+      queryClient.invalidateQueries({ queryKey: ["projector-orders"] });
+      queryClient.invalidateQueries({ queryKey: ["myOrders"] });
+    },
+    onError: (error: any) => toast.error(error.message || "受け渡し状態を更新できませんでした"),
+  });
+
   const handleStartPreparing = (orderId: string) => {
     return updateStatus.mutateAsync({ id: orderId, status: "preparing" });
+  };
+
+  const openOrderNumberDisplay = () => {
+    if (orderNumberDisplayWindow.current && !orderNumberDisplayWindow.current.closed) {
+      orderNumberDisplayWindow.current.focus();
+      return;
+    }
+    // 2026-10-21: 認証対象のサークルIDはsessionStorageにあるため、新窓へ複製してからopenerを切る。
+    const popup = window.open("/circle/backyard/display", `fesflow-order-number-display-${Date.now()}`);
+    if (!popup) {
+      toast.error("番号表示画面を開けませんでした。ポップアップを許可してください。");
+      return;
+    }
+    popup.opener = null;
+    orderNumberDisplayWindow.current = popup;
   };
 
   const handleComplete = (orderId: string) => {
@@ -125,7 +156,7 @@ function BackyardPageContent() {
     );
   }
 
-  if (isError) {
+  if (isError && !orders) {
     return (
       <div className="container mx-auto p-4">
         <ErrorState error={error} onRetry={() => refetch()} />
@@ -137,10 +168,27 @@ function BackyardPageContent() {
     <div className="container mx-auto space-y-4 p-3 sm:space-y-6 sm:p-4">
       <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 border-b-thick border-border pb-3">
         <h1 className="text-2xl sm:text-3xl font-headline uppercase tracking-tight">厨房管理</h1>
-        <Button onClick={() => refetch()} variant="outline" className="w-full sm:w-auto border-thick border-border rounded-none font-mono uppercase">
-          更新
-        </Button>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <Button
+            onClick={openOrderNumberDisplay}
+            variant="outline"
+            className="w-full sm:w-auto border-thick border-border rounded-none font-mono uppercase"
+          >
+            <Monitor className="mr-2 h-4 w-4" />
+            番号表示
+          </Button>
+          <Button onClick={() => refetch()} variant="outline" className="w-full sm:w-auto border-thick border-border rounded-none font-mono uppercase">
+            更新
+          </Button>
+        </div>
       </div>
+
+      {isError && orders && (
+        <div role="status" className="flex flex-wrap items-center justify-between gap-2 border-thick border-warning bg-warning/10 p-3 text-xs font-bold">
+          <span>通信に失敗しました。表示中の注文は前回取得した内容です。</span>
+          <Button onClick={() => refetch()} variant="outline" className="min-h-10 border-thick border-border">再接続して更新</Button>
+        </div>
+      )}
 
       {/* ステータスフィルター */}
       <div className="flex gap-2 flex-wrap">
@@ -173,6 +221,20 @@ function BackyardPageContent() {
           完成
         </Button>
         <Button
+          variant={selectedStatus === "pickup" ? "default" : "outline"}
+          onClick={() => setSelectedStatus("pickup")}
+          className="border-thick border-border rounded-none font-mono uppercase text-xs sm:text-sm"
+        >
+          受け取り待ち
+        </Button>
+        <Button
+          variant={selectedStatus === "received" ? "default" : "outline"}
+          onClick={() => setSelectedStatus("received")}
+          className="border-thick border-border rounded-none font-mono uppercase text-xs sm:text-sm"
+        >
+          受け渡し済み
+        </Button>
+        <Button
           variant={selectedStatus === "cancelled" ? "default" : "outline"}
           onClick={() => setSelectedStatus("cancelled")}
           className="border-thick border-border rounded-none font-mono uppercase text-xs sm:text-sm"
@@ -192,13 +254,15 @@ function BackyardPageContent() {
       <SwipeableOrderStack
         orders={visibleOrders}
         view={view}
+        scrollStateKey={`fesflow:backyard:${circleId || "unselected"}:horizontal-scroll`}
         openAtLatest={selectedStatus === undefined}
         onViewChange={setView}
         onStart={handleStartPreparing}
         onComplete={handleComplete}
+        onMarkReceived={(id) => markReceived.mutateAsync({ id })}
         onCancelRequest={(id, orderNumber) => setPendingCancel({ id, orderNumber })}
         cancelAnimationOrderId={cancelAnimationOrderId}
-        isUpdating={updateStatus.isPending || completeOrder.isPending}
+        isUpdating={updateStatus.isPending || completeOrder.isPending || markReceived.isPending}
       />
 
       <ConfirmDialog

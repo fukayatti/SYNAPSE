@@ -65,7 +65,7 @@ function CircleQrContent() {
     );
   }
 
-  if (isError) {
+  if (isError && !circle) {
     return (
       <DashboardLayout title={circleName} subtitle="モバイルオーダーQR" type="circle">
         <ErrorState error={error} onRetry={() => refetch()} />
@@ -150,6 +150,7 @@ function CircleQrContent() {
 
   return (
     <DashboardLayout title={circleName} subtitle="モバイルオーダーQR" type="circle">
+      {isError && <p role="status" className="mb-4 border-thick border-warning bg-warning/10 p-3 text-xs">最新のサークル情報を取得できません。前回取得した内容を表示しています。</p>}
       <div className="space-y-6 font-mono">
         {/* ナビゲーション・アクション（印刷時には非表示） */}
         <div className="print:hidden flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 border-b-thick border-border pb-4">

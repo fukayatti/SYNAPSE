@@ -15,7 +15,7 @@ import { Label } from "@/components/ui/label";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { toast } from "sonner";
 import { useUnsavedChanges } from "@/components/UnsavedNavigationGuard";
-import { Calendar, Trash2, Settings2, Save, Eye, Search, Coins, Plus, RotateCcw, ChevronLeft, ChevronRight } from "lucide-react";
+import { Calendar, Trash2, Archive, Settings2, Save, Eye, Search, Coins, Plus, RotateCcw, ChevronLeft, ChevronRight } from "lucide-react";
 
 // SaaS 運営: イベント/契約管理 (2026-07-12 Phase C / 2026-07-15 契約金額・入金履歴で拡充)。
 // 全テナント(イベント)の契約状態・サークル上限・契約金額・入金履歴を手動で管理する
@@ -502,7 +502,7 @@ export function SaasEventsTab() {
               <Coins className="h-3.5 w-3.5" /> 入金履歴
             </h3>
             <span className="text-[11px] font-mono text-muted-foreground">
-              合計 {yen((payments ?? []).reduce((s, p) => s + p.amount, 0))}
+              合計 {yen((payments ?? []).filter((payment) => !payment.voidedAt).reduce((s, p) => s + p.amount, 0))}
             </span>
           </div>
 
@@ -556,23 +556,25 @@ export function SaasEventsTab() {
           />
 
           {/* 履歴一覧 */}
+          {/* 2026-10-21: 台帳行は削除せず訂正扱いで残し、誤操作後も金額の根拠を確認できるようにする。 */}
           {payments && payments.length > 0 ? (
             <div className="divide-y divide-border border-thick border-border">
               {payments.map((p) => (
                 <div key={p.id} className="flex items-center justify-between gap-2 p-2 text-[11px] font-mono">
                   <div className="min-w-0">
-                    <span className="font-bold tabular-nums">{yen(p.amount)}</span>
+                    <span className={`font-bold tabular-nums ${p.voidedAt ? "line-through text-muted-foreground" : ""}`}>{yen(p.amount)}</span>
                     <span className="text-muted-foreground"> · {p.method} · {toDateInput(p.paidAt)}</span>
                     {p.note && <span className="text-muted-foreground truncate"> · {p.note}</span>}
+                    {p.voidedAt && <span className="ml-2 inline-block font-bold text-destructive">訂正済み · {toDateInput(p.voidedAt)} · {p.voidedBy || "管理者"}</span>}
                   </div>
-                  <button
+                  {!p.voidedAt && <button
                     className="p-1 text-destructive hover:bg-muted shrink-0"
-                    title="この入金記録を削除"
-                    aria-label={`${yen(p.amount)}の入金記録を削除`}
+                    title="この入金記録を訂正済みにする"
+                    aria-label={`${yen(p.amount)}の入金記録を訂正済みにする`}
                     onClick={() => setPendingPaymentDelete(p.id)}
                   >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
+                    <Archive className="h-3.5 w-3.5" />
+                  </button>}
                 </div>
               ))}
             </div>
@@ -592,9 +594,9 @@ export function SaasEventsTab() {
       />
       <ConfirmDialog
         isOpen={!!pendingPaymentDelete}
-        title="入金記録を削除しますか?"
-        description="選択した入金記録を台帳から削除します。監査ログには削除操作が残ります。"
-        confirmLabel="記録を削除"
+        title="入金記録を訂正済みにしますか?"
+        description="記録は台帳に残り、契約入金合計から除外されます。訂正後の入金は正しい内容で新しく記録してください。"
+        confirmLabel="訂正済みにする"
         isPending={removePayment.isPending}
         onConfirm={() => pendingPaymentDelete && removePayment.mutate(pendingPaymentDelete)}
         onCancel={() => setPendingPaymentDelete(null)}

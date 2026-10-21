@@ -1,13 +1,13 @@
 import { useMemo } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { eventApi, circleApi, activeWaitTimeReport, parseCircleSettings, parseStoreAreas } from "@/lib/api";
+import { eventApi, circleApi, reviewApi, activeWaitTimeReport, parseCircleSettings, parseStoreAreas, type VisitorReviewStoreSummary } from "@/lib/api";
 import { useVisitor } from "@/hooks/useVisitor";
 import { EventTheme } from "@/components/EventTheme";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState } from "@/components/ui/ErrorState";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { Store, ArrowRight, QrCode, Calendar, ChevronRight } from "lucide-react";
+import { Store, ArrowRight, QrCode, Calendar, ChevronRight, ShoppingCart, Star } from "lucide-react";
 import { resolveAssetUrl } from "@/lib/asset-url";
 import { findVisitorRouteItem } from "@/lib/visitor-route";
 import { groupCirclesByStoreArea } from "@/lib/store-areas";
@@ -120,6 +120,16 @@ function EventMenuContent({
     refetchInterval: 60_000,
   });
 
+  const { data: publicReviewSummaries } = useQuery({
+    queryKey: ["public-review-summaries", eventId],
+    queryFn: () => reviewApi.publicStores(eventId),
+    staleTime: 30_000,
+  });
+  const reviewSummaryByCircle = useMemo(
+    () => new Map((publicReviewSummaries ?? []).map((summary) => [summary.circleId, summary])),
+    [publicReviewSummaries],
+  );
+
   const theme = useMemo(() => event ?? null, [event]);
   const storeAreas = useMemo(() => parseStoreAreas(event?.storeAreas), [event?.storeAreas]);
   const safeOfficialWebsiteUrl = useMemo(() => {
@@ -175,13 +185,19 @@ function EventMenuContent({
 
         {/* イベント取得失敗: ヘッダーは上でフォールバック表示済みだが、
             テーマ/イベント名が欠けたまま気づかず進むのを避けるため明示的にエラーを出す */}
-        {eventError && (
+        {eventError && !event && (
           <ErrorState
             error={eventErrorObj}
             title="イベント情報の取得に失敗しました"
             onRetry={() => refetchEvent()}
             className="mb-6"
           />
+        )}
+        {eventError && event && (
+          <div role="status" className="mb-6 flex flex-wrap items-center justify-between gap-2 border-thick border-warning bg-warning/10 p-3 text-xs font-bold">
+            <span>通信に失敗しました。前回取得したイベント情報を表示しています。</span>
+            <button type="button" onClick={() => void refetchEvent()} className="min-h-10 border-thick border-border px-3 underline">再接続して更新</button>
+          </div>
         )}
 
         {/* 未入場バナー: 閲覧は自由・利用は発行必須 */}
@@ -211,7 +227,7 @@ function EventMenuContent({
               <Skeleton key={i} className="h-24" />
             ))}
           </div>
-        ) : circlesError ? (
+        ) : circlesError && !circles ? (
           <ErrorState error={circlesErrorObj} onRetry={() => refetchCircles()} />
         ) : uniqueCircles && uniqueCircles.length > 0 ? (
           <div className="space-y-5">
@@ -224,12 +240,15 @@ function EventMenuContent({
                 {/* 2026-10-16: 画面を有効に使うため、スマートフォンでも店舗を2列で一覧できるようにする。 */}
                 <div className="grid grid-cols-2 gap-2 sm:gap-3">
                   {group.circles.map((circle) => (
-              <button
+              <article
                 key={circle.id}
-                type="button"
-                onClick={() => onBrowseCircle(circle.id)}
-                className="group flex min-w-0 w-full cursor-pointer items-center gap-2 border-thick border-border bg-background p-2 text-left transition-colors hover:bg-muted sm:gap-3 sm:p-3"
+                className="flex min-w-0 flex-col gap-2 border-thick border-border bg-background p-2 sm:p-3"
               >
+                <button
+                  type="button"
+                  onClick={() => onBrowseCircle(circle.id)}
+                  className="group flex min-h-16 min-w-0 w-full cursor-pointer items-center gap-2 text-left transition-colors hover:bg-muted sm:gap-3"
+                >
                 {circle.iconImagePath ? (
                   <img
                     src={resolveAssetUrl(circle.iconImagePath)}
@@ -259,12 +278,30 @@ function EventMenuContent({
                     const report = activeWaitTimeReport(circle.settings);
                     return <div className="mt-1 break-words text-[9px] font-bold sm:text-[10px]">待ち時間: {report ? `約${report.minutes}分（${report.minutesAgo}分前）` : "未報告"}</div>;
                   })()}
+                  {reviewSummaryByCircle.get(circle.id)?.showAverageRating && (
+                    <PublicRatingSummary summary={reviewSummaryByCircle.get(circle.id)!} />
+                  )}
                   <div className="mt-1 inline-flex flex-wrap items-center gap-1 text-[9px] font-black uppercase tracking-wider sm:text-[10px]">
-                    メニューを見る
+                    {parseCircleSettings(circle.settings).preOrderEnabled ? "事前注文" : "メニューを見る"}
                     <ArrowRight className="h-3 w-3 transition-transform group-hover:translate-x-1" />
                   </div>
                 </div>
-              </button>
+                </button>
+                {parseCircleSettings(circle.settings).preOrderEnabled && parseCircleSettings(circle.settings).mobileOrderEnabled && (
+                  <p className="border-t-thin border-border pt-1 text-center text-[9px] font-bold text-muted-foreground sm:text-[10px]">
+                    事前注文とモバイル注文から選べます
+                  </p>
+                )}
+                {parseCircleSettings(circle.settings).mobileOrderEnabled && (
+                  <Link
+                    to={`/visitor/order/${circle.id}`}
+                    className="inline-flex min-h-11 items-center justify-center gap-2 border-thick border-primary bg-primary px-2 text-center text-[10px] font-black text-primary-foreground hover:bg-background hover:text-foreground sm:text-xs"
+                  >
+                    <ShoppingCart className="h-4 w-4" aria-hidden="true" />
+                    モバイル注文
+                  </Link>
+                )}
+              </article>
                   ))}
                 </div>
               </section>
@@ -272,6 +309,13 @@ function EventMenuContent({
           </div>
         ) : (
           <EmptyState icon={Store} message="このイベントにはまだ出店が登録されていません" />
+        )}
+
+        {circlesError && circles && (
+          <div role="status" className="mt-3 flex flex-wrap items-center justify-between gap-2 border-thick border-warning bg-warning/10 p-3 text-xs font-bold">
+            <span>通信に失敗しました。前回取得した出店一覧を表示しています。</span>
+            <button type="button" onClick={() => void refetchCircles()} className="min-h-10 border-thick border-border px-3 underline">再接続して更新</button>
+          </div>
         )}
 
         {/* 2026-10-20: 下見中の未登録者へマイQR導線を出さず、入場登録完了後にだけ表示する。 */}
@@ -288,6 +332,41 @@ function EventMenuContent({
         )}
       </div>
     </EventTheme>
+  );
+}
+
+function PublicRatingSummary({ summary }: { summary: VisitorReviewStoreSummary }) {
+  const average = summary.averageRating;
+
+  return (
+    <div className="mt-2 space-y-1.5 border-t-thin border-border pt-2" role="group" aria-label={
+      average == null
+        ? `公開レビュー、${summary.reviewCount}件、評価はまだありません`
+        : `公開レビュー、平均${average.toFixed(1)}、${summary.reviewCount}件`
+    }>
+      <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5">
+        <span className="text-sm font-black tabular-nums leading-none">{average == null ? "—" : average.toFixed(1)}</span>
+        <span className="inline-flex items-center gap-0.5" aria-hidden="true">
+          {Array.from({ length: 5 }, (_, index) => {
+            const fill = average == null ? 0 : Math.max(0, Math.min(1, average - index));
+            return (
+              <span key={index} className="relative inline-flex h-3.5 w-3.5 shrink-0 items-center">
+                <Star className="h-3.5 w-3.5 fill-current text-muted-foreground/30" />
+                {fill > 0 && (
+                  <span className="absolute inset-y-0 left-0 overflow-hidden" style={{ width: `${fill * 100}%` }}>
+                    <Star className="h-3.5 w-3.5 max-w-none shrink-0 fill-current text-primary" />
+                  </span>
+                )}
+              </span>
+            );
+          })}
+        </span>
+        <span className="text-[9px] text-muted-foreground">{summary.reviewCount}件</span>
+      </div>
+      {summary.reviewCount === 0 && (
+        <p className="text-[9px] leading-snug text-muted-foreground">レビューはまだありません</p>
+      )}
+    </div>
   );
 }
 

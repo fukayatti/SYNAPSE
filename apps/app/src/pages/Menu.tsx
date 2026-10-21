@@ -3,8 +3,9 @@ import { useEffect, useRef, useState, Suspense } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { ModSandbox } from "@/components/ModSandbox";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { eventApi, circleApi, menuApi, preOrderApi, orderApi, wristbandApi, type CreatePreOrderInput, type MenuWithToppings, type Topping } from "@/lib/api";
+import { eventApi, circleApi, menuApi, preOrderApi, orderApi, wristbandApi, reviewApi, parseCircleSettings, type CreatePreOrderInput, type MenuWithToppings, type Topping, type PublicStoreReviewList } from "@/lib/api";
 import { useVisitor } from "@/hooks/useVisitor";
+import { useSessionState } from "@/hooks/useSessionState";
 import { getCouponsForCircle, type StoredCoupon } from "@/lib/coupon-storage";
 import { cn } from "@/lib/utils";
 import {
@@ -24,12 +25,14 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { toast } from "sonner";
 import { EventTheme } from "@/components/EventTheme";
 import { ApiError } from "@/lib/api-error";
-import { ShoppingCart, Plus, Minus, CheckCircle, UtensilsCrossed, Ticket, X, QrCode } from "lucide-react";
+import { ShoppingCart, Plus, Minus, CheckCircle, UtensilsCrossed, Ticket, X, QrCode, Star, MessageSquareText } from "lucide-react";
 import { resolveAssetUrl } from "@/lib/asset-url";
+import { isEventEnded } from "@/lib/event-lifecycle";
 import { QRCodeSVG } from "qrcode.react";
 // 2026-10-03: 画面をまたぐカート規則と再送制御を機能モジュールに集約する。
 import { addCartLine, updateCartQuantity, toggleCartTopping, lineSubtotal, cartTotal, cartCount, type CartLine, type CartTopping } from "@/features/orders/cart";
 import { useOrderSubmission } from "@/features/orders/use-order-submission";
+import { submitMobileOrder } from "@/features/orders/mobile-order-outbox";
 import { getPreOrderSaveRetryAfterMs, getPreOrderSaveRetryDelay, isRetryablePreOrderSaveError, shouldRetryPreOrderSave } from "@/features/orders/pre-order-save";
 import type { CreateOrderInput } from "@fesflow/config/order-contract";
 import { ToppingSelection, parseToppingCategoryMaximums, parseToppingCategoryMinimums } from "@/components/menu/ToppingSelection";
@@ -50,12 +53,16 @@ function VisitorMenuCard({
   enabledCouponSlugs,
   onToggleCoupon,
   onAdd,
+  orderingDisabled,
+  orderingDisabledLabel,
 }: {
   menu: MenuWithToppings;
   relevantCoupons: StoredCoupon[];
   enabledCouponSlugs: Set<string>;
   onToggleCoupon: (slug: string) => void;
   onAdd: (menu: MenuWithToppings, toppings: CartTopping[]) => void;
+  orderingDisabled: boolean;
+  orderingDisabledLabel: string;
 }) {
   // 既定トッピング: menu.defaultToppingIds のうち、このメニューに紐づく売切れでないもの。
   const defaultIds = () => {
@@ -109,7 +116,7 @@ function VisitorMenuCard({
     .reduce((s, t) => s + (freeToppingIds.has(t.id) ? 0 : t.price), 0);
 
   const handleAdd = () => {
-    if (!selectionReady) return;
+    if (orderingDisabled || !selectionReady) return;
     const chosen: CartTopping[] = availableToppings
       .filter((t) => selected.has(t.id))
       .map((t) => ({ toppingId: t.id, toppingName: t.name, toppingPrice: t.price }));
@@ -118,7 +125,7 @@ function VisitorMenuCard({
   };
 
   return (
-    <Card>
+    <Card className="w-full max-w-lg justify-self-center">
       <CardHeader>
         <div className="relative h-48 w-full overflow-hidden border-b-thick border-border">
           {menu.imagePath ? (
@@ -164,7 +171,7 @@ function VisitorMenuCard({
               freeIds={freeToppingIds}
               onToggle={toggle}
               wizardEnabled={menu.toppingWizardEnabled}
-              disabled={menu.soldOut}
+              disabled={menu.soldOut || orderingDisabled}
               minimums={toppingMinimums}
               maximums={toppingMaximums}
               onReadyChange={setSelectionReady}
@@ -208,8 +215,9 @@ function VisitorMenuCard({
                   <button
                     type="button"
                     onClick={() => onToggleCoupon(c.slug)}
+                    disabled={orderingDisabled}
                     className={cn(
-                      "border-thick px-4 py-2 text-sm font-black uppercase shrink-0 transition-all",
+                      "border-thick px-4 py-2 text-sm font-black uppercase shrink-0 transition-all disabled:cursor-not-allowed disabled:opacity-50",
                       enabled
                         ? "border-primary bg-primary text-primary-foreground"
                         : "border-border bg-background hover:bg-muted"
@@ -227,11 +235,11 @@ function VisitorMenuCard({
       <CardFooter className="border-t-thick border-border pt-4">
         <Button
           onClick={handleAdd}
-          disabled={menu.soldOut || !selectionReady}
-          className="w-full h-14 border-thick border-border bg-primary font-mono text-lg font-black uppercase text-primary-foreground rounded-none hover:bg-background hover:text-foreground transition-colors"
+          disabled={orderingDisabled || menu.soldOut || !selectionReady}
+          className="w-full h-14 border-thick border-border bg-primary font-mono text-lg font-black uppercase text-primary-foreground rounded-none hover:bg-background hover:text-foreground transition-colors disabled:bg-muted disabled:text-muted-foreground disabled:opacity-100"
         >
           <ShoppingCart className="mr-2 h-5 w-5" />
-          カートに追加
+          {orderingDisabled ? orderingDisabledLabel : "カートに追加"}
         </Button>
       </CardFooter>
     </Card>
@@ -239,10 +247,11 @@ function VisitorMenuCard({
 }
 
 function MenuPageContent() {
-  const { eventName: eventNameParam, circleName: circleNameParam } = useParams();
+  const { eventName: eventNameParam, circleName: circleNameParam, circleId: routeCircleId } = useParams();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const circleIdParam = searchParams.get("circleId");
+  const circleIdParam = searchParams.get("circleId") || routeCircleId || null;
+  const isMobileOrderRoute = !!routeCircleId;
   // 未入場 (リストバンド未発行) は空文字。閲覧は許可し注文送信側でゲートする
   const { userId: visitorUserId, session, isLoaded: visitorLoaded } = useVisitor();
   const userId = visitorUserId ?? "";
@@ -255,14 +264,16 @@ function MenuPageContent() {
   const activeWristband = wristbandStatus?.wristband;
   const familyAllergies = parseJapaneseAllergens(wristbandStatus?.user.allergies);
 
-  const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
-  const [selectedCircleId, setSelectedCircleId] = useState<string | null>(
-    circleIdParam
-  );
-  const [cart, setCart] = useState<CartLine[]>([]);
-  const [selectedMenuCategory, setSelectedMenuCategory] = useState<string | null>(null);
+  // 2026-10-21: 来場者の店舗一覧へ戻った時に選択中のイベントと店舗を復元する。
+  const [selectedEventId, setSelectedEventId] = useSessionState<string | null>(`fesflow:visitor-menu:${eventNameParam ?? "browse"}:event`, null);
+  const circleSelectionKey = circleIdParam ?? (eventNameParam ? `${eventNameParam}:${circleNameParam ?? "event"}` : "browse");
+  const [selectedCircleId, setSelectedCircleId] = useSessionState<string | null>(`fesflow:visitor-menu-selection:${circleSelectionKey}`, circleIdParam);
+  const visitorOrderStateKey = `fesflow:visitor-menu:${selectedCircleId || circleIdParam || "browse"}`;
+  const [cart, setCart] = useSessionState<CartLine[]>(`${visitorOrderStateKey}:cart`, []);
+  const [selectedMenuCategory, setSelectedMenuCategory] = useSessionState<string | null>(`${visitorOrderStateKey}:category`, null);
   const [hydratedDraftKey, setHydratedDraftKey] = useState<string | null>(null);
   const [isQrOpen, setIsQrOpen] = useState(false);
+  const [isReviewsOpen, setIsReviewsOpen] = useState(false);
   const [appOrigin, setAppOrigin] = useState("");
   const [draftSaveRetry, setDraftSaveRetry] = useState(0);
   const [draftRetryWaitElapsed, setDraftRetryWaitElapsed] = useState(true);
@@ -282,7 +293,6 @@ function MenuPageContent() {
     setCouponsLoadedCircleId(null);
     setAppliedCoupons(selectedCircleId ? getCouponsForCircle(selectedCircleId) : []);
     setEnabledCouponSlugs(new Set());
-    setSelectedMenuCategory(null);
     // 2026-10-08: クーポンは localStorage から同期取得するため、対象サークル分の読込後に下書き保存を解放する。
     setCouponsLoadedCircleId(selectedCircleId);
   }, [selectedCircleId]);
@@ -300,6 +310,7 @@ function MenuPageContent() {
   const { data: events, isLoading: eventsLoading } = useQuery({
     queryKey: ["events"],
     queryFn: () => eventApi.list(),
+    networkMode: "always",
   });
 
   // 2026-10-08: App.tsx に登録済みの名称URLは、イベント一覧を読み込んでから選択状態へ解決する。
@@ -314,6 +325,7 @@ function MenuPageContent() {
     queryKey: ["circles", selectedEventId],
     queryFn: () => circleApi.list(selectedEventId!),
     enabled: !!selectedEventId,
+    networkMode: "always",
   });
 
   useEffect(() => {
@@ -333,6 +345,21 @@ function MenuPageContent() {
     queryKey: ["circle", selectedCircleId],
     queryFn: () => circleApi.get(selectedCircleId!),
     enabled: !!selectedCircleId,
+    networkMode: "always",
+  });
+
+  const { data: publicReviewSummaries } = useQuery({
+    queryKey: ["public-review-summaries", circleData?.eventId],
+    queryFn: () => reviewApi.publicStores(circleData!.eventId),
+    enabled: !!circleData?.eventId,
+    staleTime: 30_000,
+  });
+  const publicReviewSummary = publicReviewSummaries?.find((summary) => summary.circleId === selectedCircleId);
+  const publicReviewsQuery = useQuery<PublicStoreReviewList>({
+    queryKey: ["public-store-reviews", circleData?.eventId, selectedCircleId],
+    queryFn: () => reviewApi.publicStoreReviews(circleData!.eventId, selectedCircleId!),
+    enabled: isReviewsOpen && !!circleData?.eventId && !!selectedCircleId && !!publicReviewSummary,
+    staleTime: 15_000,
   });
 
   // 選択したサークルのメニュー取得
@@ -347,13 +374,17 @@ function MenuPageContent() {
     queryFn: () => menuApi.list(selectedCircleId!),
     // 登録済み来場者は、サークルの所属イベント確認後に自分のイベントのメニューだけ取得する。
     enabled: visitorLoaded && !!selectedCircleId && (!session?.userId || !session.eventId || circleData?.eventId === session.eventId),
+    networkMode: "always",
   });
 
   const draftKey = userId && selectedCircleId ? `${userId}:${selectedCircleId}` : null;
+  const mobileCartStorageKey = userId && selectedCircleId
+    ? `fesflow-mobile-cart:${userId}:${selectedCircleId}`
+    : null;
   const { data: savedDrafts, isSuccess: draftsLoaded } = useQuery({
     queryKey: ["preOrderDraft", userId, selectedCircleId],
     queryFn: () => preOrderApi.getByCode(userId, selectedCircleId!),
-    enabled: visitorLoaded && !!userId && !!selectedCircleId,
+    enabled: visitorLoaded && !!userId && !!selectedCircleId && !isMobileOrderRoute,
   });
 
   useEffect(() => {
@@ -368,6 +399,36 @@ function MenuPageContent() {
   }, [selectedCircleId, userId]);
 
   useEffect(() => {
+    if (isMobileOrderRoute) {
+      if (!draftKey || !mobileCartStorageKey || !menus || hydratedDraftKey === draftKey) return;
+      let storedLines: CartLine[] = [];
+      try {
+        const raw = localStorage.getItem(mobileCartStorageKey);
+        storedLines = raw ? JSON.parse(raw) as CartLine[] : [];
+      } catch {
+        storedLines = [];
+      }
+      const menuById = new Map(menus.map((item) => [item.id, item]));
+      setCart(storedLines.flatMap((line) => {
+        const menuItem = menuById.get(line.menuId);
+        if (!menuItem) return [];
+        const validToppings = new Map((menuItem.toppings ?? []).map((topping) => [topping.id, topping]));
+        return [{
+          ...line,
+          menuName: menuItem.name,
+          menuPrice: menuItem.price,
+          toppings: line.toppings.flatMap((topping) => {
+            const current = validToppings.get(topping.toppingId);
+            return current && !current.soldOut
+              ? [{ toppingId: current.id, toppingName: current.name, toppingPrice: current.price }]
+              : [];
+          }),
+        }];
+      }));
+      suppressNextDraftSaveRef.current = true;
+      setHydratedDraftKey(draftKey);
+      return;
+    }
     if (!draftKey || !draftsLoaded || !menus || hydratedDraftKey === draftKey) return;
     const draft = savedDrafts?.[0];
     // 2026-10-07 Issue #49: 以後のautosaveは初回から同じIDを使い、claim後の遅延要求を新規注文にしない。
@@ -400,7 +461,17 @@ function MenuPageContent() {
     setCart(restoredCart);
     suppressNextDraftSaveRef.current = true;
     setHydratedDraftKey(draftKey);
-  }, [draftKey, draftsLoaded, savedDrafts, menus, hydratedDraftKey, selectedCircleId]);
+  }, [isMobileOrderRoute, draftKey, mobileCartStorageKey, draftsLoaded, savedDrafts, menus, hydratedDraftKey, selectedCircleId]);
+
+  useEffect(() => {
+    if (!isMobileOrderRoute || !mobileCartStorageKey || !draftKey || hydratedDraftKey !== draftKey) return;
+    try {
+      if (cart.length > 0) localStorage.setItem(mobileCartStorageKey, JSON.stringify(cart));
+      else localStorage.removeItem(mobileCartStorageKey);
+    } catch {
+      // 2026-10-21: 端末容量不足でも注文画面を止めず、送信待ち保存時に明示的に失敗させる。
+    }
+  }, [isMobileOrderRoute, mobileCartStorageKey, draftKey, hydratedDraftKey, cart]);
 
   // サークルが属するイベントのテーマ (配色/ロゴ) を取得して画面に反映
   const {
@@ -411,13 +482,27 @@ function MenuPageContent() {
     queryKey: ["event", circleData?.eventId],
     queryFn: () => eventApi.get(circleData!.eventId),
     enabled: !!circleData?.eventId,
+    networkMode: "always",
+    // 2026-10-21: 開いたままの注文画面にも運営の終了状態を反映する。
+    refetchInterval: 15_000,
+    refetchIntervalInBackground: false,
   });
+  const eventEnded = isEventEnded(circleEvent);
+  const preOrderAcceptanceEnabled = parseCircleSettings(circleData?.settings).preOrderEnabled;
+  const preOrderAcceptanceDisabled = !isMobileOrderRoute && !!circleData && !preOrderAcceptanceEnabled;
+  const orderEntryDisabled = eventEnded || isCircleEventLoading || isCircleEventError;
+  const orderEntryDisabledLabel = eventEnded
+    ? "開催終了"
+    : isCircleEventError
+      ? "開催状態を確認できません"
+      : "開催状態を確認中…";
   // 2026-10-20: 来場案内と同じイベント設定を使い、物理バンド必須のイベントではスマホQRを出さない。
   const mustPresentPhysicalWristband = Boolean(
     circleEvent?.hasPhysicalWristband && !circleEvent.allowSelfIssue
   );
   const canDisplayMyQr = !!circleEvent
     && !isCircleEventError
+    && !eventEnded
     && !mustPresentPhysicalWristband
     && !!wristbandStatus?.user.onboardedAt
     && !!activeWristband
@@ -428,6 +513,8 @@ function MenuPageContent() {
       ? "入場情報を確認できません"
       : mustPresentPhysicalWristband
         ? "物理リストバンドを提示してください"
+        : eventEnded
+          ? "開催終了のためQRは表示できません"
         : canDisplayMyQr
           ? "マイQRを表示"
           : "入場登録をおこなってください";
@@ -497,54 +584,92 @@ function MenuPageContent() {
 
   const orderInput: CreateOrderInput | null = selectedCircleId && userId && cart.length > 0 ? {
     circleId: selectedCircleId, userId, peopleCount: 1,
+    ...(isMobileOrderRoute ? { expectedTotalPrice: cartTotal(cart) } : {}),
     items: cart.map((line) => ({ menuId: line.menuId, quantity: line.quantity, toppingIds: line.toppings.map((t) => t.toppingId) })),
   } : null;
-  const submitOrder = useOrderSubmission(orderInput, orderApi.createMobile);
-  // 代引オーダー（本注文）も同じカートの再送では Idempotency-Key を維持する (2026-10-03)。
+  const circleNameForSubmission = useRef(circleData?.name || "サークル");
+  circleNameForSubmission.current = circleData?.name || "サークル";
+  const mobileOrderDisplayItems = useRef(cart.map((line) => ({
+    menuName: line.menuName,
+    quantity: line.quantity,
+    unitPrice: line.menuPrice + line.toppings.reduce((sum, topping) => sum + topping.toppingPrice, 0),
+    toppings: line.toppings.map((topping) => topping.toppingName),
+  })));
+  mobileOrderDisplayItems.current = cart.map((line) => ({
+    menuName: line.menuName,
+    quantity: line.quantity,
+    unitPrice: line.menuPrice + line.toppings.reduce((sum, topping) => sum + topping.toppingPrice, 0),
+    toppings: line.toppings.map((topping) => topping.toppingName),
+  }));
+  const submitOrder = useOrderSubmission(orderInput, (input, key) =>
+    submitMobileOrder(input, circleNameForSubmission.current, mobileOrderDisplayItems.current, key),
+  );
+  const clearSavedMobileCart = () => {
+    try {
+      if (mobileCartStorageKey) localStorage.removeItem(mobileCartStorageKey);
+    } catch {
+      // 2026-10-21: 注文の受付処理を端末キャッシュの削除失敗で覆い隠さない。
+    }
+  };
+  // モバイル注文は送信前に冪等キーと内容を端末へ保存し、通信断後も同じ注文として再送する。
   const codOrderMutation = useMutation({
+    networkMode: "always",
     mutationFn: async () => {
+      if (eventEnded) throw new Error("開催終了後は注文を受け付けていません");
+      if (orderEntryDisabled) throw new Error("開催状態を確認できないため、注文を受け付けられません");
       if (!orderInput) throw new Error("注文にはリストバンドとカート内の商品が必要です");
       return submitOrder(orderInput);
     },
     onSuccess: (orderData) => {
       if (!orderData) return;
-      try {
-        const stored = localStorage.getItem("fesorder_direct_orders");
-        const directOrders = stored ? JSON.parse(stored) : [];
-        directOrders.push({
-          orderId: orderData.id,
-          orderNumber: orderData.orderNumber,
-          circleId: selectedCircleId,
-          circleName: circleData?.name || "サークル",
-          totalPrice: getTotalPrice(),
-          createdAt: new Date().toISOString()
-        });
-        localStorage.setItem("fesorder_direct_orders", JSON.stringify(directOrders));
-      } catch (e) {}
-
+      clearSavedMobileCart();
       toast.success(`注文を受け付けました！呼出番号: ${orderData.orderNumber}`);
       setCart([]);
-      // 注文直後は注文履歴に遷移し、店頭注文の状態(呼出番号・受取状況)を確認できるようにする (2026-07-11)
-      navigate("/visitor/orders");
+      // 2026-10-21: 注文履歴で今回の注文を注文票として強調し、番号・内容・金額を店頭で伝えられるようにする。
+      navigate("/visitor/orders", {
+        state: isMobileOrderRoute ? {
+          mobileOrderReceipt: {
+            orderId: orderData.id,
+            orderNumber: orderData.orderNumber,
+            circleName: circleNameForSubmission.current,
+            totalPrice: cartTotal(cart),
+            items: mobileOrderDisplayItems.current,
+          },
+        } : undefined,
+      });
     },
     onError: (error: any) => {
+      if (error instanceof ApiError && (error.code === "NETWORK" || error.status === 429 || error.status >= 500)) {
+        clearSavedMobileCart();
+        toast.message("受付状態を確認中です。通信が戻ると同じ注文キーで受付結果を確認します。");
+        setCart([]);
+        navigate("/visitor/orders");
+        return;
+      }
       toast.error(error.message || "注文の送信に失敗しました");
     },
   });
 
   const [isCartOpen, setIsCartOpen] = useState(false);
 
+  // 2026-10-21: 終了境界をまたいで開いていた注文・QRモーダルを閉じ、終了前の操作状態を持ち越さない。
+  useEffect(() => {
+    if (!orderEntryDisabled) return;
+    setIsCartOpen(false);
+    setIsQrOpen(false);
+  }, [orderEntryDisabled]);
 
 
   // カードで選んだトッピング付きで1行追加。トッピング構成まで同一なら数量+1、違えば別行。
   const addLine = (menu: MenuWithToppings, chosen: CartTopping[]) => {
+    if (orderEntryDisabled) return;
     setCart((prev) => addCartLine(prev, menu, chosen));
   };
 
   // このメニューに関係するクーポン (2026-10-16)。cart_percentage は商品小計全体が対象。
   // menu_discount はこのメニューが対象、free_topping は紐づくトッピングが対象。
   const relevantCouponsForMenu = (menu: MenuWithToppings) =>
-    appliedCoupons.filter((c) =>
+    (isMobileOrderRoute ? [] : appliedCoupons).filter((c) =>
       c.kind === "cart_percentage"
         ? true
         : c.kind === "menu_discount"
@@ -565,6 +690,7 @@ function MenuPageContent() {
   // 既存モッドは addToCart(menuId,...) / updateQuantity(menuId, delta) を呼ぶため、
   // トッピング無し行に対して従来通り menuId 単位で操作するラッパーを維持する。
   const addToCart = (menuId: string, menuName: string, menuPrice: number) => {
+    if (orderEntryDisabled) return;
     setCart((prev) => {
       const existing = prev.find((l) => l.menuId === menuId && l.toppings.length === 0);
       if (existing) {
@@ -578,6 +704,7 @@ function MenuPageContent() {
   };
 
   const updateQuantity = (menuId: string, delta: number) => {
+    if (orderEntryDisabled) return;
     setCart((prev) =>
       prev
         .map((l) =>
@@ -661,7 +788,7 @@ function MenuPageContent() {
   };
   // 実際に効くクーポン = 明示的にONにしていて、かつ対象商品がカートにある (割引>0) もの。
   const couponApplications: { coupon: StoredCoupon; discount: number }[] = [];
-  if (!isPreOrderEnabled()) {
+  if (!isMobileOrderRoute && !isPreOrderEnabled()) {
     for (const c of appliedCoupons) {
       if (!enabledCouponSlugs.has(c.slug)) continue;
       const remaining = Math.max(0, getTotalPrice() - couponApplications.reduce((sum, item) => sum + item.discount, 0));
@@ -683,9 +810,11 @@ function MenuPageContent() {
   });
 
   useEffect(() => {
+    const hasSavedDraft = draftIdentityRef.current?.key === draftKey && draftIdentityRef.current.updatedAt !== null;
     if (
-      !draftKey || hydratedDraftKey !== draftKey || !userId || !visitorLoaded ||
-      couponsLoadedCircleId !== selectedCircleId || isPreOrderEnabled()
+      isMobileOrderRoute || !draftKey || hydratedDraftKey !== draftKey || !userId || !visitorLoaded ||
+      couponsLoadedCircleId !== selectedCircleId || isPreOrderEnabled() ||
+      (!preOrderAcceptanceEnabled && !(cart.length === 0 && hasSavedDraft))
     ) return;
 
     if (suppressNextDraftSaveRef.current) {
@@ -703,7 +832,8 @@ function MenuPageContent() {
     return () => window.clearTimeout(timeout);
   }, [
     draftKey, hydratedDraftKey, userId, visitorLoaded, couponsLoadedCircleId,
-    selectedCircleId, draftPayload, saveDraft, draftSaveRetry,
+    selectedCircleId, draftPayload, saveDraft, draftSaveRetry, isMobileOrderRoute,
+    preOrderAcceptanceEnabled, cart.length,
   ]);
 
   // 外部モッド用グローバルAPIの公開
@@ -789,7 +919,7 @@ function MenuPageContent() {
 
   // サークル情報 or メニュー取得失敗: どちらも欠けると画面が成立しないため
   // 一つの ErrorState にまとめて表示し、両方をまとめて再試行する
-  if (circleError || menusError) {
+  if ((circleError && !circleData) || (menusError && !menus)) {
     return (
       <div className="max-w-6xl mx-auto p-sp-4">
         <ErrorState
@@ -804,44 +934,14 @@ function MenuPageContent() {
     );
   }
 
-  // イベント終了後は注文を受け付けず「ご来場ありがとうございました」の御礼画面にする (2026-07-15)。
-  // 来場者の主目的(注文)が終わっているため、メニュー閲覧の代わりに御礼と注文履歴への導線を出す。
-  if (circleEvent && (circleEvent.lifecycleStatus === "ended" || circleEvent.lifecycleStatus === "archived")) {
+  // 2026-10-21: モバイル注文の可否は現行のサークル設定で判定し、旧COD拡張の有効化を必須にしない。
+  if (isMobileOrderRoute && circleData && !isMobileOrderEnabled() && !eventEnded) {
     return (
-      <EventTheme theme={circleEvent} className="bg-background text-foreground">
-        <div className="max-w-xl mx-auto p-sp-3 sm:p-sp-4 text-center font-mono my-12">
-          <div className="border-heavy border-border p-sp-5 space-y-sp-4 bg-background">
-            {circleEvent.logoUrl ? (
-              <img src={resolveAssetUrl(circleEvent.logoUrl)} alt={circleEvent.eventName} className="max-h-24 mx-auto block border-thick border-border" />
-            ) : (
-              <div className="inline-flex items-center justify-center h-14 w-14 border-thick border-border bg-primary text-primary-foreground mx-auto">
-                <UtensilsCrossed className="h-7 w-7" />
-              </div>
-            )}
-            <h1 className="text-[22px] sm:text-[30px] font-headline uppercase tracking-tight leading-[1.15] text-foreground">
-              ご来場<br />ありがとうございました
-            </h1>
-            <p className="text-[13px] sm:text-[14px] leading-[1.6] text-muted-foreground">
-              {circleEvent.eventName} は終了しました。ご利用いただきありがとうございました。
-              新しいご注文の受付は終了しています。
-            </p>
-            <div className="border-t-[3px] border-border pt-sp-4 flex flex-col gap-sp-2">
-              <Button
-                onClick={() => navigate("/visitor/orders")}
-                className="w-full h-12 border-thick border-border bg-primary text-primary-foreground font-mono font-bold uppercase hover:bg-background hover:text-foreground"
-              >
-                注文履歴を見る
-              </Button>
-              <Button
-                onClick={() => navigate("/visitor/mypage")}
-                className="w-full h-12 border-thick border-border bg-background text-foreground font-mono font-bold hover:bg-accent hover:text-accent-foreground"
-              >
-                マイページ
-              </Button>
-            </div>
-          </div>
-        </div>
-      </EventTheme>
+      <div className="mx-auto max-w-xl p-6 font-mono" role="alert">
+        <h1 className="text-xl font-black">モバイル注文は利用できません</h1>
+        <p className="my-4">このサークルは現在、モバイル注文を受け付けていません。</p>
+        <Button onClick={() => navigate("/visitor/events")}>出店一覧へ戻る</Button>
+      </div>
     );
   }
 
@@ -850,6 +950,12 @@ function MenuPageContent() {
     {/* 2026-09-27: スマートフォンでは固定カートバーがカード末尾の「カートに追加」を
         隠すため、バーの最大高さぶんスクロール余白を確保する。 */}
     <div className="max-w-6xl mx-auto p-sp-3 sm:p-sp-4 space-y-sp-4 sm:space-y-sp-5 pb-56 sm:pb-36">
+      {(circleError || menusError) && (
+        <div role="status" className="flex flex-wrap items-center justify-between gap-2 border-thick border-warning bg-warning/10 p-3 text-xs font-bold">
+          <span>通信に失敗しました。前回取得したメニューを表示しています。</span>
+          <Button type="button" variant="outline" onClick={() => { void refetchCircle(); void refetchMenus(); }} className="min-h-10 border-thick border-border">再接続して更新</Button>
+        </div>
+      )}
       {/* 戻るボタン */}
       <button
         onClick={() => {
@@ -901,16 +1007,53 @@ function MenuPageContent() {
         </div>
       )}
 
+      {circleData && publicReviewSummary && (
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => setIsReviewsOpen(true)}
+          aria-haspopup="dialog"
+          className="min-h-12 w-full border-thick border-border bg-background px-4 font-mono text-sm font-black hover:bg-primary hover:text-primary-foreground sm:w-auto"
+        >
+          <MessageSquareText className="mr-2 h-4 w-4" aria-hidden="true" />
+          レビューを見る
+        </Button>
+      )}
+
+      {eventEnded && (
+        <section className="border-heavy border-error bg-error/10 p-4" role="status" aria-live="polite">
+          <p className="text-sm font-black text-error">開催終了・注文受付終了</p>
+          <p className="mt-1 text-xs leading-relaxed text-foreground">メニューと価格は引き続きご覧いただけます。カート追加、注文送信、マイQRの表示はできません。</p>
+        </section>
+      )}
+      {!eventEnded && orderEntryDisabled && (
+        <section className="border-heavy border-border bg-muted p-4" role="status" aria-live="polite">
+          <p className="text-sm font-black">{isCircleEventLoading ? "開催状況を確認しています" : "開催状況を確認できません"}</p>
+          <p className="mt-1 text-xs leading-relaxed text-foreground">
+            {isCircleEventLoading
+              ? "受付状況を確認するまでカート追加を停止しています。"
+              : "受付状況を取得できませんでした。通信を確認して再読み込みしてください。"}
+          </p>
+        </section>
+      )}
+      {preOrderAcceptanceDisabled && !orderEntryDisabled && (
+        <section className="border-heavy border-warning bg-warning/10 p-4" role="status" aria-live="polite">
+          <p className="text-sm font-black">事前注文の受付を停止しています</p>
+          <p className="mt-1 text-xs leading-relaxed text-foreground">メニューは確認できます。注文を受け付ける場合は、サークル設定の「注文受付」から事前注文を有効にしてください。</p>
+        </section>
+      )}
+
       {/* メニュー一覧。常設のクーポンセクションは置かず、各カードの中でトッピング選択の
           すぐ下に関係するクーポンを出す (2026-09-16、モーダル案は撤回してカード内に戻した)。 */}
       <div>
         <h2 className="text-[24px] sm:text-[32px] font-headline uppercase tracking-tight mb-sp-3 leading-[1.1]">
-          メニューを選択して事前注文
+            {isMobileOrderRoute ? "モバイル注文" : "メニューを選択して事前注文"}
         </h2>
         {menus && menus.length > 0 ? (
           <>
           <MenuCategoryFilter menus={menus} selectedCategory={selectedMenuCategory} onSelect={setSelectedMenuCategory} />
-          <div className="grid gap-sp-3 sm:grid-cols-2 lg:grid-cols-3">
+          {/* 2026-10-21: 商品数が少ない画面で空の列を残さず、1件でも中央に読みやすい幅で表示する。 */}
+          <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,20rem),1fr))] gap-sp-3">
             {menus.filter((menu) => selectedMenuCategory === null || menuCategoryKey(menu.category) === selectedMenuCategory).map((menu) => (
               <VisitorMenuCard
                 key={menu.id}
@@ -919,6 +1062,8 @@ function MenuPageContent() {
                 enabledCouponSlugs={enabledCouponSlugs}
                 onToggleCoupon={toggleCoupon}
                 onAdd={addLine}
+                orderingDisabled={orderEntryDisabled || preOrderAcceptanceDisabled}
+                orderingDisabledLabel={preOrderAcceptanceDisabled ? "事前注文は受付停止中" : orderEntryDisabledLabel}
               />
             ))}
           </div>
@@ -929,7 +1074,7 @@ function MenuPageContent() {
       </div>
 
       {/* 2026-10-07 Issue #49: カート保存状態とマイQRを同じ操作起点に置き、注文確定前でも提示できるようにする。 */}
-      {(cart.length > 0 || userId) && (
+      {!orderEntryDisabled && (cart.length > 0 || userId) && (
         <div id="standard-cart-bar" className="fixed bottom-0 left-0 right-0 z-40 bg-primary text-primary-foreground border-t-heavy border-border p-3 sm:p-4">
           <div className="max-w-4xl mx-auto flex flex-col gap-3">
             {cart.length > 0 && <div className="flex items-center justify-between gap-2">
@@ -1010,7 +1155,7 @@ function MenuPageContent() {
                   onClick={() => setIsCartOpen(true)}
                   className="w-full sm:flex-1 h-12 border-thick border-border bg-background px-3 font-mono text-sm font-black uppercase text-foreground rounded-none hover:bg-primary hover:text-primary-foreground"
                 >
-                  <ShoppingCart className="mr-2 h-5 w-5 shrink-0" />注文を確認する
+                  <ShoppingCart className="mr-2 h-5 w-5 shrink-0" />{isMobileOrderRoute ? "注文内容を確認する" : "注文を確認する"}
                 </Button>
               )}
             </div>
@@ -1029,7 +1174,7 @@ function MenuPageContent() {
 
       {/* 標準カート確認モーダル */}
       <Modal
-        isOpen={isCartOpen}
+        isOpen={isCartOpen && !orderEntryDisabled}
         onClose={() => setIsCartOpen(false)}
         title="[カートの中身を確認]"
         maxWidth="lg"
@@ -1131,11 +1276,9 @@ function MenuPageContent() {
             <span>¥{getDiscountedTotal().toLocaleString()}</span>
           </div>
           <p className="text-[11px] text-muted-foreground leading-normal">
-            {!isMobileOrderEnabled()
-              ? "このサークルはモバイルオーダーを受け付けていません。カートを保存し、レジでお支払いください。"
-              : isPreOrderEnabled()
-              ? "※「注文を送信する」を押すと注文が送信されます。番号が呼ばれたら受取口にてお支払いください。"
-              : "カートの内容は自動保存されています。レジでマイQRコード、または連携したリストバンドを提示してお支払いください。"}
+            {isMobileOrderEnabled()
+              ? "注文はサーバーで受付が完了してから確定します。通信が切れた場合は端末に保存し、復帰後に再送します。"
+              : "このサークルはモバイルオーダーを受け付けていません。カートを保存し、レジでお支払いください。"}
           </p>
         </div>
 
@@ -1152,16 +1295,15 @@ function MenuPageContent() {
         )}
 
         <div className="flex flex-col gap-2 pt-2">
-          {isPreOrderEnabled() && isMobileOrderEnabled() ? <Button
+          {/* 2026-10-21: APIも mobileOrderEnabled だけを受付条件にするため、画面側も同じ設定へ揃える。 */}
+          {isMobileOrderRoute && isMobileOrderEnabled() ? <Button
             onClick={() => {
               if (!userId) {
                 toast.error("注文にはリストバンドが必要です。QR を読み取って入場してください。");
                 return;
               }
               setIsCartOpen(false);
-              if (isPreOrderEnabled()) {
-                codOrderMutation.mutate();
-              }
+              codOrderMutation.mutate();
             }}
             disabled={!userId || codOrderMutation.isPending}
             className="w-full h-12 border-thick border-border bg-primary text-primary-foreground text-base font-black uppercase rounded-none hover:bg-background hover:text-foreground transition-all disabled:opacity-50"
@@ -1181,6 +1323,76 @@ function MenuPageContent() {
             </Button>
           )}
         </div>
+      </Modal>
+
+      {/* 2026-10-21: 店舗が公開を選んだ項目だけを表示し、匿名レビューに来場者IDを含めない。 */}
+      <Modal
+        isOpen={isReviewsOpen && !!publicReviewSummary}
+        onClose={() => setIsReviewsOpen(false)}
+        title={`[${circleData?.name ?? "店舗"}のレビュー]`}
+        subtitle="来場者から寄せられたレビューです"
+        maxWidth="lg"
+      >
+        {publicReviewsQuery.isLoading ? (
+          <div className="space-y-3" role="status" aria-busy="true">
+            <Skeleton className="h-16 w-full" />
+            <Skeleton className="h-24 w-full" />
+            <span className="sr-only">レビューを読み込んでいます</span>
+          </div>
+        ) : publicReviewsQuery.isError ? (
+          <ErrorState
+            error={publicReviewsQuery.error}
+            title="レビューを読み込めませんでした"
+            onRetry={() => void publicReviewsQuery.refetch()}
+          />
+        ) : publicReviewsQuery.data && publicReviewSummary ? (
+          <div className="space-y-4">
+            {publicReviewSummary.showAverageRating && (
+              <div className="flex flex-wrap items-center gap-2 border-thick border-border bg-muted/30 p-3">
+                <span className="text-2xl font-black tabular-nums">
+                  {publicReviewSummary.averageRating == null ? "—" : publicReviewSummary.averageRating.toFixed(1)}
+                </span>
+                <span className="inline-flex items-center" role="img" aria-label={`${publicReviewSummary.averageRating?.toFixed(1) ?? "評価なし"} / 5`}>
+                  {Array.from({ length: 5 }, (_, index) => (
+                    <Star key={index} aria-hidden="true" className={`h-4 w-4 ${publicReviewSummary.averageRating != null && index < Math.round(publicReviewSummary.averageRating) ? "fill-primary text-primary" : "text-muted-foreground"}`} />
+                  ))}
+                </span>
+                <span className="text-xs text-muted-foreground">{publicReviewSummary.reviewCount}件の評価</span>
+              </div>
+            )}
+
+            {!publicReviewsQuery.data.showStars && !publicReviewsQuery.data.showComments ? (
+              <div className="border-thick border-border bg-muted/30 p-4 text-sm leading-relaxed">
+                この店舗はレビューを公開していますが、星と文章は表示しない設定です。
+              </div>
+            ) : publicReviewsQuery.data.reviews.length === 0 ? (
+              <EmptyState icon={MessageSquareText} message="公開中のレビューはまだありません" />
+            ) : (
+              <div className="space-y-2" role="list" aria-label="公開中のレビュー">
+                {publicReviewsQuery.data.reviews.map((review, index) => (
+                  <article key={`${review.createdAt}-${index}`} role="listitem" className="min-w-0 border-thick border-border p-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      {publicReviewsQuery.data!.showStars && review.rating != null ? (
+                        <span className="inline-flex items-center gap-1" role="img" aria-label={`${review.rating}つ星`}>
+                          {Array.from({ length: 5 }, (_, starIndex) => (
+                            <Star key={starIndex} aria-hidden="true" className={`h-4 w-4 ${starIndex < review.rating! ? "fill-primary text-primary" : "text-muted-foreground"}`} />
+                          ))}
+                          <span className="ml-1 text-xs font-bold tabular-nums">{review.rating}.0</span>
+                        </span>
+                      ) : <span className="text-xs font-bold text-muted-foreground">レビュー</span>}
+                      <time className="text-[10px] text-muted-foreground">
+                        {new Date(review.createdAt).toLocaleDateString("ja-JP")}
+                      </time>
+                    </div>
+                    {publicReviewsQuery.data!.showComments && review.comment?.trim() && (
+                      <p className="mt-2 break-words whitespace-pre-wrap text-sm leading-relaxed">{review.comment}</p>
+                    )}
+                  </article>
+                ))}
+              </div>
+            )}
+          </div>
+        ) : null}
       </Modal>
 
       {/* 2026-10-08: 登録済みバンドがない場合は userId を代用したQRを生成しない。 */}
@@ -1221,8 +1433,14 @@ function MenuPageContent() {
                 circleData,
                 cart,
                 userId, // guest_user_idを引き渡し
+                eventEnded,
+                orderingDisabled: orderEntryDisabled,
               }}
               onAction={(actionType, payload) => {
+                if (orderEntryDisabled && ["ADD_TO_CART", "UPDATE_QUANTITY", "SAVE_DIRECT_ORDER"].includes(actionType)) {
+                  toast.message(eventEnded ? "開催終了のため注文を受け付けていません" : "開催状況を確認できるまで注文できません");
+                  return;
+                }
                 if (actionType === "ADD_TO_CART") {
                   addToCart(payload.menuId, payload.menuName, payload.menuPrice);
                 } else if (actionType === "UPDATE_QUANTITY") {
@@ -1265,8 +1483,14 @@ function MenuPageContent() {
                 circleData,
                 cart,
                 userId, // guest_user_idを引き渡し
+                eventEnded,
+                orderingDisabled: orderEntryDisabled,
               }}
               onAction={(actionType, payload) => {
+                if (orderEntryDisabled && ["ADD_TO_CART", "UPDATE_QUANTITY", "SAVE_DIRECT_ORDER"].includes(actionType)) {
+                  toast.message(eventEnded ? "開催終了のため注文を受け付けていません" : "開催状況を確認できるまで注文できません");
+                  return;
+                }
                 if (actionType === "ADD_TO_CART") {
                   addToCart(payload.menuId, payload.menuName, payload.menuPrice);
                 } else if (actionType === "UPDATE_QUANTITY") {

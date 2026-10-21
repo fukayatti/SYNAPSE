@@ -3,7 +3,7 @@ import { zBody } from "../z-validator";
 import { apiError } from "../http-error";
 import { z } from "zod";
 import { menu, menuTopping, topping, circle, event } from "@fesflow/db";
-import { and, eq, inArray, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
 import { ulid } from "ulidx";
 import { hasPermission } from "../utils/auth";
 import type { AppEnv } from "../types";
@@ -28,6 +28,7 @@ async function requireActiveCircle(c: Context<AppEnv>, circleId: string) {
 menuRoutes.get("/", async (c) => {
   const db = c.get("db");
   const circleId = c.req.query("circleId");
+  const includeArchived = c.req.query("includeArchived") === "true";
 
   if (!circleId) {
     apiError("BAD_REQUEST", "circleIdが必要です");
@@ -35,9 +36,19 @@ menuRoutes.get("/", async (c) => {
 
   // 2026-10-15 (#128): 既知のサークルIDを使った直接APIアクセスでも削除済みイベントを表示しない。
   await requireActiveCircle(c, circleId);
+  // 2026-10-21: 販売停止中の商品は管理権限のある画面だけで復活候補として見せる。
+  if (includeArchived && !(await hasPermission(c, circleId, "menu:delete"))) {
+    apiError("FORBIDDEN", "販売停止中メニューを表示する権限がありません");
+  }
 
   // メニューを取得
-  const menus = await db.select().from(menu).where(and(eq(menu.circleId, circleId), eq(menu.isArchived, false)));
+  const menus = await db
+    .select()
+    .from(menu)
+    .where(includeArchived
+      ? eq(menu.circleId, circleId)
+      : and(eq(menu.circleId, circleId), eq(menu.isArchived, false)))
+    .orderBy(asc(menu.sortOrder), asc(menu.createdAt), asc(menu.id));
 
   // 各メニューのトッピングを取得
   const menuIds = menus.map((m) => m.id);
@@ -55,7 +66,12 @@ menuRoutes.get("/", async (c) => {
 
   const toppings =
     toppingIds.length > 0
-      ? await db.select().from(topping).where(and(inArray(topping.id, toppingIds), eq(topping.isArchived, false)))
+      ? await db
+        .select()
+        .from(topping)
+        .where(and(inArray(topping.id, toppingIds), eq(topping.isArchived, false)))
+        // 2026-10-21: サークル設定の順番を来場者・レジの選択肢にも同じ順で返す。
+        .orderBy(asc(topping.sortOrder), asc(topping.createdAt), asc(topping.id))
       : [];
 
   // メニューにトッピング情報を追加
@@ -101,7 +117,12 @@ menuRoutes.get("/:id", async (c) => {
 
   const toppings =
     toppingIds.length > 0
-      ? await db.select().from(topping).where(and(inArray(topping.id, toppingIds), eq(topping.isArchived, false)))
+      ? await db
+        .select()
+        .from(topping)
+        .where(and(inArray(topping.id, toppingIds), eq(topping.isArchived, false)))
+        // 2026-10-21: 単品取得も一覧と同じ順序を使う。
+        .orderBy(asc(topping.sortOrder), asc(topping.createdAt), asc(topping.id))
       : [];
 
   return c.json({
@@ -146,12 +167,21 @@ menuRoutes.post(
     }
 
     const id = ulid();
+    const category = input.category?.trim() ?? "";
+    // 2026-10-21: 新規メニューは同じカテゴリの末尾へ置き、既存の手動順を保つ。
+    const lastMenu = await db
+      .select({ sortOrder: menu.sortOrder })
+      .from(menu)
+      .where(and(eq(menu.circleId, input.circleId), eq(menu.category, category), eq(menu.isArchived, false)))
+      .orderBy(desc(menu.sortOrder))
+      .limit(1);
 
     await db.insert(menu).values({
       id,
       circleId: input.circleId,
       name: input.name,
-      category: input.category?.trim() ?? "",
+      category,
+      sortOrder: (lastMenu[0]?.sortOrder ?? -1) + 1,
       price: input.price,
       description: input.description,
       // image_path は NOT NULL のため未指定時は空文字を入れる (フロントは空=画像なし扱い)
@@ -191,6 +221,7 @@ menuRoutes.put(
     z.object({
       name: z.string().min(1).optional(),
       category: z.string().max(100).optional(),
+      sortOrder: z.number().int().min(0).optional(),
       price: z.number().optional(), // 負値許可 (割引メニュー)
       description: z.string().optional(),
       imagePath: z.string().optional(),
@@ -222,7 +253,21 @@ menuRoutes.put(
     const updates: Partial<typeof menu.$inferSelect> = {};
 
     if (input.name !== undefined) updates.name = input.name;
-    if (input.category !== undefined) updates.category = input.category.trim();
+    if (input.category !== undefined) {
+      const category = input.category.trim();
+      updates.category = category;
+      if (input.sortOrder === undefined && category !== existingMenu[0]!.category) {
+        // 2026-10-21: カテゴリ変更時は新カテゴリ末尾へ移し、順序番号の衝突を避ける。
+        const lastMenu = await db
+          .select({ sortOrder: menu.sortOrder })
+          .from(menu)
+          .where(and(eq(menu.circleId, existingMenu[0]!.circleId), eq(menu.category, category), eq(menu.isArchived, false)))
+          .orderBy(desc(menu.sortOrder))
+          .limit(1);
+        updates.sortOrder = (lastMenu[0]?.sortOrder ?? -1) + 1;
+      }
+    }
+    if (input.sortOrder !== undefined) updates.sortOrder = input.sortOrder;
     if (input.price !== undefined) updates.price = input.price;
     if (input.description !== undefined)
       updates.description = input.description;
@@ -337,6 +382,20 @@ menuRoutes.delete("/:id", async (c) => {
   // 2026-10-21: 注文・事前注文の履歴から参照されるため、商品行を残して新規販売だけ停止する。
   await db.update(menu).set({ isArchived: true }).where(eq(menu.id, id));
 
+  return c.json({ success: true });
+});
+
+// 2026-10-21: 注文履歴の参照を保ったまま、販売停止した商品を管理者が再公開できるようにする。
+menuRoutes.post("/:id/restore", async (c) => {
+  const db = c.get("db");
+  const id = c.req.param("id");
+  const rows = await db.select().from(menu).where(eq(menu.id, id)).limit(1);
+  const archivedMenu = rows[0];
+  if (!archivedMenu) apiError("NOT_FOUND", "メニューが見つかりません");
+  if (!(await hasPermission(c, archivedMenu.circleId, "menu:delete"))) {
+    apiError("FORBIDDEN", "権限がありません");
+  }
+  await db.update(menu).set({ isArchived: false }).where(eq(menu.id, id));
   return c.json({ success: true });
 });
 

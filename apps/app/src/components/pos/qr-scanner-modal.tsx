@@ -1,5 +1,6 @@
 
 import { useState, useRef, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { useMutation } from "@tanstack/react-query";
 import jsQR from "jsqr";
 import { preOrderApi, wristbandApi, type PreOrderWithDetails } from "@/lib/api";
@@ -10,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { QrCode, X, CheckCircle2, Search, Camera } from "lucide-react";
+import { useBodyScrollLock } from "@/hooks/useBodyScrollLock";
 
 // 2026-10-20: 来場者QRと物理バンドを取り違えないよう、スキャン結果にバンド状態も渡す。
 interface QrScannerModalProps {
@@ -29,6 +31,7 @@ export function QrScannerModal({
   mode = "pre_order",
   onCustomerScanned,
 }: QrScannerModalProps) {
+  useBodyScrollLock(isOpen);
   const [scannedCode, setScannedCode] = useState("");
   const [preOrders, setPreOrders] = useState<PreOrderWithDetails[]>([]);
   const [isCameraActive, setIsCameraActive] = useState(false);
@@ -335,18 +338,19 @@ export function QrScannerModal({
 
   if (!isOpen) return null;
 
-  return (
+  // 2026-10-21: カメラ付きスキャナーも親の overflow/stacking context から独立させる。
+  return createPortal((
     // 2026-10-20: 新しい登録フォームからも使うため、スキャナーを読み上げ可能なモーダルとして明示する。
-    <div role="dialog" aria-modal="true" aria-labelledby="qr-scanner-title" className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/80 p-4 backdrop-blur-sm">
+    <div role="dialog" aria-modal="true" aria-labelledby="qr-scanner-title" className="viewport-safe-area fixed inset-0 z-[80] flex items-center justify-center overflow-y-auto bg-foreground/80 backdrop-blur-sm">
       {/* RawBlock モーダルコンテナ */}
-      <div className="relative w-full max-w-2xl border-heavy border-border bg-background p-4 sm:p-6 shadow-none">
+      <div className="relative max-h-full w-full min-w-0 max-w-2xl overflow-y-auto overscroll-contain border-heavy border-border bg-background p-3 shadow-none sm:p-6">
         {/* ヘッダー */}
         <div className="mb-4 sm:mb-6 flex items-center justify-between border-b-thick border-border pb-4">
           <div className="flex items-center space-x-2 sm:space-x-3">
             <div className="bg-primary p-2 text-primary-foreground">
               <QrCode className="h-5 w-5 sm:h-6 sm:w-6" />
             </div>
-            <h2 id="qr-scanner-title" className="font-mono text-lg sm:text-2xl font-black uppercase tracking-wider">
+            <h2 id="qr-scanner-title" className="min-w-0 break-words font-mono text-lg sm:text-2xl font-black uppercase tracking-wider">
               {mode === "customer" ? "[顧客特定 - QR / リストバンド]" : "[QR / リストバンド照会]"}
             </h2>
           </div>
@@ -522,5 +526,5 @@ export function QrScannerModal({
         </div>
       </div>
     </div>
-  );
+  ), document.body);
 }

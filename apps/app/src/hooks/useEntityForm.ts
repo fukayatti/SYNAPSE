@@ -5,6 +5,12 @@ import type { SaveStatus } from "@/components/ui/FormField";
 import { handleApiErrorToast } from "@/lib/api-error";
 import { useUnsavedChanges } from "@/components/UnsavedNavigationGuard";
 
+/** 一覧を先行更新した保存を、失敗時に戻し成功時に確定するためのコールバック。 */
+export interface EntityFormOptimisticContext {
+  rollback?: () => void;
+  commit?: (result: unknown) => void;
+}
+
 // 2026-07-04: Circle/Menu/Topping/Staff/EventStaff の各 FormModal が
 // 「新規=作成 / 編集=onBlur 自動保存 / 未保存入力ありなら閉じる前に確認」という
 // 同一のデータ操作ロジックを個別に実装していたため共通化する。
@@ -24,8 +30,12 @@ interface UseEntityFormOptions<TForm extends Record<string, unknown>, TEntity> {
   /** 保存成功時に無効化する react-query のキー群。 */
   invalidateKeys: readonly unknown[][];
   create: (form: TForm) => Promise<unknown>;
+  /** 2026-10-21: 一覧を先に更新し、API失敗時に戻す新規作成時のキャッシュ処理。 */
+  onOptimisticCreate?: (form: TForm) => EntityFormOptimisticContext | undefined | Promise<EntityFormOptimisticContext | undefined>;
   /** 編集(自動保存)。省略時は編集モードでも保存を行わない。 */
   update?: (entity: TEntity, form: TForm) => Promise<unknown>;
+  /** 2026-10-21: 編集結果を一覧へ先行反映し、API失敗時に戻すキャッシュ処理。 */
+  onOptimisticUpdate?: (entity: TEntity, form: TForm) => EntityFormOptimisticContext | undefined | Promise<EntityFormOptimisticContext | undefined>;
   /** 新規作成前のバリデーション。エラーメッセージ文字列を返すと中断。 */
   validate?: (form: TForm) => string | null;
   /** 自動保存を発火すべき差分があるか。省略時は toForm(entity) との JSON 比較。 */
@@ -42,7 +52,7 @@ export function useEntityForm<TForm extends Record<string, unknown>, TEntity>(
 ) {
   const {
     isOpen, entity, emptyForm, toForm, onClose, toastId, invalidateKeys,
-    create, update, validate, hasChanged, hasInput, onAfterAutoSave, messages,
+    create, update, onOptimisticCreate, onOptimisticUpdate, validate, hasChanged, hasInput, onAfterAutoSave, messages,
   } = opts;
 
   const queryClient = useQueryClient();
@@ -71,7 +81,9 @@ export function useEntityForm<TForm extends Record<string, unknown>, TEntity>(
 
   const createMutation = useMutation({
     mutationFn: (data: TForm) => create(data),
-    onSuccess: () => {
+    onMutate: (data) => onOptimisticCreate?.(data),
+    onSuccess: (result, _variables, context) => {
+      context?.commit?.(result);
       toast.success(messages.createSuccess);
       invalidate();
       onClose();
@@ -79,7 +91,10 @@ export function useEntityForm<TForm extends Record<string, unknown>, TEntity>(
     // Phase4: ApiError.code (401/403/429/VALIDATION) に応じた分岐は handleApiErrorToast に
     // 委譲する。それ以外の code (BAD_REQUEST/CONFLICT/INTERNAL等) は err.message をそのまま
     // 使いたいので、フォールバック文言は handleApiErrorToast 内の "従来どおり表示" に任せる。
-    onError: (err: any) => handleApiErrorToast(err),
+    onError: (err: any, _variables, context) => {
+      context?.rollback?.();
+      handleApiErrorToast(err);
+    },
   });
 
   const updateMutation = useMutation({
@@ -87,13 +102,16 @@ export function useEntityForm<TForm extends Record<string, unknown>, TEntity>(
       if (!entity || !update) throw new Error("No entity/updater for edit");
       return update(entity, data);
     },
-    onSuccess: (_result, variables) => {
+    onMutate: (data) => entity ? onOptimisticUpdate?.(entity, data) : undefined,
+    onSuccess: (_result, variables, context) => {
+      context?.commit?.(_result);
       toast.success(messages.updateSuccess, { id: toastId });
       invalidate();
       lastSavedFormRef.current = variables;
       setSaveStatus("saved");
     },
-    onError: (err: any) => {
+    onError: (err: any, _variables, context) => {
+      context?.rollback?.();
       // 401(ログイン誘導)/403/429/VALIDATION は handleApiErrorToast の分岐に任せ、
       // それ以外 (BAD_REQUEST/CONFLICT/INTERNAL等) は「自動保存失敗」の文脈を保つため
       // 専用のトーストを出す (toastId で「自動保存中...」のローディングトーストを差し替える)。

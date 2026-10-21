@@ -14,6 +14,7 @@
     "build": "CI=true WRANGLER_SEND_METRICS=false wrangler deploy --dry-run --outdir dist/worker"
   },
   "dependencies": {
+    "@block65/webcrypto-web-push": "^2.0.0",
     "@fesflow/auth": "workspace:*",
     "@fesflow/config": "workspace:*",
     "@fesflow/db": "workspace:*",

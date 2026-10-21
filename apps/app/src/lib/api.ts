@@ -4,6 +4,7 @@ import type { RoleType } from "@fesflow/config";
 import type { JapaneseAllergen } from "@fesflow/config/allergens";
 import type { VisitorAgeGroup } from "@fesflow/config/visitor-profile";
 import { createOrderResultSchema, type CreateOrderInput, type CreateOrderResult, type OrderStatus } from "@fesflow/config/order-contract";
+import type { RegisterDisplaySnapshot } from "@fesflow/config/register-display-contract";
 export type { CreateOrderInput, CreateOrderResult, OrderStatus } from "@fesflow/config/order-contract";
 
 export function getApiBaseUrl(): string {
@@ -63,7 +64,13 @@ async function fetchApi<T>(
     response = await fetch(`${baseUrl}${endpoint}`, config);
   } catch (err) {
     // fetch 自体の失敗 (オフライン・DNS解決失敗等)。ApiError.code = "NETWORK" として区別する。
+    if (typeof window !== "undefined") window.dispatchEvent(new Event("fesflow:api-network-failure"));
     throw networkApiError(err);
+  }
+
+  // 2026-10-21: HTTP応答を受け取っても5xxは業務API障害として扱い、通信復帰と誤表示しない。
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event(response.status >= 500 ? "fesflow:api-server-failure" : "fesflow:api-network-success"));
   }
 
   if (!response.ok) {
@@ -92,7 +99,11 @@ async function fetchApiBlob(endpoint: string): Promise<Blob> {
   try {
     response = await fetch(`${getApiBaseUrl()}${endpoint}`, { headers, credentials: "include" });
   } catch (err) {
+    if (typeof window !== "undefined") window.dispatchEvent(new Event("fesflow:api-network-failure"));
     throw networkApiError(err);
+  }
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event(response.status >= 500 ? "fesflow:api-server-failure" : "fesflow:api-network-success"));
   }
   if (!response.ok) throw await apiErrorFromResponse(response);
   return response.blob();
@@ -144,11 +155,15 @@ export const eventApi = {
   // 過去に送信した一斉アナウンスの履歴 (2026-07-16)。event_manager (member:read) 権限。
   announcements: (id: string) =>
     fetchApi<EventAnnouncement[]>(`/api/festivals/${id}/announcements`),
-  // 履歴からの削除。配信済みの notification (受信者側) は取り消されない
-  // (履歴ログの削除であり配信取り消しではない設計。詳細は API 側コメント参照)。
+  archivedAnnouncements: (id: string) =>
+    fetchApi<EventAnnouncement[]>(`/api/festivals/${id}/announcements?includeDeleted=true`),
   deleteAnnouncement: (id: string, announcementId: string) =>
     fetchApi<{ success: boolean }>(`/api/festivals/${id}/announcements/${announcementId}`, {
       method: "DELETE",
+    }),
+  restoreAnnouncement: (id: string, announcementId: string) =>
+    fetchApi<{ success: boolean }>(`/api/festivals/${id}/announcements/${announcementId}/restore`, {
+      method: "POST",
     }),
   create: (data: CreateEventInput) =>
     fetchApi<{ id: string }>("/api/festivals", { method: "POST", body: data }),
@@ -209,8 +224,8 @@ export const circleApi = {
 
 // Menu API
 export const menuApi = {
-  list: (circleId: string) =>
-    fetchApi<MenuWithToppings[]>(`/api/menus?circleId=${circleId}`),
+  list: (circleId: string, includeArchived = false) =>
+    fetchApi<MenuWithToppings[]>(`/api/menus?circleId=${encodeURIComponent(circleId)}${includeArchived ? "&includeArchived=true" : ""}`),
   get: (id: string) => fetchApi<MenuWithToppings>(`/api/menus/${id}`),
   create: (data: CreateMenuInput) =>
     fetchApi<{ id: string }>("/api/menus", { method: "POST", body: data }),
@@ -221,6 +236,8 @@ export const menuApi = {
     }),
   delete: (id: string) =>
     fetchApi<{ success: boolean }>(`/api/menus/${id}`, { method: "DELETE" }),
+  restore: (id: string) =>
+    fetchApi<{ success: boolean }>(`/api/menus/${id}/restore`, { method: "POST" }),
   // 在庫の絶対値更新 (在庫>0 で soldOut は自動解除される)。
   // サーバ (menu.ts の PATCH /:id/stock) は stockQuantity を要求する。
   // 以前は { stock } を送っており zBody のバリデーションで常に 400 になっていた。
@@ -239,8 +256,8 @@ export const menuApi = {
 
 // Topping API
 export const toppingApi = {
-  list: (circleId: string) =>
-    fetchApi<Topping[]>(`/api/toppings?circleId=${circleId}`),
+  list: (circleId: string, includeArchived = false) =>
+    fetchApi<Topping[]>(`/api/toppings?circleId=${encodeURIComponent(circleId)}${includeArchived ? "&includeArchived=true" : ""}`),
   get: (id: string) => fetchApi<Topping>(`/api/toppings/${id}`),
   create: (data: CreateToppingInput) =>
     fetchApi<{ id: string }>("/api/toppings", { method: "POST", body: data }),
@@ -257,12 +274,14 @@ export const toppingApi = {
     }),
   delete: (id: string) =>
     fetchApi<{ success: boolean }>(`/api/toppings/${id}`, { method: "DELETE" }),
+  restore: (id: string) =>
+    fetchApi<{ success: boolean }>(`/api/toppings/${id}/restore`, { method: "POST" }),
 };
 
 // Staff API
 export const staffApi = {
-  list: (circleId: string) =>
-    fetchApi<Staff[]>(`/api/staff?circleId=${circleId}`),
+  list: (circleId: string, includeDeleted = false) =>
+    fetchApi<Staff[]>(`/api/staff?circleId=${circleId}${includeDeleted ? "&includeDeleted=true" : ""}`),
   get: (id: string) => fetchApi<Staff>(`/api/staff/${id}`),
   create: (data: CreateStaffInput) =>
     fetchApi<{ id: string }>("/api/staff", { method: "POST", body: data }),
@@ -273,15 +292,58 @@ export const staffApi = {
     }),
   delete: (id: string) =>
     fetchApi<{ success: boolean }>(`/api/staff/${id}`, { method: "DELETE" }),
+  restore: (id: string) =>
+    fetchApi<{ success: boolean }>(`/api/staff/${id}/restore`, { method: "POST" }),
   // 2026-07-14: シフト機能(getCurrentShift/clockIn/clockOut)を撤去。
 };
 
 // Order API
+export interface ProjectorOrder {
+  orderNumber: string;
+  status: string;
+  receivedAt: string | null;
+  createdAt: string;
+}
+
+export interface RegisterDisplaySession {
+  id: string;
+  token: string;
+  revision: number;
+  expiresAt: number;
+}
+
+export interface RegisterDisplayResponse {
+  snapshot: RegisterDisplaySnapshot;
+  revision: number;
+  updatedAt: number;
+  expiresAt: number;
+}
+
 export const orderApi = {
   list: (circleId: string, status?: string) =>
     fetchApi<OrderWithItems[]>(
       `/api/orders?circleId=${circleId}${status ? `&status=${status}` : ""}`
     ),
+  projector: (circleId: string) =>
+    fetchApi<ProjectorOrder[]>(`/api/orders/projector?circleId=${encodeURIComponent(circleId)}`),
+  createRegisterDisplay: (circleId: string, snapshot: RegisterDisplaySnapshot) =>
+    fetchApi<RegisterDisplaySession>("/api/orders/register-displays", {
+      method: "POST",
+      body: { circleId, snapshot },
+    }),
+  updateRegisterDisplay: (id: string, snapshot: RegisterDisplaySnapshot, revision: number) =>
+    fetchApi<{ success: boolean }>(`/api/orders/register-displays/${encodeURIComponent(id)}/snapshot`, {
+      method: "PUT",
+      body: { snapshot, revision },
+    }),
+  getRegisterDisplay: (id: string, token: string) =>
+    fetchApi<RegisterDisplayResponse>(`/api/orders/register-displays/${encodeURIComponent(id)}/snapshot`, {
+      headers: { Authorization: `Bearer ${token}` },
+    }),
+  closeRegisterDisplay: (id: string) =>
+    fetchApi<{ success: boolean }>(`/api/orders/register-displays/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    }),
   get: (id: string) => fetchApi<OrderWithItems>(`/api/orders/${id}`),
   // 来場者本人の注文履歴 (レジを通った注文)。code = eventUser.id or リストバンドID。
   // 旧実装 (getByCode) の .catch(()=>[]) は 500 を空表示に握り潰し障害を隠していたため、
@@ -317,6 +379,15 @@ export const orderApi = {
     fetchApi<{ success: boolean }>(`/api/orders/${id}/complete`, {
       method: "POST",
     }),
+  markReceived: (id: string) =>
+    fetchApi<{ success: boolean }>(`/api/orders/${id}/received`, {
+      method: "POST",
+    }),
+  // 2026-10-21: 来場者用は本人のeventUser IDを送り、サーバーで注文所有者を照合する。
+  markReceivedByVisitor: (code: string, id: string) =>
+    fetchApi<{ success: boolean }>(`/api/orders/user/${encodeURIComponent(code)}/${encodeURIComponent(id)}/received`, {
+      method: "POST",
+    }),
   setEstimatedTime: (id: string, estimatedMinutes: number) =>
     fetchApi<{ success: boolean }>(`/api/orders/${id}/estimated-time`, {
       method: "PATCH",
@@ -339,14 +410,24 @@ export interface VisitorReviewTarget {
 export interface VisitorReviewStoreSummary {
   circleId: string;
   circleName: string;
+  showAverageRating: boolean;
   averageRating: number | null;
   reviewCount: number;
+  /** 1つ星から5つ星の件数。星の平均を公開している店舗だけ集計する。 */
+  ratingDistribution: number[];
 }
 
 export interface VisitorPublicReview {
-  rating: number;
+  rating: number | null;
   comment: string | null;
   createdAt: string | number | Date;
+}
+
+export interface PublicStoreReviewList {
+  reviewCount: number;
+  showStars: boolean;
+  showComments: boolean;
+  reviews: VisitorPublicReview[];
 }
 
 export interface ManagedReview {
@@ -363,6 +444,9 @@ export const reviewApi = {
   mine: (code: string) => fetchApi<VisitorReviewTarget[]>(`/api/reviews/visitor/${encodeURIComponent(code)}`),
   stores: (code: string) => fetchApi<VisitorReviewStoreSummary[]>(`/api/reviews/visitor/${encodeURIComponent(code)}/stores`),
   storeReviews: (code: string, circleId: string) => fetchApi<VisitorPublicReview[]>(`/api/reviews/visitor/${encodeURIComponent(code)}/stores/${encodeURIComponent(circleId)}`),
+  // 2026-10-21: 未登録の来場者も評価を見られるようイベントIDで公開一覧を取得し、API側で店舗設定を適用する。
+  publicStores: (eventId: string) => fetchApi<VisitorReviewStoreSummary[]>(`/api/reviews/public/events/${encodeURIComponent(eventId)}/stores`),
+  publicStoreReviews: (eventId: string, circleId: string) => fetchApi<PublicStoreReviewList>(`/api/reviews/public/events/${encodeURIComponent(eventId)}/stores/${encodeURIComponent(circleId)}/reviews`),
   submit: (code: string, body: { circleId: string; rating: number; comment: string }) =>
     fetchApi<{ success: boolean }>(`/api/reviews/visitor/${encodeURIComponent(code)}`, { method: "POST", body }),
   circle: (circleId: string) => fetchApi<ManagedReview[]>(`/api/reviews/circle/${encodeURIComponent(circleId)}`),
@@ -490,6 +574,34 @@ export const notificationApi = {
     ),
 };
 
+export const pushApi = {
+  configuration: () => fetchApi<{ enabled: boolean; publicKey: string | null }>("/api/notifications/config"),
+  status: (input: { endpoint: string; visitorId?: string }) =>
+    fetchApi<{ subscribed: boolean }>("/api/notifications/subscriptions/status", { method: "POST", body: input }),
+  subscribe: (input: { visitorId?: string; subscription: BrowserPushSubscription }) =>
+    fetchApi<{ success: boolean }>("/api/notifications/subscriptions", { method: "POST", body: input }),
+  unsubscribe: (input: { visitorId?: string; endpoint: string }) =>
+    fetchApi<{ success: boolean }>("/api/notifications/subscriptions", { method: "DELETE", body: input }),
+};
+
+export interface BrowserPushSubscription {
+  endpoint: string;
+  expirationTime: number | null;
+  keys: { p256dh: string; auth: string };
+}
+
+export interface VisitorNotification {
+  id: string;
+  eventId: string;
+  eventUserId: string;
+  type: string;
+  title: string;
+  message: string;
+  href: string;
+  readAt: string | null;
+  createdAt: string;
+}
+
 // 画像アップロード
 export const uploadImage = async (
   file: File
@@ -506,7 +618,13 @@ export const uploadImage = async (
       credentials: "include",
     });
   } catch (err) {
+    if (typeof window !== "undefined") window.dispatchEvent(new Event("fesflow:api-network-failure"));
     throw networkApiError(err);
+  }
+
+  if (typeof window !== "undefined") {
+    // 2026-10-21: 画像・動画アップロードも通信状態の判定へ含める。
+    window.dispatchEvent(new Event(response.status >= 500 ? "fesflow:api-server-failure" : "fesflow:api-network-success"));
   }
 
   if (!response.ok) {
@@ -653,6 +771,7 @@ export interface StampRallyOrder {
 
 export interface VisitorStampRally {
   enabled: boolean;
+  eventEnded: boolean;
   stampedCircleIds: string[];
   stampedCount: number;
   targetCircleCount: number;
@@ -790,6 +909,7 @@ export interface EventAnnouncement {
   message: string;
   senderEmail: string;
   recipientCount: number;
+  deletedAt: string | null;
   createdAt: string;
 }
 
@@ -986,9 +1106,35 @@ export function recentWaitTimeReports(raw?: string | null, limit = 8): WaitTimeR
 
 // サークル運用設定 (circle.settings JSON のシェイプ)
 export type OrderFlowMode = "pending" | "preparing" | "completed";
+// 2026-10-21: レビューは店舗の明示設定を公開境界とし、平均・星・文章を個別に制御する。
+export interface CircleReviewPublicationSettings {
+  publishReviews: boolean;
+  showAverageRating: boolean;
+  showStars: boolean;
+  showComments: boolean;
+}
+
+export interface OrderNumberDisplayMedia {
+  id: string;
+  name: string;
+  kind: "image" | "video";
+  durationSeconds: number;
+}
+
+export interface OrderNumberDisplaySettings {
+  showPreparingNumbers: boolean;
+  showPickupNumbers: boolean;
+  overflowPriority: "latest" | "oldest";
+  // 2026-10-21: 番号表示とローカルメディアに割り当てる画面比率を共有設定へ保存する。
+  mediaPercent: number;
+  media: OrderNumberDisplayMedia[];
+}
+
 export interface CircleSettings {
   // 新規注文の初期状態: pending=未着手 / preparing=調理中 / completed=即完成
   orderFlowMode: OrderFlowMode;
+  // 2026-10-21: 事前注文はレジで確定する注文とは別の受け入れ設定にする。
+  preOrderEnabled: boolean;
   // 2026-10-17: 来場者の確定注文は店舗が許可した場合だけ受け付ける (初期値は停止)。
   mobileOrderEnabled: boolean;
   // 組み込み拡張機能のON/OFF (既定はすべてOFF=オプトイン)
@@ -1001,16 +1147,33 @@ export interface CircleSettings {
   acceptedPayments: string[];
   // 2026-10-16 (#126): event.storeAreas のどの位置に出店するかを参照するID。
   storeAreaId: string | null;
+  reviewPublication: CircleReviewPublicationSettings;
+  orderNumberDisplay: OrderNumberDisplaySettings;
 }
 
 // settings JSON をパースし、未設定キーを既定値で補完する
 export function parseCircleSettings(raw?: string | null): CircleSettings {
   const defaults: CircleSettings = {
     orderFlowMode: "pending",
+    // 2026-10-21: 設定キーを持たない既存サークルは従来どおり事前注文を受け付ける。
+    preOrderEnabled: true,
     mobileOrderEnabled: false,
     extensions: { stock: false, staff: false },
     acceptedPayments: [],
     storeAreaId: null,
+    reviewPublication: {
+      publishReviews: false,
+      showAverageRating: false,
+      showStars: false,
+      showComments: false,
+    },
+    orderNumberDisplay: {
+      showPreparingNumbers: true,
+      showPickupNumbers: true,
+      overflowPriority: "latest",
+      mediaPercent: 35,
+      media: [],
+    },
   };
   if (!raw) return defaults;
   try {
@@ -1021,6 +1184,7 @@ export function parseCircleSettings(raw?: string | null): CircleSettings {
         parsed?.orderFlowMode === "completed"
           ? parsed.orderFlowMode
           : "pending",
+      preOrderEnabled: parsed?.preOrderEnabled !== false,
       mobileOrderEnabled: parsed?.mobileOrderEnabled === true,
       extensions: {
         stock: parsed?.extensions?.stock === true,
@@ -1030,6 +1194,47 @@ export function parseCircleSettings(raw?: string | null): CircleSettings {
         ? parsed.acceptedPayments.filter((x: unknown) => typeof x === "string")
         : [],
       storeAreaId: typeof parsed?.storeAreaId === "string" ? parsed.storeAreaId : null,
+      // 2026-10-21: 既存店舗はレビューを未公開として扱い、明示的な公開設定なしに文章や評価を配信しない。
+      reviewPublication: {
+        publishReviews: parsed?.reviewPublication?.publishReviews === true,
+        showAverageRating: parsed?.reviewPublication?.showAverageRating === true,
+        showStars: parsed?.reviewPublication?.showStars === true,
+        showComments: parsed?.reviewPublication?.showComments === true,
+      },
+      // 2026-10-21: 共有設定には端末内メディアの識別子だけを残し、ファイル本体やURLは保存しない。
+      orderNumberDisplay: (() => {
+        const rawDisplay = parsed?.orderNumberDisplay;
+        const media = Array.isArray(rawDisplay?.media)
+          ? rawDisplay.media.flatMap((item: unknown) => {
+              if (!item || typeof item !== "object") return [];
+              const candidate = item as Record<string, unknown>;
+              if (
+                typeof candidate.id !== "string" ||
+                typeof candidate.name !== "string" ||
+                (candidate.kind !== "image" && candidate.kind !== "video")
+              ) return [];
+              return [{
+                id: candidate.id.slice(0, 80),
+                name: candidate.name.slice(0, 160),
+                kind: candidate.kind,
+                durationSeconds: typeof candidate.durationSeconds === "number" && Number.isFinite(candidate.durationSeconds)
+                  ? Math.max(2, Math.min(60, Math.round(candidate.durationSeconds)))
+                  : 8,
+              }];
+            }).slice(0, 20)
+          : [];
+        const showPreparingNumbers = rawDisplay?.showPreparingNumbers !== false;
+        const showPickupNumbers = rawDisplay?.showPickupNumbers !== false;
+        return {
+          showPreparingNumbers: showPreparingNumbers || !showPickupNumbers,
+          showPickupNumbers,
+          overflowPriority: rawDisplay?.overflowPriority === "oldest" ? "oldest" as const : "latest" as const,
+          mediaPercent: typeof rawDisplay?.mediaPercent === "number" && Number.isFinite(rawDisplay.mediaPercent)
+            ? Math.max(20, Math.min(80, Math.round(rawDisplay.mediaPercent / 5) * 5))
+            : 35,
+          media,
+        };
+      })(),
     };
   } catch {
     return defaults;
@@ -1049,6 +1254,7 @@ export interface Menu {
   stockQuantity: number | null;
   inventoryEnabled: boolean;
   soldOut: boolean;
+  isArchived: boolean;
   /** 既定トッピングID配列を JSON 文字列で保持 (例: '["t1","t2"]') */
   defaultToppingIds?: string;
   toppingWizardEnabled: boolean;
@@ -1068,6 +1274,7 @@ export interface Topping {
   soldOut: boolean;
   stockQuantity: number;
   sortOrder: number;
+  isArchived: boolean;
 }
 
 export interface MenuWithToppings extends Menu {
@@ -1080,6 +1287,7 @@ export interface Staff {
   name: string;
   createdAt: Date;
   updatedAt: Date;
+  deletedAt: string | null;
 }
 
 export interface Order {
@@ -1093,6 +1301,7 @@ export interface Order {
   estimatedMinutes: number | null;
   createdAt: Date | null;
   completedAt: Date | null;
+  receivedAt: Date | null;
   peopleCount: number;
   paymentMethod: string | null;
   // レジ担当者 (order.cashier_id)。スタッフ向け一覧 (orderApi.list) にのみ含まれる想定で、
@@ -1143,6 +1352,7 @@ export interface VisitorOrderHistory {
   circleName: string | null;
   createdAt: string;
   completedAt: string | null;
+  receivedAt: string | null;
   estimatedTime: number | null;
   items: VisitorOrderHistoryItem[];
 }
@@ -1274,6 +1484,7 @@ export interface CreateMenuInput {
 export interface UpdateMenuInput {
   name?: string;
   category?: string;
+  sortOrder?: number;
   price?: number;
   description?: string;
   allergens?: JapaneseAllergen[];
@@ -1455,6 +1666,7 @@ export interface VisitorAdminEditorData {
     circleId: string;
     circleName: string;
     staffId: string | null;
+    deletedAt: string | null;
     createdAt: string;
   }>;
   circles: Array<{ id: string; name: string }>;
@@ -1671,6 +1883,10 @@ export const visitorApi = {
       method: "POST",
       body: { userId, allergies },
     }),
+  notifications: (userId: string) =>
+    fetchApi<VisitorNotification[]>(`/api/notifications/visitor/${encodeURIComponent(userId)}`),
+  markNotificationRead: (userId: string, notificationId: string) =>
+    fetchApi<{ success: boolean }>(`/api/notifications/visitor/${encodeURIComponent(userId)}/${encodeURIComponent(notificationId)}/read`, { method: "POST" }),
 };
 
 
@@ -1915,6 +2131,7 @@ export interface PublicAnnouncement {
 export interface AdminAnnouncement extends PublicAnnouncement {
   published: boolean;
   updatedAt: string;
+  deletedAt: string | null;
 }
 
 export interface AnnouncementInput {
@@ -1958,6 +2175,8 @@ export const adminApi = {
     }),
   deleteAnnouncement: (id: string) =>
     fetchApi<{ success: boolean }>(`/api/admin/announcements/${id}`, { method: "DELETE" }),
+  restoreAnnouncement: (id: string) =>
+    fetchApi<{ success: boolean }>(`/api/admin/announcements/${id}/restore`, { method: "POST" }),
   // セッションクリーンアップ (2026-07-12)
   expiredSessionsCount: () => fetchApi<{ count: number }>("/api/admin/sessions/expired-count"),
   cleanupSessions: () => fetchApi<{ success: boolean }>("/api/admin/sessions/cleanup", { method: "POST" }),
@@ -2007,6 +2226,7 @@ export interface LotteryData {
     entryConfig: LotteryEntryConfig;
   } | null;
   prizes?: { id: string; name: string; quantity: number }[];
+  archivedPrizes?: { id: string; name: string; quantity: number }[];
   entryCount?: number;
   winners?: { id: string; prizeId: string; prizeName: string; eventUserId: string; userLabel: string; claimedAt: string | null }[];
 }
@@ -2019,6 +2239,8 @@ export const lotteryApi = {
     fetchApi<{ id: string }>(`/api/lottery/${id}/prizes`, { method: "POST", body: data }),
   deletePrize: (id: string, prizeId: string) =>
     fetchApi<{ success: boolean }>(`/api/lottery/${id}/prizes/${prizeId}`, { method: "DELETE" }),
+  restorePrize: (id: string, prizeId: string) =>
+    fetchApi<{ success: boolean }>(`/api/lottery/${id}/prizes/${prizeId}/restore`, { method: "POST" }),
   draw: (id: string) => fetchApi<{ drawn: number }>(`/api/lottery/${id}/draw`, { method: "POST" }),
   claim: (id: string, winnerId: string) =>
     fetchApi<{ success: boolean }>(`/api/lottery/${id}/winners/${winnerId}/claim`, { method: "POST" }),
@@ -2103,6 +2325,8 @@ export interface ContractPayment {
   paidAt: string;
   note: string | null;
   recordedBy: string | null;
+  voidedAt: string | null;
+  voidedBy: string | null;
   createdAt: string;
 }
 export interface ContractPaymentInput {

@@ -1,8 +1,9 @@
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
+import { createPortal } from "react-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { CircleAuthGuard, getAuthInfo, useAuth } from "@/hooks/useCircleAuth";
-import { menuApi, toppingApi, orderApi, circleApi, eventApi, wristbandApi, preOrderApi, couponApi, discountApi, parseCircleSettings, parseEventPaymentMethods, activeWaitTimeReport, type MenuWithToppings, type Topping, type RegisterDiscountOption } from "@/lib/api";
+import { menuApi, toppingApi, orderApi, circleApi, eventApi, wristbandApi, preOrderApi, couponApi, discountApi, parseCircleSettings, parseEventPaymentMethods, activeWaitTimeReport, type MenuWithToppings, type Topping, type RegisterDiscountOption, type RegisterDisplaySession } from "@/lib/api";
 import { extractIdFromCode, cn } from "@/lib/utils";
 import { undoableAction } from "@/lib/toast-undo";
 import { ModSandbox } from "@/components/ModSandbox";
@@ -20,8 +21,13 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState } from "@/components/ui/ErrorState";
 import { Modal } from "@/components/ui/Modal";
 import { toast } from "sonner";
-import { Minus, Plus, ShoppingCart, Trash2, QrCode, X, ScanLine } from "lucide-react";
+import { Minus, Plus, ShoppingCart, Trash2, QrCode, X, ScanLine, Monitor, Copy } from "lucide-react";
+import { QRCodeSVG } from "qrcode.react";
+import { ApiError } from "@/lib/api-error";
 import { resolveAssetUrl } from "@/lib/asset-url";
+import { useBodyScrollLock } from "@/hooks/useBodyScrollLock";
+import { useSessionState } from "@/hooks/useSessionState";
+import { displayOrderNumber } from "@/lib/order-number";
 // 2026-10-03: 画面をまたぐカート規則と再送制御を機能モジュールに集約する。
 import { addCartLine, updateCartQuantity, toggleCartTopping, lineSubtotal, checkoutTotal, cartCount, type CartLine, type CartTopping } from "@/features/orders/cart";
 import { useOrderSubmission } from "@/features/orders/use-order-submission";
@@ -30,6 +36,10 @@ import { ToppingSelection, parseToppingCategoryMaximums, parseToppingCategoryMin
 import { MenuCategoryFilter, menuCategoryKey } from "@/components/menu/MenuCategoryFilter";
 import { parseJapaneseAllergens, type JapaneseAllergen } from "@fesflow/config/allergens";
 import { getCartAllergyWarnings, OrderAllergyWarning } from "@/features/orders/allergy-check";
+import { clearRegisterDisplayConnection, readRegisterDisplayConnection, saveRegisterDisplayConnection } from "@/features/orders/register-display-connection";
+import type { RegisterDisplaySnapshot } from "@fesflow/config/register-display-contract";
+
+type CustomerDisplayShare = RegisterDisplaySession & { circleId: string; url: string; localOnly: boolean };
 
 // カートは「行 (line)」単位。同じメニューでもトッピング構成が違えば別行として持てるように
 // menuId ではなく lineId をキーにする (トッピングあり/なしを同時注文したい要件のため)。
@@ -513,33 +523,47 @@ function RegisterPageContent() {
   const { circleId: authCircleId } = useAuth();
   const queryClient = useQueryClient();
   const circleId = authCircleId ?? "";
-  const [selectedMenuCategory, setSelectedMenuCategory] = useState<string | null>(null);
-  useEffect(() => setSelectedMenuCategory(null), [circleId]);
-  const [cart, setCart] = useState<CartLine[]>([]);
-  const [peopleCount, setPeopleCount] = useState(1);
+  const registerStateKey = `fesflow:register-state:${circleId || "unselected"}`;
+  const [selectedMenuCategory, setSelectedMenuCategory] = useSessionState<string | null>(`${registerStateKey}:category`, null);
+  const [cart, setCart] = useSessionState<CartLine[]>(`${registerStateKey}:cart`, []);
+  const [peopleCount, setPeopleCount] = useSessionState(`${registerStateKey}:people`, 1);
   const [isQrModalOpen, setIsQrModalOpen] = useState(false);
   const [isCustomerQrModalOpen, setIsCustomerQrModalOpen] = useState(false);
+  const [isCustomerDisplayModalOpen, setIsCustomerDisplayModalOpen] = useState(false);
+  const [customerDisplayShare, setCustomerDisplayShare] = useState<CustomerDisplayShare | null>(null);
+  const [customerDisplaySyncError, setCustomerDisplaySyncError] = useState(false);
+  const customerDisplayWindow = useRef<Window | null>(null);
+  const [submittedCustomerDisplaySnapshot, setSubmittedCustomerDisplaySnapshot] = useSessionState<RegisterDisplaySnapshot | null>(`${registerStateKey}:customer-display-submitted`, null);
+  const submittingCustomerDisplaySnapshot = useRef<RegisterDisplaySnapshot | null>(null);
   const [isCartPanelOpen, setIsCartPanelOpen] = useState(false);
+  useBodyScrollLock(isCartPanelOpen);
+  useEffect(() => {
+    if (!isCartPanelOpen) return;
+    // 2026-10-21: xl 以上では固定カートを隠すため、画面回転/リサイズ時にロックも解除する。
+    const closeOnWideViewport = () => {
+      if (window.matchMedia("(min-width: 1280px)").matches) setIsCartPanelOpen(false);
+    };
+    window.addEventListener("resize", closeOnWideViewport);
+    return () => window.removeEventListener("resize", closeOnWideViewport);
+  }, [isCartPanelOpen]);
   const [scannedCode, setScannedCode] = useState("");
-  const [activeCustomer, setActiveCustomer] = useState<{ userId: string; wristbandId: string | null; familyBandCount: number; allergies: JapaneseAllergen[] | null } | null>(null);
-  const [activePreOrderId, setActivePreOrderId] = useState<string | null>(null);
-  const [activePreOrderTotalPrice, setActivePreOrderTotalPrice] = useState<number | null>(null);
-  const [registerCouponId, setRegisterCouponId] = useState("");
+  const [activeCustomer, setActiveCustomer] = useSessionState<{ userId: string; wristbandId: string | null; familyBandCount: number; allergies: JapaneseAllergen[] | null } | null>(`${registerStateKey}:customer`, null);
+  const [activePreOrderId, setActivePreOrderId] = useSessionState<string | null>(`${registerStateKey}:preorder`, null);
+  const [activePreOrderTotalPrice, setActivePreOrderTotalPrice] = useSessionState<number | null>(`${registerStateKey}:preorder-total`, null);
+  const [registerCouponId, setRegisterCouponId] = useSessionState(`${registerStateKey}:coupon`, "");
   const { data: registerCoupons = [] } = useQuery({
     queryKey: ["register-coupons", circleId],
     queryFn: () => couponApi.registerOptions(circleId),
     enabled: !!circleId,
     refetchInterval: 60_000,
   });
-  useEffect(() => setRegisterCouponId(""), [circleId]);
-  const [discountId, setDiscountId] = useState("");
+  const [discountId, setDiscountId] = useSessionState(`${registerStateKey}:discount`, "");
   const { data: registerDiscounts = [] } = useQuery({
     queryKey: ["register-discounts", circleId],
     queryFn: () => discountApi.registerOptions(circleId),
     enabled: !!circleId,
     refetchInterval: 60_000,
   });
-  useEffect(() => setDiscountId(""), [circleId]);
 
   const { data: circle } = useQuery({
     queryKey: ["circle", circleId],
@@ -548,7 +572,8 @@ function RegisterPageContent() {
     // 2026-10-07 (#9): レジ担当にも報告後30分の期限切れを画面上で反映する。
     refetchInterval: 60_000,
   });
-  const [waitMinutes, setWaitMinutes] = useState("10");
+  // 2026-10-21: レジを離れて厨房へ移動しても、報告前の待ち時間入力を同じサークル内で保つ。
+  const [waitMinutes, setWaitMinutes] = useSessionState<string>(`${registerStateKey}:wait-minutes`, "10");
   const waitTimeReport = activeWaitTimeReport(circle?.settings);
   const reportWaitTime = useMutation({
     mutationFn: () => circleApi.reportWaitTime(circleId, Number(waitMinutes)),
@@ -573,7 +598,7 @@ function RegisterPageContent() {
     const list = accepted.length > 0 ? accepted.filter((p) => eventMethods.includes(p)) : eventMethods;
     return list.length > 0 ? list : eventMethods;
   })();
-  const [paymentMethod, setPaymentMethod] = useState<string>("");
+  const [paymentMethod, setPaymentMethod] = useSessionState(`${registerStateKey}:payment`, "");
   // 対応が1つだけなら自動採用。選択肢が変わって現在値が無効になったらリセット。
   useEffect(() => {
     if (effectivePayments.length === 1) setPaymentMethod(effectivePayments[0]!);
@@ -609,6 +634,7 @@ function RegisterPageContent() {
     },
     onSuccess: (data) => {
       if (data.user) {
+        setSubmittedCustomerDisplaySnapshot(null);
         // 顧客を特定するだけ。事前オーダーのロードは activeCustomer の変化を監視する
         // useEffect 側で行う (カメラスキャン経由でも確実に走らせるための共通化)。
         setActiveCustomer({
@@ -714,7 +740,10 @@ function RegisterPageContent() {
   const createOrder = useMutation({
     mutationFn: submitOrder,
     onSuccess: (data) => {
-      toast.success(`注文完了！注文番号: ${data.orderNumber}`);
+      const submittedSnapshot = submittingCustomerDisplaySnapshot.current;
+      if (submittedSnapshot) setSubmittedCustomerDisplaySnapshot({ ...submittedSnapshot, displayState: "submitted", orderNumber: data.orderNumber });
+      submittingCustomerDisplaySnapshot.current = null;
+      toast.success(`注文完了！呼出番号: ${displayOrderNumber(data.orderNumber)}`);
       setCart([]);
       setPeopleCount(1);
       setActiveCustomer(null); // 会計完了後に顧客情報をクリア
@@ -726,6 +755,7 @@ function RegisterPageContent() {
       setPaymentMethod("");
     },
     onError: (error: any) => {
+      submittingCustomerDisplaySnapshot.current = null;
       toast.error(error.message || "注文に失敗しました");
     },
   });
@@ -738,7 +768,10 @@ function RegisterPageContent() {
       return preOrderApi.claim(input.preOrderId, input.cashierId, input.paymentMethod);
     },
     onSuccess: (data) => {
-      toast.success(`注文完了！ 注文番号: ${data.orderNumber}`, {
+      const submittedSnapshot = submittingCustomerDisplaySnapshot.current;
+      if (submittedSnapshot) setSubmittedCustomerDisplaySnapshot({ ...submittedSnapshot, displayState: "submitted", orderNumber: data.orderNumber });
+      submittingCustomerDisplaySnapshot.current = null;
+      toast.success(`注文完了！ 呼出番号: ${displayOrderNumber(data.orderNumber)}`, {
         style: {
           border: "3px solid var(--border)",
           borderRadius: "var(--radius)",
@@ -757,6 +790,7 @@ function RegisterPageContent() {
       setPaymentMethod("");
     },
     onError: (error: any) => {
+      submittingCustomerDisplaySnapshot.current = null;
       toast.error(error.message || "注文確定に失敗しました");
     },
   });
@@ -785,21 +819,25 @@ function RegisterPageContent() {
 
   // カードで選んだトッピング付きで1行追加。トッピング構成まで同一なら数量+1、違えば別行。
   const addLine = (menu: MenuWithToppings, chosen: CartTopping[]) => {
+    setSubmittedCustomerDisplaySnapshot(null);
     setActivePreOrderId(null);
     setCart((prev) => addCartLine(prev, menu, chosen));
   };
 
   const removeLine = (lineId: string) => {
+    setSubmittedCustomerDisplaySnapshot(null);
     setActivePreOrderId(null);
     setCart((prev) => prev.filter((l) => l.lineId !== lineId));
   };
 
   const updateQuantity = (lineId: string, delta: number) => {
+    setSubmittedCustomerDisplaySnapshot(null);
     setActivePreOrderId(null);
     setCart((prev) => updateCartQuantity(prev, lineId, delta));
   };
 
   const toggleTopping = (lineId: string, topping: Topping) => {
+    setSubmittedCustomerDisplaySnapshot(null);
     setActivePreOrderId(null);
     setCart((prev) => toggleCartTopping(prev, lineId, topping));
   };
@@ -816,6 +854,79 @@ function RegisterPageContent() {
       : selectedDiscount ? Math.min(subtotal, selectedDiscount.value) : 0;
     return Math.max(0, subtotal - couponDiscount - discountAmount);
   };
+  const customerDisplaySnapshot = useMemo<RegisterDisplaySnapshot>(() => {
+    const subtotal = checkoutTotal(cart, activePreOrderId ? activePreOrderTotalPrice : null);
+    const selectedCoupon = activePreOrderId ? null : registerCoupons.find((option) => option.id === registerCouponId);
+    const couponDiscount = selectedCoupon?.discountPercent ? Math.floor((subtotal * selectedCoupon.discountPercent) / 100) : 0;
+    const selectedDiscount = activePreOrderId ? null : registerDiscounts.find((option) => option.id === discountId);
+    const discountAmount = selectedDiscount?.kind === "percentage"
+      ? Math.floor((subtotal * selectedDiscount.value) / 100)
+      : selectedDiscount ? Math.min(subtotal, selectedDiscount.value) : 0;
+    const total = Math.max(0, subtotal - couponDiscount - discountAmount);
+    return {
+      circleName: (circle?.name ?? "").slice(0, 120),
+      isPreOrder: !!activePreOrderId,
+      displayState: "cart",
+      orderNumber: null,
+      items: cart.map((line) => ({
+        name: line.menuName.slice(0, 120),
+        quantity: line.quantity,
+        // 2026-10-21: トッピング価格は内訳に別表示するため、単価にはベースメニュー価格だけを送る。
+        unitPrice: line.menuPrice,
+        subtotal: lineSubtotal(line),
+        toppings: line.toppings.map((topping) => ({
+          name: topping.toppingName.slice(0, 120),
+          unitPrice: topping.toppingPrice,
+        })),
+      })),
+      subtotal,
+      discount: Math.max(0, subtotal - total),
+      total,
+    };
+  }, [cart, circle?.name, activePreOrderId, activePreOrderTotalPrice, registerCoupons, registerCouponId, registerDiscounts, discountId]);
+  const currentCustomerDisplaySnapshot = submittedCustomerDisplaySnapshot ?? customerDisplaySnapshot;
+
+  useEffect(() => {
+    if (!circleId || customerDisplayShare?.circleId === circleId) return;
+    const saved = readRegisterDisplayConnection(circleId);
+    if (!saved) return;
+    if (saved.expiresAt <= Date.now()) {
+      clearRegisterDisplayConnection(saved.circleId, saved.id);
+      return;
+    }
+    // 2026-10-21: レジへ戻った時も稼働中のお客さま画面を再利用し、新規共有を作らない。
+    setCustomerDisplayShare(saved);
+    setCustomerDisplaySyncError(false);
+  }, [circleId, customerDisplayShare?.circleId]);
+
+  useEffect(() => {
+    if (!customerDisplayShare || customerDisplayShare.circleId !== circleId) return;
+    saveRegisterDisplayConnection({ ...customerDisplayShare, snapshot: currentCustomerDisplaySnapshot });
+  }, [customerDisplayShare, currentCustomerDisplaySnapshot, circleId]);
+
+  useEffect(() => {
+    const onSync = (event: Event) => {
+      const detail = (event as CustomEvent<{ sessionId: string; ok: boolean }>).detail;
+      if (detail?.sessionId === customerDisplayShare?.id) setCustomerDisplaySyncError(!detail.ok);
+    };
+    window.addEventListener("fesflow:register-display-sync", onSync);
+    return () => window.removeEventListener("fesflow:register-display-sync", onSync);
+  }, [customerDisplayShare?.id]);
+
+  useEffect(() => {
+    if (!customerDisplayShare || customerDisplayShare.circleId === circleId) return;
+    // 2026-10-21: サークルを切り替えた時は旧共有を終了し、別サークルのカートを旧画面へ送らない。
+    if (!customerDisplayShare.localOnly) {
+      void orderApi.closeRegisterDisplay(customerDisplayShare.id).catch(() => undefined);
+    }
+    clearRegisterDisplayConnection(customerDisplayShare.circleId, customerDisplayShare.id);
+    if (customerDisplayWindow.current && !customerDisplayWindow.current.closed) customerDisplayWindow.current.close();
+    customerDisplayWindow.current = null;
+    setCustomerDisplayShare(null);
+    setCustomerDisplaySyncError(false);
+    setIsCustomerDisplayModalOpen(false);
+  }, [circleId, customerDisplayShare]);
+
   const getTotalCount = () => cartCount(cart);
 
   const handleSubmitOrder = async () => {
@@ -823,6 +934,9 @@ function RegisterPageContent() {
     if (cart.length === 0) { toast.error("カートが空です"); return; }
     if (!activeCustomer) { toast.error("顧客が特定されていません。リストバンド/QRをスキャンしてください"); return; }
     if (effectivePayments.length > 1 && !paymentMethod) { toast.error("支払い方法を選択してください"); return; }
+
+    // 2026-10-21: 送信時点の明細を保持し、カートが空になった後も注文番号と一緒に顧客画面へ残す。
+    submittingCustomerDisplaySnapshot.current = currentCustomerDisplaySnapshot;
 
     // 2026-07-16: 「誰がレジをやったか」を記録するため、ログイン中スタッフの識別子を
     // cashierId として送る。メールアドレスが無いアカウント (旧形式の認証情報等) では
@@ -837,7 +951,112 @@ function RegisterPageContent() {
     if (orderInput) await createOrder.mutateAsync(orderInput);
   };
 
+  const getOrCreateCustomerDisplaySession = async (snapshot: RegisterDisplaySnapshot) => {
+    const storageKey = `fesflow-register-display:${circleId}`;
+    let cached: RegisterDisplaySession | null = null;
+    try {
+      cached = JSON.parse(sessionStorage.getItem(storageKey) ?? "null") as RegisterDisplaySession | null;
+    } catch {
+      cached = null;
+    }
+    if (
+      cached && cached.expiresAt > Date.now() + 30_000 && cached.id && cached.token &&
+      Number.isSafeInteger(cached.revision) && cached.revision >= 1
+    ) {
+      const revision = cached.revision + 1;
+      try {
+        await orderApi.updateRegisterDisplay(cached.id, snapshot, revision);
+        const renewed = { ...cached, revision };
+        try { sessionStorage.setItem(storageKey, JSON.stringify(renewed)); } catch { /* 保存不可でも表示は続ける */ }
+        return renewed;
+      } catch (error) {
+        if (!(error instanceof ApiError) || error.code !== "NOT_FOUND") throw error;
+        // 2026-10-21: 期限切れ・終了済みの保存セッションは新しい共有へ置き換える。
+        try { sessionStorage.removeItem(storageKey); } catch { /* 新規共有を優先する */ }
+      }
+    } else {
+      try { sessionStorage.removeItem(storageKey); } catch { /* 新規共有を優先する */ }
+    }
+
+    const created = await orderApi.createRegisterDisplay(circleId, snapshot);
+    try { sessionStorage.setItem(storageKey, JSON.stringify(created)); } catch { /* 保存不可でも表示は続ける */ }
+    return created;
+  };
+
+  const openCustomerDisplay = async () => {
+    // 2026-10-21: 先に選択UIを出し、レジ担当が明示した時だけ新しいタブを開く。
+    setIsCustomerDisplayModalOpen(true);
+    if (customerDisplayShare?.circleId === circleId) return;
+    try {
+      if (!circleId) throw new Error("サークルを特定できません");
+      const session = await getOrCreateCustomerDisplaySession(currentCustomerDisplaySnapshot);
+      const url = new URL(`/register-display/${session.id}`, window.location.origin);
+      url.hash = session.token;
+      const share: CustomerDisplayShare = { ...session, circleId, url: url.toString(), localOnly: false };
+      setCustomerDisplayShare(share);
+      setCustomerDisplaySyncError(false);
+    } catch {
+      // 2026-10-21: APIが使えない時も同じ端末の別窓は維持し、QR共有だけを未接続として示す。
+      const localId = `local-${crypto.randomUUID()}`;
+      const localUrl = new URL(`/register-display/${localId}`, window.location.origin).toString();
+      const localShare: CustomerDisplayShare = {
+        id: localId,
+        token: "",
+        revision: 0,
+        expiresAt: Date.now() + 12 * 60 * 60 * 1000,
+        circleId,
+        url: localUrl,
+        localOnly: true,
+      };
+      setCustomerDisplayShare(localShare);
+      setCustomerDisplaySyncError(true);
+      toast.warning("別端末共有に接続できません。同じ端末の別ウィンドウ表示は利用できます。");
+    }
+  };
+
+  const openCustomerDisplayWindow = () => {
+    if (!customerDisplayShare) return;
+    if (customerDisplayWindow.current && !customerDisplayWindow.current.closed) {
+      customerDisplayWindow.current.focus();
+      return;
+    }
+    const popup = window.open(customerDisplayShare.url, "_blank");
+    if (!popup) {
+      toast.error("画面を開けませんでした。ブラウザーのポップアップ設定をご確認ください。");
+      return;
+    }
+    popup.opener = null;
+    customerDisplayWindow.current = popup;
+  };
+
+  const copyCustomerDisplayUrl = async () => {
+    if (!customerDisplayShare || customerDisplayShare.localOnly) return;
+    try {
+      await navigator.clipboard.writeText(customerDisplayShare.url);
+      toast.success("共有URLをコピーしました");
+    } catch {
+      toast.error("URLをコピーできませんでした。QRコードをご利用ください。");
+    }
+  };
+
+  const closeCustomerDisplayShare = async () => {
+    if (!customerDisplayShare) return;
+    try {
+      if (!customerDisplayShare.localOnly) await orderApi.closeRegisterDisplay(customerDisplayShare.id);
+      clearRegisterDisplayConnection(customerDisplayShare.circleId, customerDisplayShare.id);
+      if (customerDisplayWindow.current && !customerDisplayWindow.current.closed) customerDisplayWindow.current.close();
+      customerDisplayWindow.current = null;
+      setCustomerDisplayShare(null);
+      setCustomerDisplaySyncError(false);
+      setIsCustomerDisplayModalOpen(false);
+      toast.success("お客さま用画面を終了しました");
+    } catch {
+      toast.error("共有を終了できませんでした。通信状態を確認してください。");
+    }
+  };
+
   const clearCart = () => {
+    setSubmittedCustomerDisplaySnapshot(null);
     const prev = cart;
     const previousCouponId = registerCouponId;
     const previousDiscountId = discountId;
@@ -887,8 +1106,56 @@ function RegisterPageContent() {
         isOpen={isCustomerQrModalOpen}
         onClose={() => setIsCustomerQrModalOpen(false)}
         mode="customer"
-        onCustomerScanned={(userId, wristbandId, familyBandCount, allergies) => setActiveCustomer({ userId, wristbandId, familyBandCount, allergies: parseJapaneseAllergens(allergies) })}
+        onCustomerScanned={(userId, wristbandId, familyBandCount, allergies) => {
+          setSubmittedCustomerDisplaySnapshot(null);
+          setActiveCustomer({ userId, wristbandId, familyBandCount, allergies: parseJapaneseAllergens(allergies) });
+        }}
       />
+      <Modal
+        isOpen={isCustomerDisplayModalOpen}
+        title="[お客さま用カート表示]"
+        subtitle="レジのカート内容を別画面へ表示します。共有画面は12時間で失効します。"
+        onClose={() => setIsCustomerDisplayModalOpen(false)}
+        maxWidth="md"
+      >
+        {customerDisplayShare?.localOnly ? (
+          <div className="space-y-3">
+            <p className="border-l-heavy border-error bg-muted p-3 text-sm font-bold">
+              ネットワークに接続できないため、QR共有は停止中です。同じ端末で開いた別ウィンドウにはカートを表示できます。
+            </p>
+            <p className="break-all text-xs text-muted-foreground">{customerDisplayShare.url}</p>
+            <Button onClick={openCustomerDisplayWindow} className="w-full border-thick border-border font-mono uppercase">
+              <Monitor className="mr-2 h-4 w-4" />新しいタブで開く
+            </Button>
+          </div>
+        ) : customerDisplayShare ? (
+          <div className="flex flex-col items-center gap-4 text-center">
+            <div className="border-thick border-border bg-white p-3">
+              <QRCodeSVG value={customerDisplayShare.url} size={232} level="M" includeMargin />
+            </div>
+            <p className="text-sm font-bold">別のスマートフォンで読み取ると、カートの内容と金額が同期されます。</p>
+            <p className="break-all text-xs text-muted-foreground">有効期限: {new Date(customerDisplayShare.expiresAt).toLocaleString("ja-JP")}</p>
+            <Button onClick={openCustomerDisplayWindow} className="w-full border-thick border-border font-mono uppercase">
+              <Monitor className="mr-2 h-4 w-4" />新しいタブで開く
+            </Button>
+            {customerDisplaySyncError && (
+              <p role="status" className="w-full border-l-heavy border-error bg-muted p-3 text-left text-sm font-bold">
+                別端末への同期を確認できません。同じ端末の別ウィンドウは引き続き同期します。
+              </p>
+            )}
+            <Button variant="outline" onClick={copyCustomerDisplayUrl} className="w-full border-thick border-border font-mono uppercase">
+              <Copy className="mr-2 h-4 w-4" />共有URLをコピー
+            </Button>
+          </div>
+        ) : (
+          <p className="text-sm">共有画面を準備しています…</p>
+        )}
+        {customerDisplayShare && (
+          <Button variant="destructive" onClick={closeCustomerDisplayShare} className="mt-4 w-full font-mono uppercase">
+            <X className="mr-2 h-4 w-4" />共有を終了
+          </Button>
+        )}
+      </Modal>
 
       {/* 横幅に余裕がある画面 (xl+) はカートを右サイドバー固定、狭い画面は下部バー+スライドアップ */}
       <div className="xl:flex xl:items-start xl:gap-4">
@@ -909,6 +1176,14 @@ function RegisterPageContent() {
                   [QR受取 (事前注文)]
                 </Button>
               )}
+              <Button
+                variant="outline"
+                onClick={openCustomerDisplay}
+                className="h-10 bg-background text-xs uppercase tracking-wider text-foreground sm:h-12 sm:text-sm"
+              >
+                <Monitor className="mr-1 h-4 w-4 sm:mr-2 sm:h-5 sm:w-5" />
+                [お客さま画面]
+              </Button>
               {getActiveMods().map((mod: any) => {
                 const hook = mod.manifest?.hooks?.registerAction;
                 if (!hook) return null;
@@ -1135,15 +1410,16 @@ function RegisterPageContent() {
       )}
 
       {/* ===== モバイル/タブレット: カートパネル（スライドアップ, xl 未満のみ） ===== */}
-      {isCartPanelOpen && (
-        <div className="xl:hidden fixed inset-0 z-50 flex items-end sm:items-center justify-center">
+      {/* 2026-10-21: ページ内の stacking context による背面化を避け、iOS の safe area 内に出す。 */}
+      {isCartPanelOpen && createPortal((
+        <div role="dialog" aria-modal="true" aria-labelledby="register-cart-title" className="viewport-safe-area xl:hidden fixed inset-0 z-[80] flex items-end overflow-y-auto sm:items-center justify-center">
           <div className="absolute inset-0 bg-foreground/60" onClick={() => setIsCartPanelOpen(false)} />
           {/* 2026-07-16: aside 側と同じ理由で overflow-hidden が必須。無いと画面が小さい端末で
               カート行が増えたときにシートが max-h-[90vh] を超えて伸び、確定ボタンが画面外に出て
               かつスクロールもできなくなる (UI破綻)。 */}
-          <div className="relative w-full sm:max-w-lg bg-background border-t-heavy sm:border-heavy border-border max-h-[90vh] overflow-hidden flex flex-col font-mono">
+          <div className="relative max-h-full w-full min-w-0 max-w-lg overflow-hidden bg-background border-t-heavy sm:border-heavy border-border flex flex-col font-mono">
             <div className="shrink-0 flex items-center justify-between px-4 py-3 border-b-thick border-border bg-primary text-primary-foreground">
-              <h2 className="font-black text-lg uppercase">[カート確認]</h2>
+              <h2 id="register-cart-title" className="min-w-0 break-words font-black text-lg uppercase">[カート確認]</h2>
               <button
                 onClick={() => setIsCartPanelOpen(false)}
                 aria-label="カートを閉じる"
@@ -1179,7 +1455,7 @@ function RegisterPageContent() {
             />
           </div>
         </div>
-      )}
+      ), document.body)}
     </div>
   );
 }

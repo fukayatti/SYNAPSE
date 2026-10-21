@@ -46,6 +46,9 @@ export interface WorkerEnv {
   CLEANUP_ENABLED?: string;
   // 2026-10-03: 運用時の削除確認とログ量の調整用。秘密値ではない。
   CLEANUP_DRY_RUN?: string;
+  VAPID_PUBLIC_KEY?: string;
+  VAPID_PRIVATE_KEY?: string;
+  VAPID_SUBJECT?: string;
   REQUEST_LOG_SAMPLE_RATE?: string;
   // MinIO/S3 フォールバック
   S3_ENDPOINT?: string;

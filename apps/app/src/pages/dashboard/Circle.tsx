@@ -8,6 +8,7 @@ import {
   parseCircleSettings,
   parseEventPaymentMethods,
   parseStoreAreas,
+  type CircleReviewPublicationSettings,
   type OrderFlowMode,
 } from "@/lib/api";
 import DashboardLayout from "@/components/DashboardLayout";
@@ -27,9 +28,10 @@ import { ErrorState } from "@/components/ui/ErrorState";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { OptionCard } from "@/components/ui/OptionCard";
 import { ToggleSwitch } from "@/components/ui/ToggleSwitch";
+import { Checkbox } from "@/components/ui/checkbox";
 import { ExtensionsManager } from "@/components/circle/ExtensionsManager";
 import { toast } from "sonner";
-import { Save, UserCheck, CreditCard, Crown, Clock, ChefHat, CheckCircle2, ShoppingCart } from "lucide-react";
+import { Save, UserCheck, CreditCard, Crown, Clock, ChefHat, CheckCircle2, ShoppingCart, Star, MessageSquareText } from "lucide-react";
 import { useUnsavedChanges } from "@/components/UnsavedNavigationGuard";
 
 // 注文モードの選択肢
@@ -83,22 +85,35 @@ function CircleSettingsContent() {
 
   // 2026-09-27: stockEnabledは旧設定値の保存互換用で、UIでは切り替えない。
   const [orderFlowMode, setOrderFlowMode] = useState<OrderFlowMode>("pending");
+  const [preOrderEnabled, setPreOrderEnabled] = useState(false);
   const [mobileOrderEnabled, setMobileOrderEnabled] = useState(false);
   const [stockEnabled, setStockEnabled] = useState(false);
   const [staffEnabled, setStaffEnabled] = useState(false);
   // 対応する支払い方法 (2026-07-12)。イベントの paymentMethods の部分集合。
   const [acceptedPayments, setAcceptedPayments] = useState<string[]>([]);
   const [storeAreaId, setStoreAreaId] = useState<string | null>(null);
-  // 2026-07-16: 「運用設定」(注文モード・拡張機能・支払い方法) は circleApi.updateSettings が
-  // settings カラムを丸ごと上書きする1本のAPIのため、3つを分けて保存することはできない。
-  // そのため見た目も1つのセクションにまとめ、この3項目分の未保存判定を1つのスナップショットで行う。
+  const [reviewPublication, setReviewPublication] = useState<CircleReviewPublicationSettings>({
+    publishReviews: false,
+    showAverageRating: false,
+    showStars: false,
+    showComments: false,
+  });
+  // 2026-07-16: 「運用設定」は circleApi.updateSettings が settings カラムを丸ごと上書きする1本のAPIのため、
+  // 項目別に保存できない。2026-10-21: レビュー公開設定も同じスナップショットへ含める。
   const [settingsSnapshot, setSettingsSnapshot] = useState({
     orderFlowMode: "pending" as OrderFlowMode,
+    preOrderEnabled: false,
     mobileOrderEnabled: false,
     stockEnabled: false,
     staffEnabled: false,
     acceptedPayments: [] as string[],
     storeAreaId: null as string | null,
+    reviewPublication: {
+      publishReviews: false,
+      showAverageRating: false,
+      showStars: false,
+      showComments: false,
+    },
   });
 
   // オーナー譲渡確認
@@ -139,18 +154,22 @@ function CircleSettingsContent() {
 
       const s = parseCircleSettings(circle.settings);
       setOrderFlowMode(s.orderFlowMode);
+      setPreOrderEnabled(s.preOrderEnabled);
       setMobileOrderEnabled(s.mobileOrderEnabled);
       setStockEnabled(s.extensions.stock);
       setStaffEnabled(s.extensions.staff);
       setAcceptedPayments(s.acceptedPayments);
       setStoreAreaId(s.storeAreaId);
+      setReviewPublication(s.reviewPublication);
       setSettingsSnapshot({
         orderFlowMode: s.orderFlowMode,
+        preOrderEnabled: s.preOrderEnabled,
         mobileOrderEnabled: s.mobileOrderEnabled,
         stockEnabled: s.extensions.stock,
         staffEnabled: s.extensions.staff,
         acceptedPayments: s.acceptedPayments,
         storeAreaId: s.storeAreaId,
+        reviewPublication: s.reviewPublication,
       });
     }
   }, [circle]);
@@ -193,17 +212,19 @@ function CircleSettingsContent() {
   });
 
   // 「運用設定」の保存。circleApi.updateSettings は settings カラムを丸ごと上書きするため、
-  // 注文モード・拡張機能・支払い方法を常にまとめて送る。旧stock値も後方互換用に保持する。
-  const settingsDraft = { orderFlowMode, mobileOrderEnabled, stockEnabled, staffEnabled, acceptedPayments, storeAreaId };
+  // 注文モード・拡張機能・支払い方法・レビュー公開設定を常にまとめて送る。旧stock値も後方互換用に保持する。
+  const settingsDraft = { orderFlowMode, preOrderEnabled, mobileOrderEnabled, stockEnabled, staffEnabled, acceptedPayments, storeAreaId, reviewPublication };
   const updateSettings = useMutation({
     mutationFn: async (draft: typeof settingsDraft) =>
       circleApi.updateSettings(circleId, {
         orderFlowMode: draft.orderFlowMode,
+        preOrderEnabled: draft.preOrderEnabled,
         mobileOrderEnabled: draft.mobileOrderEnabled,
         extensions: { stock: draft.stockEnabled, staff: draft.staffEnabled },
         // イベントに存在する方法だけ残す (イベント側で削除された方法を掃除)
         acceptedPayments: draft.acceptedPayments.filter((p) => eventPayments.includes(p)),
         storeAreaId: draft.storeAreaId,
+        reviewPublication: draft.reviewPublication,
       }),
     onSuccess: (_result, draft) => {
       toast.success("運用設定を保存しました");
@@ -279,11 +300,13 @@ function CircleSettingsContent() {
     onDiscard: () => {
       setForm(formSnapshot);
       setOrderFlowMode(settingsSnapshot.orderFlowMode);
+      setPreOrderEnabled(settingsSnapshot.preOrderEnabled);
       setMobileOrderEnabled(settingsSnapshot.mobileOrderEnabled);
       setStockEnabled(settingsSnapshot.stockEnabled);
       setStaffEnabled(settingsSnapshot.staffEnabled);
       setAcceptedPayments(settingsSnapshot.acceptedPayments);
       setStoreAreaId(settingsSnapshot.storeAreaId);
+      setReviewPublication(settingsSnapshot.reviewPublication);
     },
   });
 
@@ -313,7 +336,7 @@ function CircleSettingsContent() {
     );
   }
 
-  if (isError) {
+  if (isError && !circle) {
     return (
       <DashboardLayout title={circleName} subtitle="サークル設定" type="circle">
         <ErrorState error={error} onRetry={() => refetch()} />
@@ -324,6 +347,7 @@ function CircleSettingsContent() {
   return (
     <DashboardLayout title={circleName} subtitle="サークル設定" type="circle">
       <div className="space-y-6">
+        {isError && <p role="status" className="border-thick border-warning bg-warning/10 p-3 text-xs">最新のサークル設定を取得できません。前回取得した設定を表示しています。</p>}
         {/* 基本情報 (+ アイコン/背景画像)
             2026-07-16: アイコン/背景画像は circle.iconImagePath/backgroundImagePath (既存カラム) に
             保存する。circleApi.update (name/description と同じ PUT /:id) で一緒に送るため、
@@ -407,7 +431,7 @@ function CircleSettingsContent() {
           <CardHeader className="pb-3 border-b-thick border-border">
             <CardTitle className="text-sm font-bold uppercase">運用設定</CardTitle>
             <CardDescription className="text-xs text-muted-foreground">
-              注文モード・拡張機能・対応する支払い方法をこの1つの保存ボタンでまとめて保存します
+              注文モード・拡張機能・支払い方法・レビュー公開設定をこの1つの保存ボタンでまとめて保存します
             </CardDescription>
           </CardHeader>
           <CardContent className="pt-4 space-y-6">
@@ -435,6 +459,18 @@ function CircleSettingsContent() {
             <div className="space-y-2 border-t-thin border-border pt-4">
               <h3 className="text-xs font-bold uppercase tracking-wider">注文受付</h3>
               <div className="space-y-3 pt-1">
+                <label htmlFor="preOrderEnabled" className="flex cursor-pointer items-start gap-3 border-thick border-border p-3">
+                  <Checkbox
+                    id="preOrderEnabled"
+                    checked={preOrderEnabled}
+                    onCheckedChange={(checked) => setPreOrderEnabled(checked === true)}
+                    className="mt-0.5"
+                  />
+                  <span className="min-w-0">
+                    <span className="block text-xs font-bold uppercase">事前注文を受け付ける</span>
+                    <span className="mt-0.5 block text-[10px] text-muted-foreground">来場者が注文内容を先に登録し、レジで受け取る注文を受け付けます。</span>
+                  </span>
+                </label>
                 <ExtensionToggle
                   icon={ShoppingCart}
                   label="モバイルオーダーを受け付ける"
@@ -520,7 +556,53 @@ function CircleSettingsContent() {
               <p className="text-[11px] text-muted-foreground">イベントが登録した店舗エリアを選択します。</p>
             </div>
 
-            {/* 運用設定 (注文モード + 拡張機能 + 支払い方法) の保存。3項目を常にまとめて送る。 */}
+            {/* 2026-10-21: 店舗の明示選択を公開境界にし、レビュー本文・評価・集計を別々に制御する。 */}
+            <div className="space-y-3 border-t-thick border-border pt-4">
+              <div>
+                <h3 className="text-xs font-bold uppercase tracking-wider">レビュー公開</h3>
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  来場者が店舗ページでレビューを読めるか、出店一覧に平均評価を出すか選べます。
+                </p>
+              </div>
+              <ExtensionToggle
+                icon={MessageSquareText}
+                label="来場者にレビューを公開する"
+                description="有効にすると、この店舗のレビューを見るボタンが表示されます。"
+                enabled={reviewPublication.publishReviews}
+                onToggle={() => setReviewPublication((value) => ({ ...value, publishReviews: !value.publishReviews }))}
+              />
+              {reviewPublication.publishReviews ? (
+                <div className="space-y-3 border-l-thick border-border pl-3 sm:pl-4">
+                  <ExtensionToggle
+                    icon={Star}
+                    label="平均評価を出店一覧に表示"
+                    description="平均値と、5つの星の塗りつぶしで評価を表示します。"
+                    enabled={reviewPublication.showAverageRating}
+                    onToggle={() => setReviewPublication((value) => ({ ...value, showAverageRating: !value.showAverageRating }))}
+                  />
+                  <ExtensionToggle
+                    icon={Star}
+                    label="レビューに星の評価を表示"
+                    description="店舗ページのレビュー一覧に、投稿ごとの星を表示します。"
+                    enabled={reviewPublication.showStars}
+                    onToggle={() => setReviewPublication((value) => ({ ...value, showStars: !value.showStars }))}
+                  />
+                  <ExtensionToggle
+                    icon={MessageSquareText}
+                    label="レビューの文章を表示"
+                    description="店舗ページのレビュー一覧に、来場者が書いた文章を表示します。"
+                    enabled={reviewPublication.showComments}
+                    onToggle={() => setReviewPublication((value) => ({ ...value, showComments: !value.showComments }))}
+                  />
+                </div>
+              ) : (
+                <p className="border-thin border-border bg-muted/30 p-3 text-[11px] text-muted-foreground">
+                  公開をオンにすると、平均評価・星・文章の表示を個別に選べます。
+                </p>
+              )}
+            </div>
+
+            {/* 運用設定 (注文モード + 拡張機能 + 支払い方法 + レビュー公開) を常にまとめて保存する。 */}
             <div className="border-t-thick border-border pt-4 flex items-center justify-end gap-3">
               {isSettingsDirty && (
                 <span className="text-[10px] font-bold uppercase text-warning">未保存の変更があります</span>

@@ -134,7 +134,7 @@ function CircleAnalyticsContent() {
     );
   }
 
-  if (isError) {
+  if (isError && data === undefined) {
     return (
       <DashboardLayout title={circleName || "サークルダッシュボード"} subtitle="統計・分析" type="circle">
         <ErrorState error={error} onRetry={() => refetch()} />
@@ -159,6 +159,7 @@ function CircleAnalyticsContent() {
   return (
     <DashboardLayout title={circleName || "サークルダッシュボード"} subtitle="統計・分析" type="circle">
       <div className="space-y-8">
+        {isError && <p role="status" className="border-thick border-warning bg-warning/10 p-3 text-xs">最新の集計を取得できません。前回取得した内容を表示しています。</p>}
         <div className="flex flex-col gap-5 border-b-thick border-border pb-6 lg:flex-row lg:items-end lg:justify-between">
           <div className="space-y-2">
             <p className="font-mono text-xs uppercase tracking-widest text-muted-foreground">パフォーマンス概要</p>

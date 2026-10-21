@@ -1,4 +1,5 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useId } from "react";
+import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -24,6 +25,7 @@ import {
 import { authClient } from "@/lib/auth-client";
 import { PERMISSION_NAMES } from "@fesflow/config";
 import { roleLabel } from "@/lib/roles";
+import { useBodyScrollLock } from "@/hooks/useBodyScrollLock";
 
 export type Space = {
   id: string;
@@ -49,6 +51,8 @@ export default function AccountModal({
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { userName, userEmail, role, permissions } = useAuth();
+  useBodyScrollLock(open);
+  const titleId = useId();
 
   // 正本のアカウント情報 (localStorage は image を持たないため API から取得)
   const { data: me } = useQuery({
@@ -142,11 +146,13 @@ export default function AccountModal({
 
   if (!open) return null;
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/75 p-4 backdrop-blur-sm">
-      <div className="relative w-full max-w-md border-thin border-border bg-background p-6 shadow-none font-mono rounded-none max-h-[90vh] overflow-y-auto">
+  // 2026-10-21: Header の sticky stacking context に埋もれないよう、画面直下へ描画する。
+  return createPortal((
+    <div role="dialog" aria-modal="true" aria-labelledby={titleId} className="viewport-safe-area fixed inset-0 z-[80] flex items-center justify-center overflow-y-auto bg-foreground/75 backdrop-blur-sm">
+      <div className="relative max-h-full w-full min-w-0 max-w-md overflow-y-auto overscroll-contain border-thin border-border bg-background p-4 shadow-none font-mono sm:p-6">
         <button
           onClick={onClose}
+          aria-label="アカウント管理を閉じる"
           className="absolute right-4 top-4 w-8 h-8 border-thin border-border flex items-center justify-center hover:bg-primary hover:text-primary-foreground transition-all rounded-none cursor-pointer"
         >
           <X className="h-4 w-4" />
@@ -154,7 +160,7 @@ export default function AccountModal({
 
         <div className="mb-6 border-b-thin border-border pb-3 flex items-center gap-2">
           <User className="h-5 w-5 text-primary" />
-          <h2 className="text-lg font-black uppercase tracking-wider">[アカウント管理]</h2>
+          <h2 id={titleId} className="min-w-0 break-words text-lg font-black uppercase tracking-wider">[アカウント管理]</h2>
         </div>
 
         {/* プロフィール編集 (アイコン + 名前) */}
@@ -309,5 +315,5 @@ export default function AccountModal({
         onCancel={() => setConfirmDelete(false)}
       />
     </div>
-  );
+  ), document.body);
 }

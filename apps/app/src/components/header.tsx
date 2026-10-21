@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect, useLayoutEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import { Link, useNavigate, useLocation } from "react-router-dom";
 import { Button } from "./ui/button";
 import { toast } from "sonner";
@@ -32,6 +33,7 @@ import {
 } from "@/hooks/useCircleAuth";
 import { roleLabel, roleBadge } from "@/lib/roles";
 import { authClient } from "@/lib/auth-client";
+import { PushNotificationControl } from "@/components/PushNotificationControl";
 
 // 2026-07-07 単一ドメイン化: register の circle/event/sys はすべて同一オリジンの同一SPA。
 // 旧来のスタッフ/管理サブドメイン (staff./admin.) 分離とクロスドメイン遷移は撤去した。
@@ -59,6 +61,21 @@ export default function Header() {
   const navigate = useNavigate();
   const pathname = useLocation().pathname;
   const queryClient = useQueryClient();
+  const [lastCircleDashboardPath, setLastCircleDashboardPath] = useState(() => {
+    try {
+      const saved = window.sessionStorage.getItem("fesflow:last-circle-dashboard-path");
+      return saved?.startsWith("/circle/dashboard") ? saved : "/circle/dashboard";
+    } catch {
+      return "/circle/dashboard";
+    }
+  });
+
+  useEffect(() => {
+    if (!pathname.startsWith("/circle/dashboard")) return;
+    // 2026-10-21: レジ・厨房から戻る時に、最後に使っていた管理画面を開く。
+    setLastCircleDashboardPath(pathname);
+    try { window.sessionStorage.setItem("fesflow:last-circle-dashboard-path", pathname); } catch { /* 保存不可ならトップへ戻る */ }
+  }, [pathname]);
   const { role, eventId, userName, circleName, isLoading, isAuthenticated, isEventAdmin, userEmail, membershipAuthorityError, retryAuthorization } =
     useAuth();
   const { data: spaces } = useMySpaces();
@@ -523,7 +540,7 @@ export default function Header() {
     ];
   } else if (isCircleView && (role === "circle_manager" || role === "circle_admin" || role === "circle_staff" || role === "super_admin" || role === "event_manager")) {
     links = [
-      { to: "/circle/dashboard", label: "ダッシュボード" },
+      { to: lastCircleDashboardPath, label: "ダッシュボード" },
       ...(hasPermission(role, "order:write", isEventAdmin) ? [{ to: "/circle/register", label: "レジ" }] : []),
       ...(hasPermission(role, "order:read", isEventAdmin) ? [{ to: "/circle/backyard", label: "厨房" }] : []),
     ];
@@ -630,6 +647,7 @@ export default function Header() {
             お知らせ・通知はありません
           </div>
         )}
+      <PushNotificationControl ownerType="staff" />
     </div>
   );
 
@@ -739,7 +757,16 @@ export default function Header() {
   );
 
   return (
-    <header data-app-header className="sticky top-0 z-50 bg-background border-b-thick border-border text-foreground font-mono">
+    <header data-app-header className="relative bg-background border-b-thick border-border pt-[env(safe-area-inset-top)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] text-foreground font-mono">
+      {/* 2026-10-21: モバイルナビの背後を暗くするスクリーン面は header の stacking context 外へ置く。 */}
+      {mobileNavOpen && createPortal(
+        <div
+          aria-hidden="true"
+          className="fixed inset-0 z-[40] bg-foreground/60 backdrop-blur-sm"
+          onClick={() => setActiveMenu(null)}
+        />,
+        document.body,
+      )}
       <div className="flex items-center justify-between px-2 sm:px-4 py-2 max-w-7xl mx-auto gap-2 sm:gap-4">
         <div className="flex min-w-0 shrink-0 items-center gap-1.5">
           {/* 2026-10-20: 共有ドロワーを使うシステム/サークル管理画面でも、狭い幅から開けるトリガーを表示する。 */}

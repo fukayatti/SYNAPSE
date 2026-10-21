@@ -30,6 +30,8 @@ export const menu = sqliteTable(
     allergens: text("allergens"),
     soldOut: integer("sold_out", { mode: "boolean" }).default(false).notNull(),
     stockQuantity: integer("stock_quantity").default(0).notNull(),
+    // 2026-10-21: カテゴリ内の表示順を保存し、来場者画面と管理画面で同じ順番を使う。
+    sortOrder: integer("sort_order").default(0).notNull(),
     // 2026-10-21: 注文履歴から参照される商品は物理削除せず、販売停止状態を保持する。
     isArchived: integer("is_archived", { mode: "boolean" }).default(false).notNull(),
     // 2026-09-27: 在庫は商品単位で明示的に有効化する。数量0を未管理と混同せず、

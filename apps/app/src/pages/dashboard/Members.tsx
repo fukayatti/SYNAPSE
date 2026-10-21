@@ -47,6 +47,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { useUnsavedChanges } from "@/components/UnsavedNavigationGuard";
+import { queryCachePolicy } from "@/lib/query-cache-policy";
 
 // 2026-10-08: 直接追加APIと同じく、ブラウザー標準の email 判定で誤入力を送信前に止める。
 function isValidEmailAddress(value: string): boolean {
@@ -122,6 +123,7 @@ function MembersContent() {
     queryKey: ["members", circleId],
     queryFn: () => membershipApi.listByCircle(circleId!),
     enabled: !!circleId,
+    ...queryCachePolicy.live,
   });
 
   const filteredMembers = (members ?? []).filter((member) =>
@@ -137,6 +139,7 @@ function MembersContent() {
     queryKey: ["inviteTokens", circleId],
     queryFn: () => membershipApi.listInvites(circleId!),
     enabled: !!circleId,
+    ...queryCachePolicy.credentials,
   });
 
   const { data: rolesData } = useQuery({
@@ -399,6 +402,11 @@ function MembersContent() {
     >
       {/* 2026-09-27: 固定幅の表をスクロール領域内に閉じ、ページ全体の横幅を押し広げない。 */}
       <div className="min-w-0 max-w-full space-y-6 font-mono">
+      {(membersError && members !== undefined) || (inviteTokensError && inviteTokens !== undefined) ? (
+        <p role="status" className="border-thick border-warning bg-warning/10 p-3 text-xs">
+          最新情報を取得できないため、前回取得した一覧を表示しています。
+        </p>
+      ) : null}
       {/* メンバー追加モーダル */}
       <Modal
         isOpen={showAddForm}
@@ -537,7 +545,7 @@ function MembersContent() {
           </CardTitle>
         </CardHeader>
         <CardContent className="min-w-0 max-w-full">
-          {inviteTokensError ? (
+          {inviteTokensError && inviteTokens === undefined ? (
             <ErrorState error={inviteTokensErrorObj} onRetry={() => refetchTokens()} />
           ) : inviteTokens && inviteTokens.length > 0 ? (
             <div className="space-y-3">
@@ -648,7 +656,7 @@ function MembersContent() {
           )}
         </CardHeader>
         <CardContent className="p-0">
-          {membersError ? (
+          {membersError && members === undefined ? (
             <ErrorState error={membersErrorObj} onRetry={() => refetchMembers()} />
           ) : members && members.length > 0 ? (
             <p className="p-4 text-xs text-muted-foreground">{members.length}人が登録されています。表で権限変更・停止・除名を行えます。</p>

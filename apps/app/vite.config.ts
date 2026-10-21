@@ -14,6 +14,8 @@ export default defineConfig({
 		outDir: "dist",
 		emptyOutDir: true,
 		chunkSizeWarningLimit: 2000,
+		// 2026-10-21: SWが初回導入時から全ルートのJS/CSSをオフライン利用できるよう、Viteの成果物一覧を出力する。
+		manifest: "pwa-assets-manifest.json",
 	},
 	resolve: {
 		alias: {

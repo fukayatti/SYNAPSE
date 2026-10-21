@@ -17,8 +17,9 @@ import {
   orderCommit,
   coupon,
   discount,
+  registerDisplaySession,
 } from "@fesflow/db";
-import { eq, and, or, desc, inArray, sql } from "drizzle-orm";
+import { eq, and, or, desc, inArray, sql, lte, gt, isNull, isNotNull } from "drizzle-orm";
 import { ulid } from "ulidx";
 import { hasPermission } from "../utils/auth";
 import { commitOrder, committedOrder, orderCommand } from "../services/order-commit";
@@ -26,8 +27,13 @@ import { updateOrderStatus } from "../services/order-status";
 import { validateToppingCategorySelection } from "../utils/topping-wizard";
 import { calculateDiscount } from "../utils/discount";
 import type { AppEnv } from "../types";
+import { registerDisplaySnapshotSchema } from "@fesflow/config/register-display-contract";
+import { notifyCircleLowStock, notifyVisitorOrderComplete } from "../services/web-push";
 
 const orderRoutes = new Hono<AppEnv>();
+
+// 2026-10-21: 在庫画面の既定警告ラインに合わせ、残り2点以下へ入った時に一度だけ知らせる。
+const LOW_STOCK_ALERT_THRESHOLD = 2;
 
 // 2026-07-05: 注文ステータスの許可された遷移表。
 // completed/cancelled は終端状態でありそこからの遷移は禁止する。
@@ -39,6 +45,142 @@ const ORDER_STATUS_TRANSITIONS: Record<string, string[]> = {
   completed: [],
   cancelled: [],
 };
+
+const createRegisterDisplaySchema = z.object({
+  circleId: z.string().min(1),
+  snapshot: registerDisplaySnapshotSchema,
+});
+const updateRegisterDisplaySchema = z.object({
+  snapshot: registerDisplaySnapshotSchema,
+  revision: z.number().int().min(1),
+});
+const REGISTER_DISPLAY_LIFETIME_MS = 12 * 60 * 60 * 1000;
+
+async function hashRegisterDisplayToken(token: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token));
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+async function getActiveRegisterDisplay(db: ReturnType<typeof import("@fesflow/db").createDb>, id: string) {
+  const rows = await db.select().from(registerDisplaySession).where(eq(registerDisplaySession.id, id)).limit(1);
+  const session = rows[0];
+  if (!session || session.revokedAt || session.expiresAt.getTime() <= Date.now()) return null;
+  return session;
+}
+
+// 2026-10-21: 顧客表示の共有は注文情報を絞った投影用APIに分け、会計・来場者情報を返さない。
+orderRoutes.get("/projector", async (c) => {
+  const circleId = c.req.query("circleId");
+  if (!circleId) apiError("BAD_REQUEST", "circleIdが必要です");
+  if (!(await hasPermission(c, circleId, "order:read"))) apiError("FORBIDDEN", "権限がありません");
+
+  const rows = await c.get("db").select({
+    orderNumber: order.orderNumber,
+    status: order.status,
+    receivedAt: order.receivedAt,
+    createdAt: order.createdAt,
+  }).from(order).where(and(
+    eq(order.circleId, circleId),
+    inArray(order.status, ["pending", "preparing", "ready", "completed"]),
+  )).orderBy(order.createdAt);
+  return c.json(rows);
+});
+
+// 2026-10-21: 表示リンクの秘密値はURL fragmentにだけ置き、WorkerのURLログへ残さない。
+orderRoutes.post("/register-displays", zBody(createRegisterDisplaySchema), async (c) => {
+  const db = c.get("db");
+  const { circleId, snapshot } = c.req.valid("json");
+  if (!(await hasPermission(c, circleId, "order:write"))) apiError("FORBIDDEN", "権限がありません");
+
+  const now = Date.now();
+  const id = ulid();
+  const random = crypto.getRandomValues(new Uint8Array(32));
+  const token = [...random].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  const expiresAt = now + REGISTER_DISPLAY_LIFETIME_MS;
+
+  // 期限切れ・終了済みセッションは新規作成時に回収し、端末ごとのカート履歴を残さない。
+  await db.delete(registerDisplaySession).where(or(
+    lte(registerDisplaySession.expiresAt, new Date(now)),
+    isNotNull(registerDisplaySession.revokedAt),
+  ));
+  await db.insert(registerDisplaySession).values({
+    id,
+    circleId,
+    tokenHash: await hashRegisterDisplayToken(token),
+    snapshot: JSON.stringify(snapshot),
+    revision: 1,
+    expiresAt: new Date(expiresAt),
+  });
+
+  return c.json({ id, token, revision: 1, expiresAt }, 201);
+});
+
+orderRoutes.put("/register-displays/:id/snapshot", zBody(updateRegisterDisplaySchema), async (c) => {
+  const db = c.get("db");
+  const session = await getActiveRegisterDisplay(db, c.req.param("id"));
+  if (!session) apiError("NOT_FOUND", "共有画面は終了しました");
+  if (!(await hasPermission(c, session.circleId, "order:write"))) apiError("FORBIDDEN", "権限がありません");
+
+  const { snapshot, revision } = c.req.valid("json");
+  const rows = await db.update(registerDisplaySession).set({
+    snapshot: JSON.stringify(snapshot),
+    revision,
+    updatedAt: new Date(),
+  }).where(and(
+    eq(registerDisplaySession.id, session.id),
+    lte(registerDisplaySession.revision, revision - 1),
+    isNull(registerDisplaySession.revokedAt),
+    gt(registerDisplaySession.expiresAt, new Date()),
+  )).returning({ id: registerDisplaySession.id });
+  if (rows.length === 0) {
+    const current = await getActiveRegisterDisplay(db, session.id);
+    if (!current || current.revision < revision) apiError("NOT_FOUND", "共有画面は終了しました");
+    // 2026-10-21: 遅れて届いた古いスナップショットは無視し、画面を巻き戻さない。
+  }
+  return c.json({ success: true });
+});
+
+orderRoutes.delete("/register-displays/:id", async (c) => {
+  const db = c.get("db");
+  const session = await getActiveRegisterDisplay(db, c.req.param("id"));
+  if (!session) return c.json({ success: true });
+  if (!(await hasPermission(c, session.circleId, "order:write"))) apiError("FORBIDDEN", "権限がありません");
+
+  await db.update(registerDisplaySession).set({ revokedAt: new Date() }).where(and(
+    eq(registerDisplaySession.id, session.id),
+    isNull(registerDisplaySession.revokedAt),
+  ));
+  return c.json({ success: true });
+});
+
+orderRoutes.get("/register-displays/:id/snapshot", async (c) => {
+  const id = c.req.param("id");
+  const authorization = c.req.header("Authorization") ?? "";
+  const token = /^Bearer\s+([a-f0-9]{64})$/i.exec(authorization)?.[1];
+  if (!token) apiError("NOT_FOUND", "共有画面は終了しました");
+
+  const session = await getActiveRegisterDisplay(c.get("db"), id);
+  const tokenHash = await hashRegisterDisplayToken(token);
+  if (!session || session.tokenHash !== tokenHash) apiError("NOT_FOUND", "共有画面は終了しました");
+
+  let stored: unknown;
+  try {
+    stored = JSON.parse(session.snapshot);
+  } catch {
+    apiError("NOT_FOUND", "共有画面は終了しました");
+  }
+  const snapshot = registerDisplaySnapshotSchema.safeParse(stored);
+  if (!snapshot.success) apiError("NOT_FOUND", "共有画面は終了しました");
+
+  c.header("Cache-Control", "private, no-store");
+  c.header("Referrer-Policy", "no-referrer");
+  return c.json({
+    snapshot: snapshot.data,
+    revision: session.revision,
+    updatedAt: session.updatedAt.getTime(),
+    expiresAt: session.expiresAt.getTime(),
+  });
+});
 
 // 注文一覧取得
 orderRoutes.get("/", async (c) => {
@@ -60,9 +202,13 @@ orderRoutes.get("/", async (c) => {
   const query = db
     .select()
     .from(order)
-    .where(status
-      ? and(eq(order.circleId, circleId), eq(order.status, status))
-      : eq(order.circleId, circleId))
+    .where(status === "received"
+      ? and(eq(order.circleId, circleId), inArray(order.status, ["ready", "completed"]), isNotNull(order.receivedAt))
+      : status === "pickup"
+        ? and(eq(order.circleId, circleId), inArray(order.status, ["ready", "completed"]), isNull(order.receivedAt))
+        : status
+          ? and(eq(order.circleId, circleId), eq(order.status, status))
+          : eq(order.circleId, circleId))
     .orderBy(desc(order.createdAt));
 
   const orders = await query;
@@ -197,6 +343,7 @@ orderRoutes.get("/user/:code", async (c) => {
     circleName: circles.find((ci) => ci.id === o.circleId)?.name ?? null,
     createdAt: o.createdAt,
     completedAt: o.completedAt,
+    receivedAt: o.receivedAt,
     estimatedTime: o.estimatedTime,
     items: items
       .filter((i) => i.orderId === o.id)
@@ -628,6 +775,11 @@ const handleCreateOrder = async (
         appliedDiscount = { ...appliedDiscount, discountApplied };
       }
 
+      // 2026-10-21: 端末に保存した注文の再送時は価格が変わっていないことを確かめ、差額を黙って確定しない。
+      if (source === "mobile" && input.expectedTotalPrice !== undefined && totalPrice !== input.expectedTotalPrice) {
+        apiError("CONFLICT", "メニュー価格が変更されています。最新の価格を確認してから注文し直してください");
+      }
+
       // 2026-10-03: 在庫減算は注文/明細と同じD1 batchで実施する。逐次補償は不要。
       // 支払い方法の解決 (2026-07-12): 明示指定を優先し、無ければサークルの対応方法が
       // ちょうど1つのときだけそれを補完する (単一方法はレジで選択させないため)。
@@ -657,6 +809,34 @@ const handleCreateOrder = async (
           }),
         })),
       });
+
+      // 2026-10-21: 在庫減算が確定した後だけ、少量在庫に入った商品のスタッフ通知を送る。
+      const lowStockItems = [
+        ...[...stockNeeded.entries()].flatMap(([menuId, quantity]) => {
+          const item = menus.find((row) => row.id === menuId);
+          if (!item || !item.inventoryEnabled || item.stockQuantity <= LOW_STOCK_ALERT_THRESHOLD) return [];
+          const remaining = item.stockQuantity - quantity;
+          return remaining <= LOW_STOCK_ALERT_THRESHOLD ? [{ name: item.name, remaining }] : [];
+        }),
+        ...[...toppingStockNeeded.entries()].flatMap(([toppingId, quantity]) => {
+          const item = toppings.find((row) => row.id === toppingId);
+          if (!item || item.stockQuantity <= LOW_STOCK_ALERT_THRESHOLD) return [];
+          const remaining = item.stockQuantity - quantity;
+          return remaining <= LOW_STOCK_ALERT_THRESHOLD ? [{ name: item.name, remaining }] : [];
+        }),
+      ];
+      if (lowStockItems.length > 0) {
+        c.executionCtx.waitUntil(notifyCircleLowStock(c.get("db"), c.env, input.circleId, lowStockItems)
+          .catch(() => console.warn("low_stock_notification_failed")));
+      }
+      if (orderFlowMode === "completed" && input.userId) {
+        c.executionCtx.waitUntil(notifyVisitorOrderComplete(c.get("db"), c.env, {
+          eventId,
+          visitorId: input.userId,
+          orderId: committed.id,
+          orderNumber: committed.orderNumber,
+        }).catch(() => console.warn("order_completion_notification_failed")));
+      }
       return c.json(committed satisfies CreateOrderResult, 201);
     } catch (error) {
       // Phase4: apiError/AppError による意図的な 4xx (NOT_FOUND/BAD_REQUEST/FORBIDDEN 等) を
@@ -694,6 +874,7 @@ orderRoutes.patch(
         id: order.id,
         circleId: order.circleId,
         userId: order.userId,
+        orderNumber: order.orderNumber,
         status: order.status,
         eventId: circle.eventId,
       })
@@ -730,6 +911,15 @@ orderRoutes.patch(
       apiError("CONFLICT", "他の操作で注文状態が更新されました。最新の状態を読み直してください");
     }
 
+    if (input.status === "completed" && targetOrder.userId && targetOrder.eventId) {
+      c.executionCtx.waitUntil(notifyVisitorOrderComplete(c.get("db"), c.env, {
+        eventId: targetOrder.eventId,
+        visitorId: targetOrder.userId,
+        orderId: targetOrder.id,
+        orderNumber: targetOrder.orderNumber,
+      }).catch(() => console.warn("order_completion_notification_failed")));
+    }
+
     return c.json({ success: true });
   }
 );
@@ -739,7 +929,14 @@ orderRoutes.post("/:id/complete", async (c) => {
   const db = c.get("db");
   const id = c.req.param("id");
 
-  const existingOrder = await db.select().from(order).where(eq(order.id, id));
+  const existingOrder = await db.select({
+    id: order.id,
+    circleId: order.circleId,
+    eventId: circle.eventId,
+    userId: order.userId,
+    orderNumber: order.orderNumber,
+    status: order.status,
+  }).from(order).leftJoin(circle, eq(circle.id, order.circleId)).where(eq(order.id, id));
   if (existingOrder.length === 0) apiError("NOT_FOUND", "見つかりません");
   
   const targetOrder = existingOrder[0]!;
@@ -753,6 +950,75 @@ orderRoutes.post("/:id/complete", async (c) => {
     .set({ status: "completed", completed: true, completedAt: new Date() })
     .where(eq(order.id, id));
 
+  if (targetOrder.status !== "completed" && targetOrder.userId && targetOrder.eventId) {
+    c.executionCtx.waitUntil(notifyVisitorOrderComplete(db, c.env, {
+      eventId: targetOrder.eventId,
+      visitorId: targetOrder.userId,
+      orderId: targetOrder.id,
+      orderNumber: targetOrder.orderNumber,
+    }).catch(() => console.warn("order_completion_notification_failed")));
+  }
+
+  return c.json({ success: true });
+});
+
+// 2026-10-21: 完成と受け渡しを別々に残し、受け取り待ちの注文だけを厨房で確定できるようにする。
+orderRoutes.post("/:id/received", async (c) => {
+  const db = c.get("db");
+  const id = c.req.param("id");
+  const rows = await db.select({
+    id: order.id,
+    circleId: order.circleId,
+    status: order.status,
+    receivedAt: order.receivedAt,
+  }).from(order).where(eq(order.id, id)).limit(1);
+  const target = rows[0];
+  if (!target) apiError("NOT_FOUND", "注文が見つかりません");
+  if (!(await hasPermission(c, target.circleId, "order:write"))) apiError("FORBIDDEN", "権限がありません");
+  if (target.receivedAt) return c.json({ success: true });
+  if (target.status !== "ready" && target.status !== "completed") apiError("CONFLICT", "完成した注文だけ受け渡し済みにできます");
+
+  const updated = await db.update(order).set({ receivedAt: new Date() }).where(and(
+    eq(order.id, id),
+    inArray(order.status, ["ready", "completed"]),
+    isNull(order.receivedAt),
+  )).returning({ id: order.id });
+  if (updated.length === 0) {
+    const latest = await db.select({ status: order.status, receivedAt: order.receivedAt }).from(order).where(eq(order.id, id)).limit(1);
+    if (!latest[0] || (latest[0].status !== "ready" && latest[0].status !== "completed") || !latest[0].receivedAt) {
+      apiError("CONFLICT", "注文の状態が更新されました。最新状態を読み直してください");
+    }
+  }
+  return c.json({ success: true });
+});
+
+// 2026-10-21: 来場者が自分の受け取り待ち注文だけを確定できるよう、匿名ベアラーIDと注文所有者を照合する。
+orderRoutes.post("/user/:code/:id/received", async (c) => {
+  const db = c.get("db");
+  const userId = c.req.param("code");
+  const id = c.req.param("id");
+  const rows = await db.select({
+    id: order.id,
+    userId: order.userId,
+    status: order.status,
+    receivedAt: order.receivedAt,
+  }).from(order).where(and(eq(order.id, id), eq(order.userId, userId))).limit(1);
+  const target = rows[0];
+  if (!target) apiError("NOT_FOUND", "注文が見つかりません");
+  if (target.receivedAt) return c.json({ success: true });
+  if (target.status !== "ready" && target.status !== "completed") apiError("CONFLICT", "受け取り可能な注文だけ確定できます");
+
+  const updated = await db.update(order).set({ receivedAt: new Date() }).where(and(
+    eq(order.id, id),
+    eq(order.userId, userId),
+    inArray(order.status, ["ready", "completed"]),
+    isNull(order.receivedAt),
+  )).returning({ id: order.id });
+  if (updated.length === 0) {
+    const latest = await db.select({ status: order.status, receivedAt: order.receivedAt }).from(order)
+      .where(and(eq(order.id, id), eq(order.userId, userId))).limit(1);
+    if (!latest[0] || !latest[0].receivedAt) apiError("CONFLICT", "注文の状態が更新されました。最新状態を読み直してください");
+  }
   return c.json({ success: true });
 });
 

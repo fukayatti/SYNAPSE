@@ -16,6 +16,8 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { toast } from "sonner";
 import { AlertTriangle, Package, Search, Plus, Minus, XCircle, RotateCcw, Coins } from "lucide-react";
 import { resolveAssetUrl } from "@/lib/asset-url";
+import { useSessionState } from "@/hooks/useSessionState";
+import { queryCachePolicy } from "@/lib/query-cache-policy";
 
 const DEFAULT_LOW = 10;
 
@@ -81,8 +83,9 @@ function StockManagementContent() {
   const circleName = authCircleName ?? "サークルダッシュボード";
   const queryClient = useQueryClient();
 
-  const [search, setSearch] = useState("");
-  const [onlyIssues, setOnlyIssues] = useState(false);
+  // 2026-10-21: 在庫画面を離れても検索と要対応フィルターを保持する。
+  const [search, setSearch] = useSessionState<string>(`fesflow:stock-search:${circleId}`, "");
+  const [onlyIssues, setOnlyIssues] = useSessionState<boolean>(`fesflow:stock-issues:${circleId}`, false);
   // 僅少しきい値。サークル設定は circle:write が必要でスタッフが変更できないため、端末(localStorage)に保存する。
   const [lowThreshold, setLowThreshold] = useState<number>(DEFAULT_LOW);
 
@@ -99,16 +102,19 @@ function StockManagementContent() {
   };
 
   const { data: menus, isLoading, isError, error, refetch } = useQuery({
-    queryKey: ["menus", circleId],
+    // 2026-10-21: メニュー管理と在庫管理で同じ権限範囲のカタログだけ共有する。
+    queryKey: ["menus", circleId, false],
     queryFn: () => menuApi.list(circleId),
     enabled: !!circleId,
+    ...queryCachePolicy.catalog,
   });
 
   // トッピング在庫も同じ画面で管理する (2026-07-15)
   const { data: toppings } = useQuery({
-    queryKey: ["toppings", circleId],
+    queryKey: ["toppings", circleId, false],
     queryFn: () => toppingApi.list(circleId),
     enabled: !!circleId,
+    ...queryCachePolicy.catalog,
   });
 
   const updateToppingStock = useMutation({
@@ -242,7 +248,7 @@ function StockManagementContent() {
       </DashboardLayout>
     );
   }
-  if (isError) {
+  if (isError && menus === undefined) {
     return (
       <DashboardLayout title={circleName} subtitle="在庫管理" type="circle">
         <ErrorState error={error} onRetry={() => refetch()} />
@@ -253,6 +259,7 @@ function StockManagementContent() {
   return (
     <DashboardLayout title={circleName} subtitle="在庫管理" type="circle">
       <div className="space-y-5 font-mono text-foreground">
+        {isError && <p role="status" className="border-thick border-warning bg-warning/10 p-3 text-xs">最新の在庫を取得できません。前回取得した内容を表示しています。</p>}
         {/* サマリ */}
         <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
           {[
@@ -292,12 +299,14 @@ function StockManagementContent() {
           <div className="flex items-center gap-1.5 border-thick border-border px-2 h-9 shrink-0">
             <AlertTriangle className="h-3.5 w-3.5 text-warning" />
             <span className="text-[10px] uppercase text-muted-foreground">僅少≤</span>
-            <input
+            {/* 2026-10-21: しきい値も共通数値欄に揃え、空欄のまま値を打ち直せるようにする。 */}
+            <Input
               type="number"
+              inputMode="numeric"
               min={0}
               value={lowThreshold}
               onChange={(e) => updateThreshold(Number(e.target.value))}
-              className="w-12 bg-transparent text-xs text-center focus:outline-none tabular-nums"
+              className="w-12 border-0 bg-transparent px-0 py-0 text-xs text-center focus-visible:border-0 focus:outline-none tabular-nums"
             />
           </div>
         </div>
