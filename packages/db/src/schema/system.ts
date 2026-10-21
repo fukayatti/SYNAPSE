@@ -97,6 +97,8 @@ export const announcement = sqliteTable(
     // 表示レベル: info | warning | critical
     level: text("level").notNull().default("info"),
     published: integer("published", { mode: "boolean" }).notNull().default(false),
+    // 2026-10-21: 公開後も受信者通知の根拠になるため、削除操作では公開を止めて行を保持する。
+    deletedAt: integer("deleted_at", { mode: "timestamp_ms" }),
     createdAt: integer("created_at", { mode: "timestamp_ms" })
       .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
       .notNull(),

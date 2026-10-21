@@ -144,6 +144,7 @@ circleRoutes.get("/:id/analytics", async (c) => {
     .where(and(
       eq(circleVisit.circleId, circleId),
       isNotNull(eventUser.onboardedAt),
+      isNull(circleVisit.deletedAt),
       gte(circleVisit.createdAt, eventUser.onboardedAt),
     ));
   const menus = await db.select({ id: menu.id }).from(menu).where(eq(menu.circleId, circleId));

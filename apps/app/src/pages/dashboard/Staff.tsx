@@ -29,6 +29,7 @@ import {
   User,
   Users,
   Search,
+  RotateCcw,
 } from "lucide-react";
 
 // スタッフモーダルとカスタムダイアログ
@@ -47,6 +48,7 @@ function StaffManagementContent() {
   const [isStaffModalOpen, setIsStaffModalOpen] = useState(false);
   const [isStaffTableOpen, setIsStaffTableOpen] = useState(false);
   const [staffSearch, setStaffSearch] = useState("");
+  const [showDeletedStaff, setShowDeletedStaff] = useState(false);
   const [selectedStaff, setSelectedStaff] = useState<Staff | null>(null);
 
   // 削除確認用ステート
@@ -59,10 +61,12 @@ function StaffManagementContent() {
     error,
     refetch,
   } = useQuery({
-    queryKey: ["staff", circleId],
-    queryFn: () => staffApi.list(circleId!),
+    queryKey: ["staff", circleId, showDeletedStaff],
+    queryFn: () => staffApi.list(circleId!, showDeletedStaff),
     enabled: !!circleId,
     ...queryCachePolicy.live,
+    // 2026-10-21: アーカイブ一覧へ切り替える時も表を閉じず、取得中は直前の行を残す。
+    placeholderData: (previous) => previous,
   });
 
   // スタッフ削除
@@ -70,11 +74,23 @@ function StaffManagementContent() {
   const handleOpenDelete = (staff: Staff) =>
     undoableDelete<Staff>({
       queryClient,
-      queryKey: ["staff", circleId],
+      queryKey: ["staff", circleId, showDeletedStaff],
       id: staff.id,
-      message: `スタッフ「${staff.name}」を削除しました`,
-      commit: () => staffApi.delete(staff.id),
+      message: `スタッフ「${staff.name}」を利用停止にしました`,
+      commit: async () => {
+        await staffApi.delete(staff.id);
+        await queryClient.invalidateQueries({ queryKey: ["staff", circleId] });
+      },
     });
+
+  const restoreStaff = useMutation({
+    mutationFn: (id: string) => staffApi.restore(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["staff", circleId] });
+      toast.success("スタッフを名簿へ戻しました");
+    },
+    onError: (e: any) => toast.error(e.message || "復元に失敗しました"),
+  });
 
   const handleOpenAdd = () => {
     setSelectedStaff(null);
@@ -87,7 +103,9 @@ function StaffManagementContent() {
     setIsStaffModalOpen(true);
   };
 
+  // 2026-10-21: 「削除済みを表示」はアクティブ名簿と混ぜず、復元対象だけに絞る。
   const filteredStaff = (staffList ?? []).filter((staff) =>
+    (showDeletedStaff ? Boolean(staff.deletedAt) : !staff.deletedAt) &&
     staff.name.toLocaleLowerCase().includes(staffSearch.trim().toLocaleLowerCase())
   );
 
@@ -135,11 +153,9 @@ function StaffManagementContent() {
               <User className="h-4 w-4" />
               スタッフ一覧 ({staffList?.length || 0})
             </CardTitle>
-            {staffList && staffList.length > 0 && (
-              <Button variant="outline" onClick={() => setIsStaffTableOpen(true)} className="rounded-none border-thick border-border text-xs">
-                一覧を開く
-              </Button>
-            )}
+            <Button variant="outline" onClick={() => setIsStaffTableOpen(true)} className="rounded-none border-thick border-border text-xs">
+              一覧を開く
+            </Button>
           </CardHeader>
           <CardContent className="p-0">
             {staffList && staffList.length > 0 ? (
@@ -163,22 +179,40 @@ function StaffManagementContent() {
 
       {/* 2026-09-27: 長いスタッフ一覧は独立した表モーダルに収め、ページの縦長化を防ぐ。 */}
       <Modal isOpen={isStaffTableOpen} onClose={() => setIsStaffTableOpen(false)} title="[登録スタッフ一覧]" subtitle={`${staffList?.length ?? 0}人`} maxWidth="xl">
-        <div className="relative">
-          <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-          <Input aria-label="スタッフを検索" value={staffSearch} onChange={(e) => setStaffSearch(e.target.value)} placeholder="スタッフ名で検索" className="pl-9 rounded-none border-thick border-border" />
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <div className="relative min-w-0 flex-1">
+            <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+            <Input aria-label="スタッフを検索" value={staffSearch} onChange={(e) => setStaffSearch(e.target.value)} placeholder="スタッフ名で検索" className="pl-9 rounded-none border-thick border-border" />
+          </div>
+          {/* 2026-10-21: 削除済み名簿を参照・復元できるよう、履歴の切替を一覧内に置く。 */}
+          <PermissionGuard permission="staff:delete">
+            <Button variant="outline" onClick={() => setShowDeletedStaff((value) => !value)} className="shrink-0 text-xs">
+              {showDeletedStaff ? "削除済みを隠す" : "削除済みを表示"}
+            </Button>
+          </PermissionGuard>
         </div>
         <div className="max-h-[55vh] overflow-auto border-thick border-border">
           <table className="w-full text-xs text-left font-mono">
             <thead className="sticky top-0 bg-background"><tr className="border-b-thick border-border"><th className="p-3">スタッフ名</th><th className="p-3 text-right">操作</th></tr></thead>
             <tbody>
               {filteredStaff.map((staff) => (
-                <tr key={staff.id} className="border-b-thin border-border">
-                  <td className="p-3 font-bold">{staff.name}</td>
+                <tr key={staff.id} className={`border-b-thin border-border ${staff.deletedAt ? "bg-muted text-muted-foreground" : ""}`}>
+                  <td className="p-3 font-bold break-words">{staff.name}{staff.deletedAt && <span className="ml-2 inline-block text-[10px] text-destructive">利用停止中</span>}</td>
                   <td className="p-3 text-right">
-                    <PermissionGuard permission="staff:write"><span className="inline-flex gap-1">
-                      <Button aria-label={`${staff.name}を編集`} variant="ghost" size="icon" onClick={() => handleOpenEdit(staff)} className="h-8 w-8 rounded-none border-thick border-transparent hover:border-border"><Edit className="h-4 w-4" /></Button>
-                      <PermissionGuard permission="staff:delete"><Button aria-label={`${staff.name}を削除`} variant="ghost" size="icon" onClick={() => handleOpenDelete(staff)} className="h-8 w-8 rounded-none border-thick border-transparent text-destructive"><Trash2 className="h-4 w-4" /></Button></PermissionGuard>
-                    </span></PermissionGuard>
+                    {staff.deletedAt ? (
+                      <PermissionGuard permission="staff:delete">
+                        <Button aria-label={`${staff.name}を復元`} variant="outline" size="sm" onClick={() => restoreStaff.mutate(staff.id)} disabled={restoreStaff.isPending}>
+                          <RotateCcw className="mr-1 h-3.5 w-3.5" />復元
+                        </Button>
+                      </PermissionGuard>
+                    ) : <span className="inline-flex gap-1">
+                      <PermissionGuard permission="staff:write">
+                        <Button aria-label={`${staff.name}を編集`} variant="ghost" size="icon" onClick={() => handleOpenEdit(staff)} className="h-8 w-8 rounded-none border-thick border-transparent hover:border-border"><Edit className="h-4 w-4" /></Button>
+                      </PermissionGuard>
+                      <PermissionGuard permission="staff:delete">
+                        <Button aria-label={`${staff.name}を利用停止`} variant="ghost" size="icon" onClick={() => handleOpenDelete(staff)} className="h-8 w-8 rounded-none border-thick border-transparent text-destructive"><Trash2 className="h-4 w-4" /></Button>
+                      </PermissionGuard>
+                    </span>}
                   </td>
                 </tr>
               ))}

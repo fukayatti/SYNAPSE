@@ -90,7 +90,7 @@ systemRoutes.get("/announcements", async (c) => {
   const rows = await db
     .select()
     .from(announcement)
-    .where(eq(announcement.published, true))
+    .where(and(eq(announcement.published, true), isNull(announcement.deletedAt)))
     .orderBy(desc(announcement.createdAt));
   return c.json(
     rows.map((r) => ({
@@ -272,12 +272,14 @@ adminRoutes.patch(
     const db = c.get("db");
     const id = c.req.param("id");
     const input = c.req.valid("json");
-    const existingRows = await db.select().from(announcement).where(eq(announcement.id, id)).limit(1);
+    const existingRows = await db.select().from(announcement).where(and(
+      eq(announcement.id, id), isNull(announcement.deletedAt),
+    )).limit(1);
     const previous = existingRows[0];
     await db
       .update(announcement)
       .set({ ...input, updatedAt: new Date() })
-      .where(eq(announcement.id, id));
+      .where(and(eq(announcement.id, id), isNull(announcement.deletedAt)));
     if (previous && !previous.published && input.published === true) {
       c.executionCtx.waitUntil(notifyPublishedSystemAnnouncement(db, c.env, {
         id,
@@ -292,7 +294,18 @@ adminRoutes.patch(
 adminRoutes.delete("/announcements/:id", async (c) => {
   const db = c.get("db");
   const id = c.req.param("id");
-  await db.delete(announcement).where(eq(announcement.id, id));
+  // 2026-10-21: 配信根拠を残し、アーカイブ時は以後の公開だけ停止する。
+  await db.update(announcement).set({ published: false, deletedAt: new Date(), updatedAt: new Date() })
+    .where(and(eq(announcement.id, id), isNull(announcement.deletedAt)));
+  return c.json({ success: true });
+});
+
+// 2026-10-21: 復元しても自動で再公開しない。運営者が内容を確認してから公開を選ぶ。
+adminRoutes.post("/announcements/:id/restore", async (c) => {
+  const db = c.get("db");
+  const id = c.req.param("id");
+  await db.update(announcement).set({ deletedAt: null, published: false, updatedAt: new Date() })
+    .where(and(eq(announcement.id, id), isNotNull(announcement.deletedAt)));
   return c.json({ success: true });
 });
 
@@ -549,6 +562,7 @@ adminRoutes.get("/events", async (c) => {
       lastPaidAt: sql<number>`max(${contractPayment.paidAt})`,
     })
     .from(contractPayment)
+    .where(isNull(contractPayment.voidedAt))
     .groupBy(contractPayment.eventId);
   const paid = new Map(paidRows.map((r) => [r.eventId, r]));
 
@@ -709,11 +723,14 @@ adminRoutes.post(
   },
 );
 
-// 入金記録の削除 (誤登録の訂正用)。
+// 入金記録の訂正。金額台帳から行を消さず、訂正扱いとして合計から外す。
 adminRoutes.delete("/payments/:paymentId", async (c) => {
   const db = c.get("db");
   const paymentId = c.req.param("paymentId");
-  await db.delete(contractPayment).where(eq(contractPayment.id, paymentId));
+  await db.update(contractPayment).set({
+    voidedAt: new Date(),
+    voidedBy: c.get("adminEmail"),
+  }).where(and(eq(contractPayment.id, paymentId), isNull(contractPayment.voidedAt)));
   return c.json({ success: true });
 });
 

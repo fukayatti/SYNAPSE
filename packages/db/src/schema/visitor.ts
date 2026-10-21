@@ -164,6 +164,8 @@ export const circleVisit = sqliteTable(
       .notNull()
       .references(() => circle.id, { onDelete: "cascade" }),
     staffId: text("staff_id"), // 対応スタッフ (任意)
+    // 2026-10-21: 来訪実績はレビュー資格と店舗統計に使うため、管理画面の削除は論理削除にする。
+    deletedAt: integer("deleted_at", { mode: "timestamp_ms" }),
     createdAt: integer("created_at", { mode: "timestamp_ms" })
       .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
       .notNull(),

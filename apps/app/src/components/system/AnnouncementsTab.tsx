@@ -18,7 +18,7 @@ import { OptionCard } from "@/components/ui/OptionCard";
 import { undoableDelete } from "@/lib/toast-undo";
 import { toast } from "sonner";
 import { useUnsavedChanges } from "@/components/UnsavedNavigationGuard";
-import { Megaphone, Plus, Trash2, Info, AlertTriangle, OctagonAlert, Save } from "lucide-react";
+import { Megaphone, Plus, Archive, Info, AlertTriangle, OctagonAlert, Save, RotateCcw } from "lucide-react";
 
 const LEVELS: { value: AnnouncementLevel; label: string; description: string; icon: any }[] = [
   { value: "info", label: "お知らせ", description: "通常の案内", icon: Info },
@@ -38,6 +38,7 @@ export function AnnouncementsTab() {
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState<null | { id?: string; data: AnnouncementInput }>(null);
   const [editingSnapshot, setEditingSnapshot] = useState<AnnouncementInput | null>(null);
+  const [showDeleted, setShowDeleted] = useState(false);
 
   const openCreate = () => {
     const data = { ...EMPTY };
@@ -96,12 +97,22 @@ export function AnnouncementsTab() {
       queryClient,
       queryKey: ["adminAnnouncements"],
       id: a.id,
-      message: `「${a.title}」を削除しました`,
+      message: `「${a.title}」を非表示にしました`,
       commit: async () => {
         await adminApi.deleteAnnouncement(a.id);
+        await queryClient.invalidateQueries({ queryKey: ["adminAnnouncements"] });
         queryClient.invalidateQueries({ queryKey: ["publicAnnouncements"] });
       },
     });
+
+  const restoreM = useMutation({
+    mutationFn: (id: string) => adminApi.restoreAnnouncement(id),
+    onSuccess: () => {
+      invalidate();
+      toast.success("お知らせを復元しました。公開は停止中です");
+    },
+    onError: (e: any) => toast.error(e.message || "復元に失敗しました"),
+  });
 
   const togglePublish = (a: AdminAnnouncement) =>
     updateM.mutate({ id: a.id, data: { published: !a.published } });
@@ -115,6 +126,11 @@ export function AnnouncementsTab() {
     if (editing.id) updateM.mutate({ id: editing.id, data: editing.data });
     else createM.mutate(editing.data);
   };
+
+  // 2026-10-21: アーカイブ切替時は復元対象だけを表示し、通常一覧と混在させない。
+  const visibleList = (list ?? []).filter((announcement) =>
+    showDeleted ? Boolean(announcement.deletedAt) : !announcement.deletedAt
+  );
 
   // 2026-10-16: システムお知らせの作成/編集も、離脱確認内の保存ボタンから同じAPIへ送る。
   useUnsavedChanges({
@@ -130,18 +146,24 @@ export function AnnouncementsTab() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between gap-2 border-b-thick border-border pb-3">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b-thick border-border pb-3">
         <h2 className="text-sm font-bold uppercase tracking-wider flex items-center gap-2">
           <Megaphone className="h-4 w-4" />
-          お知らせ管理 {list ? `(${list.length})` : ""}
+          お知らせ管理 {list ? `(${list.filter((announcement) => !announcement.deletedAt).length})` : ""}
         </h2>
-        <Button
-          onClick={openCreate}
-          className="rounded-none border-thick border-primary bg-primary text-primary-foreground hover:bg-background hover:text-foreground h-8 text-[11px] uppercase font-bold shadow-none px-3"
-        >
-          <Plus className="mr-1.5 h-3.5 w-3.5" />
-          新規作成
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          {/* 2026-10-21: アーカイブ済みの通知文面も管理者が復元できるよう一覧表示を切り替える。 */}
+          <Button variant="outline" onClick={() => setShowDeleted((value) => !value)} className="h-8 text-[11px]">
+            {showDeleted ? "削除済みを隠す" : "削除済みを表示"}
+          </Button>
+          <Button
+            onClick={openCreate}
+            className="rounded-none border-thick border-primary bg-primary text-primary-foreground hover:bg-background hover:text-foreground h-8 text-[11px] uppercase font-bold shadow-none px-3"
+          >
+            <Plus className="mr-1.5 h-3.5 w-3.5" />
+            新規作成
+          </Button>
+        </div>
       </div>
 
       {/* 作成/編集フォーム (2026-07-16: 常設インライン入力 → ポップアップ(モーダル)化。
@@ -172,9 +194,9 @@ export function AnnouncementsTab() {
         </div>
       ) : isError ? (
         <ErrorState error={error} onRetry={() => refetch()} />
-      ) : list && list.length > 0 ? (
+      ) : visibleList.length > 0 ? (
         <div className="space-y-3">
-          {list.map((a) => (
+          {visibleList.map((a) => (
             <div key={a.id} className="border-thick border-border p-3 bg-background space-y-2">
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0 space-y-1">
@@ -184,7 +206,8 @@ export function AnnouncementsTab() {
                     >
                       {LEVELS.find((l) => l.value === a.level)?.label || a.level}
                     </span>
-                    <span className="text-sm font-bold truncate">{a.title}</span>
+                    <span className="min-w-0 break-words text-sm font-bold">{a.title}</span>
+                    {a.deletedAt && <span className="shrink-0 text-[10px] font-bold text-destructive">削除済み</span>}
                   </div>
                   {a.body && (
                     <p className="text-[11px] text-muted-foreground leading-relaxed line-clamp-2">
@@ -193,28 +216,35 @@ export function AnnouncementsTab() {
                   )}
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
-                  <div className="flex flex-col items-center gap-0.5">
-                    <ToggleSwitch
-                      checked={a.published}
-                      onChange={() => togglePublish(a)}
-                      label="公開切替"
-                    />
-                    <span className="text-[8px] font-black uppercase text-muted-foreground">
-                      {a.published ? "公開中" : "下書き"}
-                    </span>
-                  </div>
-                  <Button
-                    onClick={() => openEdit(a)}
-                    className="rounded-none border-thick border-border h-8 text-[10px] uppercase font-bold px-2 bg-background text-foreground hover:bg-primary hover:text-primary-foreground shadow-none"
-                  >
-                    編集
-                  </Button>
-                  <Button
-                    onClick={() => handleDelete(a)}
-                    className="rounded-none border-thick border-border h-8 text-destructive hover:bg-destructive hover:text-destructive-foreground px-2 bg-background shadow-none"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </Button>
+                  {a.deletedAt ? (
+                    <Button variant="outline" onClick={() => restoreM.mutate(a.id)} disabled={restoreM.isPending} className="h-8 text-[10px]">
+                      <RotateCcw className="mr-1 h-3.5 w-3.5" />復元
+                    </Button>
+                  ) : <>
+                    <div className="flex flex-col items-center gap-0.5">
+                      <ToggleSwitch
+                        checked={a.published}
+                        onChange={() => togglePublish(a)}
+                        label="公開切替"
+                      />
+                      <span className="text-[8px] font-black uppercase text-muted-foreground">
+                        {a.published ? "公開中" : "下書き"}
+                      </span>
+                    </div>
+                    <Button
+                      onClick={() => openEdit(a)}
+                      className="rounded-none border-thick border-border h-8 text-[10px] uppercase font-bold px-2 bg-background text-foreground hover:bg-primary hover:text-primary-foreground shadow-none"
+                    >
+                      編集
+                    </Button>
+                    <Button
+                      onClick={() => handleDelete(a)}
+                      aria-label={`${a.title}を非表示にする`}
+                      className="rounded-none border-thick border-border h-8 text-destructive hover:bg-destructive hover:text-destructive-foreground px-2 bg-background shadow-none"
+                    >
+                      <Archive className="h-3.5 w-3.5" />
+                    </Button>
+                  </>}
                 </div>
               </div>
             </div>
@@ -223,9 +253,9 @@ export function AnnouncementsTab() {
       ) : (
         <EmptyState
           icon={Megaphone}
-          message="お知らせがありません"
-          actionLabel="新規作成"
-          onAction={openCreate}
+          message={showDeleted ? "削除済みのお知らせがありません" : "お知らせがありません"}
+          actionLabel={showDeleted ? undefined : "新規作成"}
+          onAction={showDeleted ? undefined : openCreate}
         />
       )}
 

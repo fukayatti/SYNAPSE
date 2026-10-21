@@ -146,7 +146,7 @@ reviewRoutes.get("/visitor/:code", async (c) => {
   const userId = visitor.id;
 
   const visits = await db.select({ circleId: circleVisit.circleId })
-    .from(circleVisit).where(eq(circleVisit.eventUserId, userId));
+    .from(circleVisit).where(and(eq(circleVisit.eventUserId, userId), isNull(circleVisit.deletedAt)));
   // 2026-09-27: circle_visit は現状の本番コードで書き込まれていないため、受取/決済完了の注文も利用履歴とする。
   const completedOrders = await db.select({ circleId: order.circleId }).from(order).where(and(
     eq(order.userId, userId), ne(order.status, "cancelled"), or(eq(order.status, "completed"), eq(order.completed, true)),
@@ -214,7 +214,7 @@ reviewRoutes.post("/visitor/:code", zBody(z.object({
 
   // 2026-09-27: 体験ログまたは受取/決済完了注文をサーバで照合し、クライアントの自己申告で投稿資格を与えない。
   const visits = await db.select({ id: circleVisit.id }).from(circleVisit).where(and(
-    eq(circleVisit.eventUserId, userId), eq(circleVisit.circleId, circleId),
+    eq(circleVisit.eventUserId, userId), eq(circleVisit.circleId, circleId), isNull(circleVisit.deletedAt),
   ));
   const completedOrders = await db.select({ id: order.id }).from(order).where(and(
     eq(order.userId, userId), eq(order.circleId, circleId), ne(order.status, "cancelled"), or(eq(order.status, "completed"), eq(order.completed, true)),

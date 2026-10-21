@@ -137,7 +137,8 @@ function toDraft(data: VisitorAdminEditorData): EditorDraft {
       draftKey: visit.id,
       id: visit.id,
       isNew: false,
-      isDeleted: false,
+      // 2026-10-21: 削除済みの利用実績も編集画面から戻せるよう、保存状態を読み込む。
+      isDeleted: visit.deletedAt !== null,
       circleId: visit.circleId,
       staffId: visit.staffId ?? "",
       createdAt: toLocalDateTime(visit.createdAt),
@@ -575,9 +576,9 @@ export function VisitorRecordEditor({
               {draft.circleVisits.map((visit, index) => (
                 <section key={visit.draftKey} className={`space-y-3 border-thick p-3 sm:p-4 ${visit.isDeleted ? "border-error bg-error/5 opacity-70" : "border-border"}`}>
                   <div className="flex items-center justify-between gap-3">
-                    <h4 className="text-xs font-bold">{visit.isNew ? "新しい利用実績" : `利用実績 ${index + 1}`}{visit.isDeleted && "（保存時に削除）"}</h4>
-                    {!visit.isDeleted && <Button type="button" variant="outline" onClick={() => removeVisit(index)} className="h-9 border-thick border-error text-xs text-error"><Trash2 className="mr-1 h-3.5 w-3.5" />削除</Button>}
-                    {visit.isDeleted && <Button type="button" variant="outline" onClick={() => editVisit(index, { isDeleted: false })} className="h-9 border-thick border-border text-xs">取り消す</Button>}
+                    <h4 className="text-xs font-bold">{visit.isNew ? "新しい利用実績" : `利用実績 ${index + 1}`}{visit.isDeleted && "（履歴を無効化）"}</h4>
+                    {!visit.isDeleted && <Button type="button" variant="outline" onClick={() => removeVisit(index)} className="h-9 border-thick border-error text-xs text-error"><Trash2 className="mr-1 h-3.5 w-3.5" />利用履歴を無効化</Button>}
+                    {visit.isDeleted && <Button type="button" variant="outline" onClick={() => editVisit(index, { isDeleted: false })} className="h-9 border-thick border-border text-xs">履歴を復元</Button>}
                   </div>
                   {!visit.isDeleted && (
                     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">

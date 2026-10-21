@@ -120,6 +120,9 @@ export const contractPayment = sqliteTable(
     paidAt: integer("paid_at", { mode: "timestamp_ms" }).notNull(), // 入金日
     note: text("note"), // 備考(振込人名義など)
     recordedBy: text("recorded_by"), // 記録した運営のメール
+    // 2026-10-21: 誤登録は台帳から消さず訂正済みとして残し、契約入金の合計から除外する。
+    voidedAt: integer("voided_at", { mode: "timestamp_ms" }),
+    voidedBy: text("voided_by"),
     createdAt: integer("created_at", { mode: "timestamp_ms" })
       .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
       .notNull(),
@@ -183,7 +186,7 @@ export const circle = sqliteTable(
 //   - 将来 notification 側に保持期間クリーンアップ(古い既読分の削除)を入れると、
 //     復元元のデータごと履歴が消えてしまう。
 //   そのため「いつ・誰が・何件に送ったか」を独立して保持する専用テーブルを新設する。
-// 削除は履歴ログの削除のみを意味し、配信済みの notification(受信者側)は取り消さない
+// アーカイブは運営履歴一覧から隠すだけで、配信済みの notification(受信者側)は取り消さない
 // (受信者ごとに独立した記録のため、送信取り消しの概念を持たせない設計とした)。
 export const eventAnnouncement = sqliteTable(
   "event_announcement",
@@ -196,6 +199,8 @@ export const eventAnnouncement = sqliteTable(
     message: text("message").notNull(),
     senderEmail: text("sender_email").notNull(), // 送信した event_manager 等のメール
     recipientCount: integer("recipient_count").notNull().default(0), // 送信時点で通知を作成した件数
+    // 2026-10-21: 送信済み通知とは別に運営用の送信履歴を残し、一覧からは論理削除で隠す。
+    deletedAt: integer("deleted_at", { mode: "timestamp_ms" }),
     createdAt: integer("created_at", { mode: "timestamp_ms" })
       .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
       .notNull(),
@@ -217,6 +222,8 @@ export const staff = sqliteTable(
       .notNull()
       .references(() => circle.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
+    // 2026-10-21: 訪問・整理券・景品交換のスタッフ参照を切らず、名簿からのみ利用停止にする。
+    deletedAt: integer("deleted_at", { mode: "timestamp_ms" }),
     createdAt: integer("created_at", { mode: "timestamp_ms" })
       .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
       .notNull(),

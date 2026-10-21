@@ -54,6 +54,7 @@ lotteryRoutes.get("/", async (c) => {
 
   const allPrizes = await db.select().from(lotteryPrize).where(eq(lotteryPrize.lotteryId, lot.id));
   const prizes = allPrizes.filter((prize: any) => !prize.isArchived);
+  const archivedPrizes = allPrizes.filter((prize: any) => prize.isArchived);
   const entries = await db.select().from(lotteryEntry).where(eq(lotteryEntry.lotteryId, lot.id));
   const winners = await db.select().from(lotteryWinner).where(eq(lotteryWinner.lotteryId, lot.id));
 
@@ -68,6 +69,7 @@ lotteryRoutes.get("/", async (c) => {
   return c.json({
     lottery: { ...lot, entryConfig: JSON.parse(lot.entryConfig) },
     prizes,
+    archivedPrizes,
     entryCount: entries.length,
     winners: winners.map((w: any) => ({
       id: w.id,
@@ -146,6 +148,23 @@ lotteryRoutes.delete("/:id/prizes/:prizeId", async (c) => {
   await db.update(lotteryPrize)
     .set({ isArchived: true })
     .where(and(eq(lotteryPrize.id, prizeId), eq(lotteryPrize.lotteryId, id)));
+  return c.json({ success: true });
+});
+
+// 2026-10-21: 抽選候補から外した景品も、抽選実行前なら運営が候補へ戻せる。
+lotteryRoutes.post("/:id/prizes/:prizeId/restore", async (c) => {
+  const db = c.get("db");
+  const id = c.req.param("id");
+  const prizeId = c.req.param("prizeId");
+  const [lot] = await db.select().from(lottery).where(eq(lottery.id, id));
+  if (!lot) apiError("NOT_FOUND", "抽選が見つかりません");
+  if (!(await hasPermission(c, null, "event:write", lot.eventId))) {
+    apiError("FORBIDDEN", "抽選を編集する権限がありません");
+  }
+  if (lot.status === "drawn") apiError("CONFLICT", "抽選後は景品候補を変更できません");
+  await db.update(lotteryPrize).set({ isArchived: false }).where(and(
+    eq(lotteryPrize.id, prizeId), eq(lotteryPrize.lotteryId, id),
+  ));
   return c.json({ success: true });
 });
 

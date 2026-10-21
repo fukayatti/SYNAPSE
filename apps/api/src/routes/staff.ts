@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import { staff } from "@fesflow/db";
-import { eq } from "drizzle-orm";
+import { and, eq, isNotNull, isNull } from "drizzle-orm";
 import { ulid } from "ulidx";
 import { hasPermission } from "../utils/auth";
 import { apiError } from "../http-error";
@@ -23,11 +23,15 @@ staffRoutes.get("/", async (c) => {
   if (!(await hasPermission(c, circleId, "staff:read"))) {
     apiError("FORBIDDEN", "権限がありません");
   }
+  const includeDeleted = c.req.query("includeDeleted") === "true";
+  if (includeDeleted && !(await hasPermission(c, circleId, "staff:delete"))) {
+    apiError("FORBIDDEN", "削除済みスタッフを表示する権限がありません");
+  }
 
   const staffList = await db
     .select()
     .from(staff)
-    .where(eq(staff.circleId, circleId));
+    .where(and(eq(staff.circleId, circleId), includeDeleted ? undefined : isNull(staff.deletedAt)));
 
   return c.json(staffList);
 });
@@ -36,7 +40,7 @@ staffRoutes.get("/", async (c) => {
 staffRoutes.get("/:id", async (c) => {
   const db = c.get("db");
   const id = c.req.param("id");
-  const staffList = await db.select().from(staff).where(eq(staff.id, id));
+  const staffList = await db.select().from(staff).where(and(eq(staff.id, id), isNull(staff.deletedAt)));
 
   if (staffList.length === 0) {
     apiError("NOT_FOUND", "スタッフが見つかりません");
@@ -94,7 +98,7 @@ staffRoutes.put(
     const input = c.req.valid("json");
 
     // 2026-07-05: 認可チェックが皆無だったため追加。対象のcircleIdを先に取得して判定
-    const existingStaff = await db.select().from(staff).where(eq(staff.id, id));
+    const existingStaff = await db.select().from(staff).where(and(eq(staff.id, id), isNull(staff.deletedAt)));
     if (existingStaff.length === 0) {
       apiError("NOT_FOUND", "スタッフが見つかりません");
     }
@@ -126,7 +130,23 @@ staffRoutes.delete("/:id", async (c) => {
     apiError("FORBIDDEN", "権限がありません");
   }
 
-  await db.delete(staff).where(eq(staff.id, id));
+  // 2026-10-21: 来訪・整理券・景品交換が staff.id を履歴に記録するため、名簿から論理削除する。
+  await db.update(staff).set({ deletedAt: new Date(), updatedAt: new Date() })
+    .where(and(eq(staff.id, id), isNull(staff.deletedAt)));
+  return c.json({ success: true });
+});
+
+// 2026-10-21: 削除済みスタッフを監査権限のあるメンバーが名簿へ戻せるようにする。
+staffRoutes.post("/:id/restore", async (c) => {
+  const db = c.get("db");
+  const id = c.req.param("id");
+  const [existingStaff] = await db.select().from(staff).where(eq(staff.id, id));
+  if (!existingStaff) apiError("NOT_FOUND", "スタッフが見つかりません");
+  if (!(await hasPermission(c, existingStaff.circleId, "staff:delete"))) {
+    apiError("FORBIDDEN", "権限がありません");
+  }
+  await db.update(staff).set({ deletedAt: null, updatedAt: new Date() })
+    .where(and(eq(staff.id, id), isNotNull(staff.deletedAt)));
   return c.json({ success: true });
 });
 

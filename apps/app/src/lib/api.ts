@@ -155,11 +155,15 @@ export const eventApi = {
   // 過去に送信した一斉アナウンスの履歴 (2026-07-16)。event_manager (member:read) 権限。
   announcements: (id: string) =>
     fetchApi<EventAnnouncement[]>(`/api/festivals/${id}/announcements`),
-  // 履歴からの削除。配信済みの notification (受信者側) は取り消されない
-  // (履歴ログの削除であり配信取り消しではない設計。詳細は API 側コメント参照)。
+  archivedAnnouncements: (id: string) =>
+    fetchApi<EventAnnouncement[]>(`/api/festivals/${id}/announcements?includeDeleted=true`),
   deleteAnnouncement: (id: string, announcementId: string) =>
     fetchApi<{ success: boolean }>(`/api/festivals/${id}/announcements/${announcementId}`, {
       method: "DELETE",
+    }),
+  restoreAnnouncement: (id: string, announcementId: string) =>
+    fetchApi<{ success: boolean }>(`/api/festivals/${id}/announcements/${announcementId}/restore`, {
+      method: "POST",
     }),
   create: (data: CreateEventInput) =>
     fetchApi<{ id: string }>("/api/festivals", { method: "POST", body: data }),
@@ -276,8 +280,8 @@ export const toppingApi = {
 
 // Staff API
 export const staffApi = {
-  list: (circleId: string) =>
-    fetchApi<Staff[]>(`/api/staff?circleId=${circleId}`),
+  list: (circleId: string, includeDeleted = false) =>
+    fetchApi<Staff[]>(`/api/staff?circleId=${circleId}${includeDeleted ? "&includeDeleted=true" : ""}`),
   get: (id: string) => fetchApi<Staff>(`/api/staff/${id}`),
   create: (data: CreateStaffInput) =>
     fetchApi<{ id: string }>("/api/staff", { method: "POST", body: data }),
@@ -288,6 +292,8 @@ export const staffApi = {
     }),
   delete: (id: string) =>
     fetchApi<{ success: boolean }>(`/api/staff/${id}`, { method: "DELETE" }),
+  restore: (id: string) =>
+    fetchApi<{ success: boolean }>(`/api/staff/${id}/restore`, { method: "POST" }),
   // 2026-07-14: シフト機能(getCurrentShift/clockIn/clockOut)を撤去。
 };
 
@@ -903,6 +909,7 @@ export interface EventAnnouncement {
   message: string;
   senderEmail: string;
   recipientCount: number;
+  deletedAt: string | null;
   createdAt: string;
 }
 
@@ -1280,6 +1287,7 @@ export interface Staff {
   name: string;
   createdAt: Date;
   updatedAt: Date;
+  deletedAt: string | null;
 }
 
 export interface Order {
@@ -1658,6 +1666,7 @@ export interface VisitorAdminEditorData {
     circleId: string;
     circleName: string;
     staffId: string | null;
+    deletedAt: string | null;
     createdAt: string;
   }>;
   circles: Array<{ id: string; name: string }>;
@@ -2122,6 +2131,7 @@ export interface PublicAnnouncement {
 export interface AdminAnnouncement extends PublicAnnouncement {
   published: boolean;
   updatedAt: string;
+  deletedAt: string | null;
 }
 
 export interface AnnouncementInput {
@@ -2165,6 +2175,8 @@ export const adminApi = {
     }),
   deleteAnnouncement: (id: string) =>
     fetchApi<{ success: boolean }>(`/api/admin/announcements/${id}`, { method: "DELETE" }),
+  restoreAnnouncement: (id: string) =>
+    fetchApi<{ success: boolean }>(`/api/admin/announcements/${id}/restore`, { method: "POST" }),
   // セッションクリーンアップ (2026-07-12)
   expiredSessionsCount: () => fetchApi<{ count: number }>("/api/admin/sessions/expired-count"),
   cleanupSessions: () => fetchApi<{ success: boolean }>("/api/admin/sessions/cleanup", { method: "POST" }),
@@ -2214,6 +2226,7 @@ export interface LotteryData {
     entryConfig: LotteryEntryConfig;
   } | null;
   prizes?: { id: string; name: string; quantity: number }[];
+  archivedPrizes?: { id: string; name: string; quantity: number }[];
   entryCount?: number;
   winners?: { id: string; prizeId: string; prizeName: string; eventUserId: string; userLabel: string; claimedAt: string | null }[];
 }
@@ -2226,6 +2239,8 @@ export const lotteryApi = {
     fetchApi<{ id: string }>(`/api/lottery/${id}/prizes`, { method: "POST", body: data }),
   deletePrize: (id: string, prizeId: string) =>
     fetchApi<{ success: boolean }>(`/api/lottery/${id}/prizes/${prizeId}`, { method: "DELETE" }),
+  restorePrize: (id: string, prizeId: string) =>
+    fetchApi<{ success: boolean }>(`/api/lottery/${id}/prizes/${prizeId}/restore`, { method: "POST" }),
   draw: (id: string) => fetchApi<{ drawn: number }>(`/api/lottery/${id}/draw`, { method: "POST" }),
   claim: (id: string, winnerId: string) =>
     fetchApi<{ success: boolean }>(`/api/lottery/${id}/winners/${winnerId}/claim`, { method: "POST" }),
@@ -2310,6 +2325,8 @@ export interface ContractPayment {
   paidAt: string;
   note: string | null;
   recordedBy: string | null;
+  voidedAt: string | null;
+  voidedBy: string | null;
   createdAt: string;
 }
 export interface ContractPaymentInput {

@@ -434,6 +434,7 @@ wristbandRoutes.get(
         circleId: circleVisit.circleId,
         circleName: circle.name,
         staffId: circleVisit.staffId,
+        deletedAt: circleVisit.deletedAt,
         createdAt: circleVisit.createdAt,
       })
         .from(circleVisit)
@@ -535,7 +536,12 @@ wristbandRoutes.put(
     for (const visit of circleVisits) {
       if (visit.isNew && visit.isDeleted) continue;
       if (visit.isDeleted) {
-        statements.push(db.delete(circleVisit).where(and(eq(circleVisit.id, visit.id!), eq(circleVisit.eventUserId, userId))));
+        // 2026-10-21: 来訪実績はレビュー資格・統計の根拠なので、削除ではなく利用対象から外す。
+        statements.push(db.update(circleVisit).set({ deletedAt: new Date() }).where(and(
+          eq(circleVisit.id, visit.id!),
+          eq(circleVisit.eventUserId, userId),
+          isNull(circleVisit.deletedAt),
+        )));
       } else if (visit.isNew) {
         statements.push(db.insert(circleVisit).values({
           id: nanoid(),
@@ -549,6 +555,7 @@ wristbandRoutes.put(
           circleId: visit.circleId,
           staffId: visit.staffId || null,
           createdAt: new Date(visit.createdAt),
+          deletedAt: null,
         }).where(and(eq(circleVisit.id, visit.id!), eq(circleVisit.eventUserId, userId))));
       }
     }
