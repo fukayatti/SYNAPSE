@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { eq } from "drizzle-orm";
 import {
 	event,
 	circle,
@@ -47,6 +48,7 @@ async function insertOrder(
 		userId: string;
 		menuId: string;
 		withTopping?: boolean;
+		status?: string;
 	}
 ) {
 	const orderId = uid("ord");
@@ -58,8 +60,8 @@ async function insertOrder(
 		orderNumber: uid("num"),
 		peopleCount: 1,
 		totalPrice: opts.withTopping ? 600 : 500,
-		status: "completed",
-		completed: true,
+		status: opts.status ?? "completed",
+		completed: (opts.status ?? "completed") === "completed",
 		cashierId: "secret-cashier",
 		paymentMethod: "cash",
 	});
@@ -139,5 +141,49 @@ describe("来場者の注文履歴", () => {
 		expect(res.status).toBe(200);
 		const data = (await res.json()) as any[];
 		expect(data).toHaveLength(0);
+	});
+
+	it("本人の受け取り待ち注文を受け取り済みにでき、繰り返し操作も成功する", async () => {
+		const { db, circleId, menuId, userId } = await seed();
+		const { orderId } = await insertOrder(db, { circleId, userId, menuId, status: "ready" });
+		const path = `/api/orders/user/${userId}/${orderId}/received`;
+
+		const first = await request(path, { method: "POST" });
+		expect(first.status).toBe(200);
+		expect(await first.json()).toEqual({ success: true });
+
+		const saved = await db.select().from(order).where(eq(order.id, orderId));
+		expect(saved[0]?.status).toBe("ready");
+		expect(saved[0]?.receivedAt).toBeInstanceOf(Date);
+
+		// 2026-10-21: 通信再試行や連打では受け取り時刻を巻き戻さず、同じ成功結果を返す。
+		const receivedAt = saved[0]!.receivedAt;
+		const retry = await request(path, { method: "POST" });
+		expect(retry.status).toBe(200);
+		const afterRetry = await db.select().from(order).where(eq(order.id, orderId));
+		expect(afterRetry[0]?.receivedAt).toEqual(receivedAt);
+	});
+
+	it("他の来場者の注文は受け取り済みにできない", async () => {
+		const { db, eventId, circleId, menuId, userId } = await seed();
+		const otherUserId = uid("usr");
+		await db.insert(eventUser).values({ id: otherUserId, eventId, displayId: 2 });
+		const { orderId } = await insertOrder(db, { circleId, userId, menuId, status: "ready" });
+
+		const res = await request(`/api/orders/user/${otherUserId}/${orderId}/received`, { method: "POST" });
+		expect(res.status).toBe(404);
+		const saved = await db.select().from(order).where(eq(order.id, orderId));
+		expect(saved[0]?.receivedAt).toBeNull();
+	});
+
+	it("受け取り可能になる前の注文は状態を変更できない", async () => {
+		const { db, circleId, menuId, userId } = await seed();
+		const { orderId } = await insertOrder(db, { circleId, userId, menuId, status: "preparing" });
+
+		const res = await request(`/api/orders/user/${userId}/${orderId}/received`, { method: "POST" });
+		expect(res.status).toBe(409);
+		const saved = await db.select().from(order).where(eq(order.id, orderId));
+		expect(saved[0]?.status).toBe("preparing");
+		expect(saved[0]?.receivedAt).toBeNull();
 	});
 });
