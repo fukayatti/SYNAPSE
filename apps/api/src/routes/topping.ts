@@ -71,6 +71,7 @@ toppingRoutes.post(
       category: z.string().max(100).optional(),
       // 価格は負値も許可 (割引トッピング等。2026-07-07 に min(0) を撤廃)。
       price: z.number(),
+      // 2026-10-22: 説明は任意項目として、未入力でもトッピングを登録できる。
       description: z.string().optional(),
       allergens: allergensSchema,
       imagePath: z.string().optional(),
@@ -123,7 +124,8 @@ toppingRoutes.put(
       name: z.string().min(1).optional(),
       category: z.string().max(100).optional(),
       price: z.number().optional(), // 負値許可 (割引トッピング)
-      description: z.string().optional(),
+      // 2026-10-22: 説明は任意で、null により編集時に空欄へ戻せるようにする。
+      description: z.string().nullable().optional(),
       allergens: allergensSchema.optional(),
       imagePath: z.string().optional(),
       soldOut: z.boolean().optional(),

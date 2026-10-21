@@ -113,7 +113,8 @@ export function MenuFormModal({ circleId, isOpen, onClose, menu, onDelete }: Men
       price: data.price,
       // 2026-10-07 Issue #48: 空文字は画像削除の明示値として PUT に渡す。
       imagePath: data.imagePath,
-      description: data.description || undefined,
+      // 2026-10-22: 説明欄を空にした編集は明示的に null を送り、保存値も削除する。
+      description: data.description || null,
       allergens: data.allergens,
       soldOut: data.soldOut,
       toppingIds: data.toppingIds,
@@ -210,7 +211,7 @@ export function MenuFormModal({ circleId, isOpen, onClose, menu, onDelete }: Men
         category: input.category ?? menu.category,
         price: input.price ?? menu.price,
         imagePath: input.imagePath || null,
-        description: input.description ?? menu.description,
+        description: input.description === undefined ? menu.description : input.description,
         allergens: JSON.stringify(input.allergens),
         soldOut: input.soldOut ?? menu.soldOut,
         inventoryEnabled: input.inventoryEnabled ?? menu.inventoryEnabled,
@@ -371,7 +372,7 @@ export function MenuFormModal({ circleId, isOpen, onClose, menu, onDelete }: Men
 
         <FormField
           id="menuDescription"
-          label="説明"
+          label="説明（任意）"
           value={form.description}
           onChange={(e) => setForm({ ...form, description: e.target.value })}
           onBlur={triggerAutoSave}
