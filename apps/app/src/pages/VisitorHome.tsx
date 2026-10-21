@@ -1,7 +1,6 @@
 import type React from "react";
 import { useNavigate } from "react-router-dom";
 import { QrCode, UtensilsCrossed, ShoppingBag, ArrowRight, Store, CalendarCog } from "lucide-react";
-import { PRODUCT_NAME } from "@fesflow/config";
 import { useVisitor } from "@/hooks/useVisitor";
 
 /**
@@ -18,9 +17,10 @@ export default function Home() {
   return (
     <div className="mx-auto max-w-2xl space-y-7 px-4 py-8 font-mono sm:py-10">
       <div className="space-y-2">
-        <span className="text-[11px] font-black uppercase tracking-widest text-muted-foreground">
-          {PRODUCT_NAME.toUpperCase()}
-        </span>
+        {/* 2026-10-22: The visitor header already carries the product logo; this label names the page's audience. */}
+        <div className="text-[11px] font-black uppercase tracking-widest text-muted-foreground">
+          来場者ポータル
+        </div>
         <h1 className="font-headline text-2xl sm:text-3xl md:text-4xl font-black uppercase tracking-tight leading-tight">
           文化祭を楽しもう
         </h1>

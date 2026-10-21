@@ -1,10 +1,10 @@
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { PRODUCT_NAME } from "@fesflow/config";
 import { visitorUrl } from "@/lib/visitor-url";
+import BrandLogo from "@/components/BrandLogo";
 
 // Next.js app/page.tsx から移植 (2026-07-04)。next/link → react-router、
-// 製品名は @fesflow/config の PRODUCT_NAME を参照するよう変更。
+// 2026-10-22: Use the shared brand lockup on the system landing page as well.
 export default function Home() {
   const features = [
     {
@@ -47,14 +47,15 @@ export default function Home() {
       {/* ヒーローセクション */}
       <section className="border-b-heavy border-border py-sp-6 sm:py-sp-7 px-sp-3 sm:px-sp-4 bg-background">
         <div className="max-w-5xl mx-auto text-center space-y-sp-4 sm:space-y-sp-5">
-          <div className="inline-block bg-accent text-accent-foreground font-headline uppercase text-[10px] sm:text-[12px] tracking-[3px] px-sp-3 py-sp-2 border-thick border-accent">
-            {PRODUCT_NAME.toUpperCase()} // SYSTEM v1.0
+          {/* 2026-10-22: Use extra-light type only for the landing-page wordmark. */}
+          <div className="space-y-4">
+            <span className="inline-block bg-accent text-accent-foreground font-headline uppercase text-[10px] sm:text-[12px] tracking-[3px] px-sp-3 py-sp-2 border-thick border-accent">
+              SYSTEM v1.0
+            </span>
+            <h1>
+              <BrandLogo size="hero" weight="light" />
+            </h1>
           </div>
-          {/* 製品名をロゴ的に大きく表示 (2026-07-04 ユーザー要望)。
-              PRODUCT_NAME を参照するので名称変更にも追従する。 */}
-          <h1 className="text-[64px] sm:text-[96px] md:text-[128px] lg:text-[160px] font-headline uppercase tracking-[-3px] sm:tracking-[-5px] leading-[0.85] text-foreground">
-            {PRODUCT_NAME}
-          </h1>
           <p className="font-headline uppercase text-[12px] sm:text-[16px] tracking-[6px] text-foreground/70">
             学園祭 注文システム
           </p>

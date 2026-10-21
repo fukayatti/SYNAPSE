@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { systemApi } from "@/lib/api";
 import { Megaphone, Wrench } from "lucide-react";
-import { PRODUCT_NAME } from "@fesflow/config";
+import BrandLogo from "@/components/BrandLogo";
 
 /**
  * 来場者アプリのシステムゲート (2026-07-06)。
@@ -38,8 +38,9 @@ export default function SystemGate({ children }: { children: ReactNode }) {
             {data.maintenance.message ||
               "ただいまシステムメンテナンスを実施しています。時間をおいて再度お試しください。"}
           </p>
-          <div className="text-[10px] uppercase tracking-widest text-muted-foreground pt-2">
-            {PRODUCT_NAME}
+          {/* 2026-10-22: Use the same full lockup as both application headers. */}
+          <div className="flex items-center justify-center gap-2 text-[10px] uppercase tracking-widest text-muted-foreground pt-2">
+            <BrandLogo size="small" />
           </div>
         </div>
       </div>

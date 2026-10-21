@@ -19,6 +19,7 @@ import {
   Compass,
 } from "lucide-react";
 import AccountModal from "./account-modal";
+import BrandLogo from "./BrandLogo";
 import { PRODUCT_NAME } from "@fesflow/config";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { adminApi, notificationApi, accountApi, systemApi } from "@/lib/api";
@@ -785,13 +786,14 @@ export default function Header() {
               {dashboardMenuOpen ? <X className="h-4 w-4" aria-hidden="true" /> : <Menu className="h-4 w-4" aria-hidden="true" />}
             </button>
           )}
-          {/* ロゴ / ブランド */}
+          {/* 2026-10-22: Match the staff brand lockup to the visitor header. */}
           <Link
             to="/"
-            className="font-headline text-base sm:text-lg lg:text-xl uppercase tracking-[2px] leading-none select-none hover:opacity-80 flex items-center gap-2 shrink-0"
+            aria-label={`${PRODUCT_NAME} トップ`}
+            className="select-none hover:opacity-80 flex items-center gap-2 shrink-0"
           >
-            <span className="font-black border-thin border-border px-2 py-1 bg-primary text-primary-foreground text-sm sm:text-base">
-              {PRODUCT_NAME.toUpperCase()}
+            <span className="flex items-center gap-2">
+              <BrandLogo size="small" />
               <span className="hidden lg:inline">
                 {isCircleView && " // BOOTH"}
                 {isEventView && " // EVENT"}

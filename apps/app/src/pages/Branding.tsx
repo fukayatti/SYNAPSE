@@ -1,6 +1,7 @@
 import type React from "react";
 import { Link } from "react-router-dom";
 import { PRODUCT_NAME } from "@fesflow/config";
+import BrandLogo from "@/components/BrandLogo";
 import { ArrowRight, UtensilsCrossed, QrCode, ShoppingBag } from "lucide-react";
 
 /**
@@ -20,10 +21,9 @@ export default function Branding() {
             学園祭 モバイルオーダー
           </span>
 
-          <h1 className="mt-4 font-headline uppercase leading-[0.95] tracking-tight">
-            <span className="block text-5xl sm:text-7xl md:text-8xl font-black">
-              {PRODUCT_NAME}
-            </span>
+          {/* 2026-10-22: Keep the landing-page mark and use a lighter wordmark than the shared header. */}
+          <h1 className="mt-4 flex flex-col items-start gap-3 font-headline uppercase leading-[0.95] tracking-tight sm:flex-row sm:items-center sm:gap-5">
+            <BrandLogo size="hero" weight="light" />
           </h1>
 
           <p className="mt-6 max-w-xl text-sm sm:text-base leading-relaxed text-muted-foreground">
