@@ -488,20 +488,25 @@ function MenuPageContent() {
     refetchIntervalInBackground: false,
   });
   const eventEnded = isEventEnded(circleEvent);
+  // 2026-10-22: 開催前はメニュー閲覧だけにし、カート・注文・QR操作を止める。
+  const eventUpcoming = circleEvent?.lifecycleStatus === "upcoming";
   const preOrderAcceptanceEnabled = parseCircleSettings(circleData?.settings).preOrderEnabled;
   const preOrderAcceptanceDisabled = !isMobileOrderRoute && !!circleData && !preOrderAcceptanceEnabled;
-  const orderEntryDisabled = eventEnded || isCircleEventLoading || isCircleEventError;
-  const orderEntryDisabledLabel = eventEnded
-    ? "開催終了"
-    : isCircleEventError
-      ? "開催状態を確認できません"
-      : "開催状態を確認中…";
+  const orderEntryDisabled = eventEnded || eventUpcoming || isCircleEventLoading || isCircleEventError;
+  const orderEntryDisabledLabel = eventUpcoming
+    ? "開催前"
+    : eventEnded
+      ? "開催終了"
+      : isCircleEventError
+        ? "開催状態を確認できません"
+        : "開催状態を確認中…";
   // 2026-10-20: 来場案内と同じイベント設定を使い、物理バンド必須のイベントではスマホQRを出さない。
   const mustPresentPhysicalWristband = Boolean(
     circleEvent?.hasPhysicalWristband && !circleEvent.allowSelfIssue
   );
   const canDisplayMyQr = !!circleEvent
     && !isCircleEventError
+    && !eventUpcoming
     && !eventEnded
     && !mustPresentPhysicalWristband
     && !!wristbandStatus?.user.onboardedAt
@@ -616,6 +621,7 @@ function MenuPageContent() {
     networkMode: "always",
     mutationFn: async () => {
       if (eventEnded) throw new Error("開催終了後は注文を受け付けていません");
+      if (eventUpcoming) throw new Error("開催前のため注文を受け付けていません");
       if (orderEntryDisabled) throw new Error("開催状態を確認できないため、注文を受け付けられません");
       if (!orderInput) throw new Error("注文にはリストバンドとカート内の商品が必要です");
       return submitOrder(orderInput);
@@ -1026,7 +1032,13 @@ function MenuPageContent() {
           <p className="mt-1 text-xs leading-relaxed text-foreground">メニューと価格は引き続きご覧いただけます。カート追加、注文送信、マイQRの表示はできません。</p>
         </section>
       )}
-      {!eventEnded && orderEntryDisabled && (
+      {eventUpcoming && (
+        <section className="border-heavy border-warning bg-warning/10 p-4" role="status" aria-live="polite">
+          <p className="text-sm font-black">開催前</p>
+          <p className="mt-1 text-xs leading-relaxed text-foreground">開催前のため注文・カート追加・マイQRの表示はできません。メニューと価格はご覧いただけます。</p>
+        </section>
+      )}
+      {!eventEnded && !eventUpcoming && orderEntryDisabled && (
         <section className="border-heavy border-border bg-muted p-4" role="status" aria-live="polite">
           <p className="text-sm font-black">{isCircleEventLoading ? "開催状況を確認しています" : "開催状況を確認できません"}</p>
           <p className="mt-1 text-xs leading-relaxed text-foreground">
@@ -1063,7 +1075,7 @@ function MenuPageContent() {
                 onToggleCoupon={toggleCoupon}
                 onAdd={addLine}
                 orderingDisabled={orderEntryDisabled || preOrderAcceptanceDisabled}
-                orderingDisabledLabel={preOrderAcceptanceDisabled ? "事前注文は受付停止中" : orderEntryDisabledLabel}
+                orderingDisabledLabel={orderEntryDisabled ? orderEntryDisabledLabel : "事前注文は受付停止中"}
               />
             ))}
           </div>
@@ -1437,8 +1449,8 @@ function MenuPageContent() {
                 orderingDisabled: orderEntryDisabled,
               }}
               onAction={(actionType, payload) => {
-                if (orderEntryDisabled && ["ADD_TO_CART", "UPDATE_QUANTITY", "SAVE_DIRECT_ORDER"].includes(actionType)) {
-                  toast.message(eventEnded ? "開催終了のため注文を受け付けていません" : "開催状況を確認できるまで注文できません");
+                if (orderEntryDisabled && ["ADD_TO_CART", "UPDATE_QUANTITY", "SAVE_DIRECT_ORDER", "CLEAR_CART"].includes(actionType)) {
+                  toast.message(eventEnded ? "開催終了のため注文を受け付けていません" : eventUpcoming ? "開催前のため注文できません" : "開催状況を確認できるまで注文できません");
                   return;
                 }
                 if (actionType === "ADD_TO_CART") {
@@ -1487,8 +1499,8 @@ function MenuPageContent() {
                 orderingDisabled: orderEntryDisabled,
               }}
               onAction={(actionType, payload) => {
-                if (orderEntryDisabled && ["ADD_TO_CART", "UPDATE_QUANTITY", "SAVE_DIRECT_ORDER"].includes(actionType)) {
-                  toast.message(eventEnded ? "開催終了のため注文を受け付けていません" : "開催状況を確認できるまで注文できません");
+                if (orderEntryDisabled && ["ADD_TO_CART", "UPDATE_QUANTITY", "SAVE_DIRECT_ORDER", "CLEAR_CART"].includes(actionType)) {
+                  toast.message(eventEnded ? "開催終了のため注文を受け付けていません" : eventUpcoming ? "開催前のため注文できません" : "開催状況を確認できるまで注文できません");
                   return;
                 }
                 if (actionType === "ADD_TO_CART") {
