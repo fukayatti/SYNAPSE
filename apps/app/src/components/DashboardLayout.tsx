@@ -419,7 +419,7 @@ function DashboardLayoutFrame({
   });
 
   return (
-    <div className="mx-auto box-border w-full min-w-0 max-w-7xl p-3 sm:p-4 md:p-6 font-mono bg-background text-foreground">
+    <div className="mx-auto box-border w-full min-w-0 max-w-7xl p-3 sm:p-4 md:px-6 md:pt-6 md:pb-4 font-mono bg-background text-foreground">
       {/* 共通ヘッダー: 左にタイトル、右に画面主要アクション (actions スロット)。
           モバイルでは縦積みにしてボタンが潰れないようにする。 */}
       <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3 border-b-thick border-border pb-3 mb-6">
@@ -512,10 +512,11 @@ function DashboardLayoutFrame({
 
       {/* 2カラムレイアウト */}
       <div className="flex flex-col md:flex-row gap-6 items-start">
-        {/* 2026-10-21: 長いサイドメニューはヘッダー下に固定し、右のページとは独立してスクロールさせる。 */}
+        {/* 2026-10-21: 長いサイドメニューはヘッダー下に固定し、右のページとは独立してスクロールさせる。
+            親の下端に押し上げられてヘッダーへ重ならないよう、sticky枠と外側の下余白を合計16pxに揃える。 */}
         <aside
           ref={sidebarScrollRef}
-          className="sticky top-[calc(var(--app-chrome-height,4rem)+1rem)] hidden w-full shrink-0 overflow-y-auto overscroll-contain border-thick border-border bg-background p-2 pb-5 shadow-none md:mb-6 md:block md:max-h-[calc(100dvh-var(--app-chrome-height,4rem)-2rem)] md:w-64 md:self-start"
+          className="sticky top-[calc(var(--app-chrome-height,4rem)+1rem)] hidden w-full shrink-0 overflow-y-auto overscroll-contain border-thick border-border bg-background p-2 pb-5 shadow-none md:block md:max-h-[calc(100dvh-var(--app-chrome-height,4rem)-2rem)] md:w-64 md:self-start"
         >
           <nav className="flex md:flex-col gap-1">
             {renderMenuGroups(false)}
