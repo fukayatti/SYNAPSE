@@ -10,6 +10,7 @@ import SystemBanner from "@/components/SystemBanner";
 
 import SystemGate from "@/components/SystemGate";
 import VisitorHeader from "@/components/visitor-header";
+import VisitorPushPrompt from "@/components/VisitorPushPrompt";
 
 import { CircleAuthGuard, SystemAdminGuard, EventAdminGuard } from "@/hooks/useCircleAuth";
 import { CircleDashboardRouteLayout } from "@/components/DashboardLayout";
@@ -160,6 +161,7 @@ function VisitorLayout() {
 			<div className="grid grid-rows-[auto_1fr] min-h-svh">
 				<MobileOrderOutboxSync />
 				<VisitorHeader />
+				<VisitorPushPrompt />
 				<main>
 					<Suspense fallback={<RoutePageLoading />}>
 						<Outlet />

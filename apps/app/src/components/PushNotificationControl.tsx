@@ -133,7 +133,7 @@ export function PushNotificationControl({ ownerType }: { ownerType: OwnerType })
 			) : isIosSetupRequired ? (
 				<p className="border-l-thick border-info bg-info/10 px-2 py-2 text-[10px] leading-relaxed">ホーム画面に追加したFesFlowから通知を設定できます。</p>
 			) : Notification.permission === "denied" ? (
-				<p className="border-l-thick border-warning bg-warning/10 px-2 py-2 text-[10px] leading-relaxed">ブラウザの設定で通知を許可してください。</p>
+				<p className="border-l-thick border-warning bg-warning/10 px-2 py-2 text-[10px] leading-relaxed">通知がブロックされています。ブラウザまたは端末の設定からこのサイトの通知を許可してください。</p>
 			) : (
 				<Button
 					type="button"
