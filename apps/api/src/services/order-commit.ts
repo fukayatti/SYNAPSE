@@ -84,6 +84,10 @@ export async function commitOrder(db: D1, command: OrderCommand, input: CommitOr
   const itemJson = JSON.stringify(items);
   const toppingJson = JSON.stringify(items.flatMap((item) => item.toppings.map((top) => ({ ...top, id: ulid(), orderItemId: item.id }))));
   const registerCoupon = input.registerCoupon ?? null;
+  const source = input.source ?? "pos";
+  // 2026-10-22: mobile orders enter the kitchen queue before payment; POS orders are created only after tender.
+  const paymentStatus = source === "mobile" ? "unpaid" : "paid";
+  const paidAt = paymentStatus === "paid" ? now : null;
   const statements = [
     db.prepare(`INSERT INTO order_write_guard (id, valid) SELECT ?, CASE WHEN
       EXISTS (SELECT 1 FROM circle c JOIN event e ON e.id=c.event_id JOIN event_user u ON u.event_id=e.id
@@ -115,12 +119,12 @@ export async function commitOrder(db: D1, command: OrderCommand, input: CommitOr
       ON CONFLICT(scope) DO UPDATE SET value=value+1`)
       .bind(scope, orderNumberPrefix, input.circleId, orderNumberPrefix, `${orderNumberPrefix}:`,
         dayStart, dayStart + 24 * 60 * 60 * 1000),
-    db.prepare(`INSERT INTO orders (id,circle_id,user_id,cashier_id,source,order_number,people_count,total_price,status,payment_method,completed,completed_at)
-      SELECT ?,?,?,?,?,? || printf('%03d',daily.value),?,?,?,?,?,?
+    db.prepare(`INSERT INTO orders (id,circle_id,user_id,cashier_id,source,order_number,people_count,total_price,status,payment_method,payment_status,paid_at,completed,completed_at)
+      SELECT ?,?,?,?,?,? || printf('%03d',daily.value),?,?,?,?,?,?,?,?
       FROM order_sequence daily WHERE daily.scope=?
       RETURNING id,order_number AS orderNumber`)
-      .bind(input.id, input.circleId, input.userId, input.cashierId ?? null, input.source ?? "pos", orderNumberPrefix,
-        input.peopleCount, input.totalPrice, input.status, input.paymentMethod ?? null,
+      .bind(input.id, input.circleId, input.userId, input.cashierId ?? null, source, orderNumberPrefix,
+        input.peopleCount, input.totalPrice, input.status, input.paymentMethod ?? null, paymentStatus, paidAt,
         input.status === "completed" ? 1 : 0, input.status === "completed" ? now : null, scope),
     db.prepare(`INSERT INTO order_item (id,order_id,menu_id,menu_name,menu_price,quantity)
       SELECT json_extract(value,'$.id'),?,json_extract(value,'$.menuId'),json_extract(value,'$.menuName'),

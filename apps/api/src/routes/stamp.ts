@@ -220,6 +220,7 @@ async function getRallyProgress(db: AppEnv["Variables"]["db"], eventId: string, 
   // 2026-10-15 (#123): 店舗数が多いイベントでもD1の bind 上限を超えないよう、
   // 対象ID一覧を JSON 1引数で渡してSQL側で照合する。
   const targetCircleFilter = sql`${circle.id} in (select value from json_each(${JSON.stringify(uniqueTargetCircleIds)}))`;
+  // 2026-10-22: スタンプは店頭会計済みの購入にだけ付与する。
   const completedOrders = uniqueTargetCircleIds.length > 0
     ? await db.select({
         id: order.id,
@@ -232,6 +233,7 @@ async function getRallyProgress(db: AppEnv["Variables"]["db"], eventId: string, 
         eq(circle.eventId, eventId),
         isNull(circle.deletedAt),
         targetCircleFilter,
+        eq(order.paymentStatus, "paid"),
         ne(order.status, "cancelled"),
         or(eq(order.status, "completed"), eq(order.completed, true)),
       ))
@@ -254,6 +256,7 @@ async function getRallyProgress(db: AppEnv["Variables"]["db"], eventId: string, 
         eq(circle.eventId, eventId),
         isNull(circle.deletedAt),
         targetCircleFilter,
+        eq(order.paymentStatus, "paid"),
         ne(order.status, "cancelled"),
         or(eq(order.status, "completed"), eq(order.completed, true)),
       ))
@@ -270,6 +273,7 @@ async function getRallyProgress(db: AppEnv["Variables"]["db"], eventId: string, 
           eq(circle.eventId, eventId),
           isNull(circle.deletedAt),
           targetCircleFilter,
+          eq(order.paymentStatus, "paid"),
           ne(order.status, "cancelled"),
           or(eq(order.status, "completed"), eq(order.completed, true)),
         ))
@@ -585,6 +589,7 @@ stampRoutes.get("/event/:eventId/usage", async (c) => {
 
   const storeAreaById = new Map(configuredAreas.map((area) => [area.id, area.name]));
   const targetCircleSet = new Set(uniqueTargetCircleIds);
+  // 2026-10-22: 利用実績・売上も未会計注文では増やさない。
   const storeRows = await db.select({
     circleId: circle.id,
     orderCount: sql<number>`count(${order.id})`,
@@ -595,6 +600,7 @@ stampRoutes.get("/event/:eventId/usage", async (c) => {
   }).from(circle)
     .leftJoin(order, and(
       eq(order.circleId, circle.id),
+      eq(order.paymentStatus, "paid"),
       ne(order.status, "cancelled"),
       or(eq(order.status, "completed"), eq(order.completed, true)),
     ))
@@ -630,6 +636,7 @@ stampRoutes.get("/event/:eventId/usage", async (c) => {
           eq(circle.eventId, eventId),
           isNull(circle.deletedAt),
           targetCircleFilter,
+          eq(order.paymentStatus, "paid"),
           ne(order.status, "cancelled"),
           or(eq(order.status, "completed"), eq(order.completed, true)),
         ))
@@ -650,6 +657,7 @@ stampRoutes.get("/event/:eventId/usage", async (c) => {
           eq(circle.eventId, eventId),
           isNull(circle.deletedAt),
           targetCircleFilter,
+          eq(order.paymentStatus, "paid"),
           ne(order.status, "cancelled"),
           or(eq(order.status, "completed"), eq(order.completed, true)),
         ))
@@ -728,6 +736,7 @@ stampRoutes.get("/event/:eventId/stores/:circleId", async (c) => {
     eq(circle.id, circleId),
     eq(circle.eventId, eventId),
     isNull(circle.deletedAt),
+    eq(order.paymentStatus, "paid"),
     ne(order.status, "cancelled"),
     or(eq(order.status, "completed"), eq(order.completed, true)),
     eq(eventUser.eventId, eventId),

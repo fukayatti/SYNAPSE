@@ -147,9 +147,9 @@ reviewRoutes.get("/visitor/:code", async (c) => {
 
   const visits = await db.select({ circleId: circleVisit.circleId })
     .from(circleVisit).where(and(eq(circleVisit.eventUserId, userId), isNull(circleVisit.deletedAt)));
-  // 2026-09-27: circle_visit は現状の本番コードで書き込まれていないため、受取/決済完了の注文も利用履歴とする。
+  // 2026-10-22: 購入利用履歴として扱う注文は会計済みに限り、未会計注文だけではレビュー候補にしない。
   const completedOrders = await db.select({ circleId: order.circleId }).from(order).where(and(
-    eq(order.userId, userId), ne(order.status, "cancelled"), or(eq(order.status, "completed"), eq(order.completed, true)),
+    eq(order.userId, userId), eq(order.paymentStatus, "paid"), ne(order.status, "cancelled"), or(eq(order.status, "completed"), eq(order.completed, true)),
   ));
   const circleIds = [...new Set([...visits.map((visit) => visit.circleId), ...completedOrders.map((item) => item.circleId)])];
   if (circleIds.length === 0) return c.json([]);
@@ -212,12 +212,12 @@ reviewRoutes.post("/visitor/:code", zBody(z.object({
   if (!circleRow[0]) apiError("NOT_FOUND", "サークルが見つかりません");
   if (visitor.eventId !== circleRow[0].eventId) apiError("FORBIDDEN", "このサークルへのレビュー投稿権限がありません");
 
-  // 2026-09-27: 体験ログまたは受取/決済完了注文をサーバで照合し、クライアントの自己申告で投稿資格を与えない。
+  // 2026-10-22: 体験ログまたは会計済みの完了注文をサーバで照合し、未会計では投稿資格を与えない。
   const visits = await db.select({ id: circleVisit.id }).from(circleVisit).where(and(
     eq(circleVisit.eventUserId, userId), eq(circleVisit.circleId, circleId), isNull(circleVisit.deletedAt),
   ));
   const completedOrders = await db.select({ id: order.id }).from(order).where(and(
-    eq(order.userId, userId), eq(order.circleId, circleId), ne(order.status, "cancelled"), or(eq(order.status, "completed"), eq(order.completed, true)),
+    eq(order.userId, userId), eq(order.circleId, circleId), eq(order.paymentStatus, "paid"), ne(order.status, "cancelled"), or(eq(order.status, "completed"), eq(order.completed, true)),
   ));
   if (visits.length === 0 && completedOrders.length === 0) apiError("FORBIDDEN", "利用履歴のあるサークルにのみレビューできます");
 

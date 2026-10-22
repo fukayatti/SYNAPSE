@@ -5,6 +5,7 @@ import { z } from "zod";
 import { createOrderSchema, type CreateOrderResult } from "@fesflow/config/order-contract";
 import {
   order,
+  orderRefund,
   orderItem,
   orderItemTopping,
   menu,
@@ -19,9 +20,9 @@ import {
   discount,
   registerDisplaySession,
 } from "@fesflow/db";
-import { eq, and, or, desc, inArray, sql, lte, gt, isNull, isNotNull } from "drizzle-orm";
+import { eq, and, or, desc, inArray, sql, lte, gt, isNull, isNotNull, ne } from "drizzle-orm";
 import { ulid } from "ulidx";
-import { hasPermission } from "../utils/auth";
+import { getSession, hasPermission } from "../utils/auth";
 import { commitOrder, committedOrder, orderCommand } from "../services/order-commit";
 import { updateOrderStatus } from "../services/order-status";
 import { validateToppingCategorySelection } from "../utils/topping-wizard";
@@ -66,6 +67,48 @@ async function getActiveRegisterDisplay(db: ReturnType<typeof import("@fesflow/d
   const session = rows[0];
   if (!session || session.revokedAt || session.expiresAt.getTime() <= Date.now()) return null;
   return session;
+}
+
+async function includeOrderItems(
+  db: ReturnType<typeof import("@fesflow/db").createDb>,
+  orders: (typeof order.$inferSelect)[],
+) {
+  if (orders.length === 0) return [];
+  const orderIds = orders.map((row) => row.id);
+  const items = await db.select().from(orderItem)
+    .where(sql`${orderItem.orderId} IN (SELECT value FROM json_each(${JSON.stringify(orderIds)}))`);
+  const itemIds = items.map((row) => row.id);
+  const toppings = itemIds.length > 0
+    ? await db.select().from(orderItemTopping)
+        .where(sql`${orderItemTopping.orderItemId} IN (SELECT value FROM json_each(${JSON.stringify(itemIds)}))`)
+    : [];
+  const refunds = await db.select().from(orderRefund)
+    .where(sql`${orderRefund.orderId} IN (SELECT value FROM json_each(${JSON.stringify(orderIds)}))`);
+  const refundsByOrder = new Map(refunds.map((refund) => [refund.orderId, refund]));
+  const toppingsByItem = new Map<string, typeof toppings>();
+  for (const topping of toppings) {
+    const list = toppingsByItem.get(topping.orderItemId) ?? [];
+    list.push(topping);
+    toppingsByItem.set(topping.orderItemId, list);
+  }
+  const itemsByOrder = new Map<string, typeof items>();
+  for (const item of items) {
+    const list = itemsByOrder.get(item.orderId) ?? [];
+    list.push(item);
+    itemsByOrder.set(item.orderId, list);
+  }
+  return orders.map((row) => ({
+    ...row,
+    refund: refundsByOrder.get(row.id) ?? null,
+    items: (itemsByOrder.get(row.id) ?? []).map((item) => ({
+      ...item,
+      toppings: (toppingsByItem.get(item.id) ?? []).map((topping) => ({
+        ...topping,
+        name: topping.toppingName,
+        price: topping.toppingPrice,
+      })),
+    })),
+  }));
 }
 
 // 2026-10-21: 顧客表示の共有は注文情報を絞った投影用APIに分け、会計・来場者情報を返さない。
@@ -212,55 +255,36 @@ orderRoutes.get("/", async (c) => {
     .orderBy(desc(order.createdAt));
 
   const orders = await query;
+  return c.json(await includeOrderItems(db, orders));
+});
 
-  // 各注文のアイテムを取得
-  const orderIds = orders.map((o) => o.id);
+// 2026-10-22: リストバンド確認後、重複作成せず既存モバイル注文の未会計分をレジで案内する。
+orderRoutes.get("/mobile/unpaid", async (c) => {
+  const db = c.get("db");
+  const circleId = c.req.query("circleId");
+  const userId = c.req.query("userId");
+  if (!circleId || !userId) apiError("BAD_REQUEST", "circleIdとuserIdが必要です");
 
-  if (orderIds.length === 0) {
-    return c.json([]);
+  const circleRows = await db.select({ eventId: circle.eventId }).from(circle)
+    .where(eq(circle.id, circleId)).limit(1);
+  const targetCircle = circleRows[0];
+  if (!targetCircle) apiError("NOT_FOUND", "サークルが見つかりません");
+  if (!(await hasPermission(c, circleId, "order:write", targetCircle.eventId))) {
+    apiError("FORBIDDEN", "会計する権限がありません");
   }
 
-  const items = await db
-    .select()
-    .from(orderItem)
-    // 2026-10-08: 副問い合わせをINの括弧内に置く。DrizzleのinArrayへSQL断片を渡すと括弧が補われず構文エラーになる。
-    .where(sql`${orderItem.orderId} IN (SELECT value FROM json_each(${JSON.stringify(orderIds)}))`);
+  const visitors = await db.select({ eventId: eventUser.eventId }).from(eventUser)
+    .where(eq(eventUser.id, userId)).limit(1);
+  if (!visitors[0] || visitors[0].eventId !== targetCircle.eventId) return c.json([]);
 
-  const itemIds = items.map((i) => i.id);
-  const allItemToppings = itemIds.length > 0
-    ? await db
-        .select()
-        .from(orderItemTopping)
-        .where(sql`${orderItemTopping.orderItemId} IN (SELECT value FROM json_each(${JSON.stringify(itemIds)}))`)
-    : [];
-
-  // 注文にアイテムを追加
-  const toppingsByItem = new Map<string, typeof allItemToppings>();
-  for (const itemTopping of allItemToppings) {
-    const list = toppingsByItem.get(itemTopping.orderItemId) ?? [];
-    list.push(itemTopping);
-    toppingsByItem.set(itemTopping.orderItemId, list);
-  }
-  const itemsByOrder = new Map<string, typeof items>();
-  for (const item of items) {
-    const list = itemsByOrder.get(item.orderId) ?? [];
-    list.push(item);
-    itemsByOrder.set(item.orderId, list);
-  }
-  const ordersWithItems = orders.map((o) => ({
-    ...o,
-    items: (itemsByOrder.get(o.id) ?? []).map((item) => ({
-      ...item,
-      toppings: (toppingsByItem.get(item.id) ?? [])
-        .map((t) => ({
-          ...t,
-          name: t.toppingName,
-          price: t.toppingPrice,
-        })),
-    })),
-  }));
-
-  return c.json(ordersWithItems);
+  const orders = await db.select().from(order).where(and(
+    eq(order.circleId, circleId),
+    eq(order.userId, userId),
+    eq(order.source, "mobile"),
+    eq(order.paymentStatus, "unpaid"),
+    ne(order.status, "cancelled"),
+  )).orderBy(desc(order.createdAt));
+  return c.json(await includeOrderItems(db, orders));
 });
 
 // 来場者本人の注文履歴 (レジを通った注文) を取得
@@ -332,11 +356,12 @@ orderRoutes.get("/user/:code", async (c) => {
       ? await db.select().from(circle).where(inArray(circle.id, circleIds))
       : [];
 
-  // cashierId / paymentMethod / updatedAt 等の内部情報は含めず、本人向けの項目のみ返す。
+  // cashierId / paymentMethod / updatedAt 等は除外し、来場者に必要な会計状態だけ返す。
   const result = orders.map((o) => ({
     id: o.id,
     orderNumber: o.orderNumber,
     status: o.status,
+    paymentStatus: o.paymentStatus,
     totalPrice: o.totalPrice,
     peopleCount: o.peopleCount,
     circleId: o.circleId,
@@ -505,7 +530,8 @@ const handleCreateOrder = async (
       const eventId = context.circle.eventId;
 
       // 2026-10-17: API経路で注文元を固定し、モバイル注文はレジ担当者情報を引き継がない。
-      const cashierId = source === "pos" ? input.cashierId ?? null : null;
+      // 2026-10-22: 会計担当者はクライアント申告を信用せず、認証済みセッションから記録する。
+      const cashierId = source === "pos" ? (await getSession(c))?.user.email ?? null : null;
       if (source === "mobile") {
         let settings: { mobileOrderEnabled?: boolean } = {};
         try {
@@ -783,8 +809,9 @@ const handleCreateOrder = async (
       // 2026-10-03: 在庫減算は注文/明細と同じD1 batchで実施する。逐次補償は不要。
       // 支払い方法の解決 (2026-07-12): 明示指定を優先し、無ければサークルの対応方法が
       // ちょうど1つのときだけそれを補完する (単一方法はレジで選択させないため)。
-      let resolvedPayment: string | undefined = input.paymentMethod?.trim() || undefined;
-      if (!resolvedPayment) {
+      // 2026-10-22: モバイル注文時の希望方法を実入金と誤認しないよう、支払い方法はレジ会計時に記録する。
+      let resolvedPayment: string | undefined = source === "pos" ? input.paymentMethod?.trim() || undefined : undefined;
+      if (source === "pos" && !resolvedPayment) {
         try {
           const parsed = JSON.parse(context.circle.settings || "{}");
           const accepted: unknown = parsed?.acceptedPayments;
@@ -850,6 +877,95 @@ const handleCreateOrder = async (
 orderRoutes.post("/", zBody(createOrderSchema), async (c) => handleCreateOrder(c, "pos", c.req.valid("json")));
 orderRoutes.post("/mobile", zBody(createOrderSchema), async (c) => handleCreateOrder(c, "mobile", c.req.valid("json")));
 
+// 2026-10-22: 会計は既存モバイル注文の支払い状態だけをCAS更新し、注文・在庫を再作成しない。
+orderRoutes.post(
+  "/:id/settle",
+  zBody(z.object({
+    paymentMethod: z.string().trim().min(1).max(30),
+  })),
+  async (c) => {
+    const db = c.get("db");
+    const id = c.req.param("id");
+    const input = c.req.valid("json");
+    const rows = await db.select({
+      id: order.id,
+      circleId: order.circleId,
+      userId: order.userId,
+      source: order.source,
+      status: order.status,
+      paymentStatus: order.paymentStatus,
+      paidAt: order.paidAt,
+      eventId: circle.eventId,
+      circleSettings: circle.settings,
+      eventPaymentMethods: event.paymentMethods,
+    }).from(order)
+      .innerJoin(circle, eq(circle.id, order.circleId))
+      .innerJoin(event, eq(event.id, circle.eventId))
+      .where(eq(order.id, id)).limit(1);
+    const target = rows[0];
+    if (!target) apiError("NOT_FOUND", "注文が見つかりません");
+    if (!(await hasPermission(c, target.circleId, "order:write", target.eventId))) {
+      apiError("FORBIDDEN", "会計する権限がありません");
+    }
+    const session = await getSession(c);
+    if (target.source !== "mobile") apiError("BAD_REQUEST", "モバイル注文だけ会計できます");
+    if (target.status === "cancelled") apiError("CONFLICT", "キャンセル済みの注文は会計できません");
+    if (target.paymentStatus === "paid") {
+      return c.json({
+        success: true,
+        alreadyPaid: true,
+        paidAt: target.paidAt?.toISOString() ?? new Date().toISOString(),
+      });
+    }
+
+    let eventMethods: string[] = [];
+    let acceptedMethods: string[] = [];
+    try {
+      const parsed: unknown = JSON.parse(target.eventPaymentMethods || "[]");
+      if (Array.isArray(parsed)) eventMethods = parsed.filter((value): value is string => typeof value === "string");
+    } catch { /* 不正なイベント設定では会計方法を受け付けない */ }
+    try {
+      const parsed = JSON.parse(target.circleSettings || "{}");
+      const configured: unknown = parsed?.acceptedPayments;
+      if (Array.isArray(configured)) acceptedMethods = configured.filter((value): value is string => typeof value === "string");
+    } catch { /* サークル設定が不正な場合はイベント設定へフォールバック */ }
+    const filteredMethods = acceptedMethods.length > 0
+      ? acceptedMethods.filter((method) => eventMethods.includes(method))
+      : eventMethods;
+    const allowedMethods = filteredMethods.length > 0 ? filteredMethods : eventMethods;
+    if (!allowedMethods.includes(input.paymentMethod)) {
+      apiError("BAD_REQUEST", "このサークルで利用できない支払い方法です");
+    }
+
+    const now = Date.now();
+    const results = await c.env.DB.batch([
+      c.env.DB.prepare(`UPDATE orders SET payment_status='paid', payment_method=?, cashier_id=?, paid_at=?, updated_at=?
+        WHERE id=? AND circle_id=? AND source='mobile' AND payment_status='unpaid' AND status!='cancelled'
+        RETURNING id`).bind(input.paymentMethod, session?.user.email ?? null, now, now, id, target.circleId),
+      // すでに厨房が調理を始めている場合は会計時にスタンプを補完する。
+      c.env.DB.prepare(`INSERT INTO user_stamp (id,user_id,circle_id)
+        SELECT ?, orders.user_id, orders.circle_id FROM orders
+        WHERE orders.id=? AND orders.user_id IS NOT NULL AND orders.payment_status='paid'
+          AND orders.status IN ('preparing','ready','completed')
+          AND NOT EXISTS (SELECT 1 FROM user_stamp WHERE user_id=orders.user_id AND circle_id=orders.circle_id)
+        ON CONFLICT(user_id,circle_id) DO NOTHING`).bind(ulid(), id),
+    ]);
+
+    const latest = await db.select({ paymentStatus: order.paymentStatus, status: order.status, paidAt: order.paidAt })
+      .from(order).where(eq(order.id, id)).limit(1);
+    if (latest[0]?.status === "cancelled") apiError("CONFLICT", "会計中に注文がキャンセルされました");
+    if (latest[0]?.paymentStatus !== "paid") {
+      if (results[0]?.meta.changes !== 1) apiError("CONFLICT", "注文の状態が変わりました。未会計注文を再読み込みしてください");
+      apiError("INTERNAL", "会計状態を確認できませんでした");
+    }
+    return c.json({
+      success: true,
+      alreadyPaid: results[0]?.meta.changes !== 1,
+      paidAt: latest[0]?.paidAt?.toISOString() ?? new Date(now).toISOString(),
+    });
+  },
+);
+
 // 注文ステータス更新
 orderRoutes.patch(
   "/:id/status",
@@ -862,6 +978,8 @@ orderRoutes.patch(
         "completed",
         "cancelled",
       ]),
+      // 2026-10-22: 支払済み注文は現金移動を済ませた担当者の明示操作でのみ返金取消する。
+      refundConfirmed: z.boolean().optional(),
     })
   ),
   async (c) => {
@@ -876,6 +994,9 @@ orderRoutes.patch(
         userId: order.userId,
         orderNumber: order.orderNumber,
         status: order.status,
+        totalPrice: order.totalPrice,
+        paymentMethod: order.paymentMethod,
+        paymentStatus: order.paymentStatus,
         eventId: circle.eventId,
       })
       .from(order)
@@ -899,10 +1020,24 @@ orderRoutes.patch(
       apiError("BAD_REQUEST", `${targetOrder.status} から ${input.status} への変更はできません`);
     }
 
+    const needsRefund = input.status === "cancelled" && targetOrder.paymentStatus === "paid";
+    if (needsRefund && input.refundConfirmed !== true) {
+      apiError("BAD_REQUEST", "支払済み注文は、実際に全額返金した後に返金を確認してください");
+    }
+    if (input.status === "cancelled" && targetOrder.paymentStatus === "refunded") {
+      apiError("CONFLICT", "この注文はすでに返金されています");
+    }
+    const now = Date.now();
+    const session = needsRefund ? await getSession(c) : null;
+
     const transitioned = await updateOrderStatus(c.env.DB, {
       orderId: id,
       expectedStatus: targetOrder.status,
       nextStatus: input.status,
+      expectedPaymentStatus: input.status === "cancelled" ? targetOrder.paymentStatus as "paid" | "unpaid" : undefined,
+      refund: needsRefund
+        ? { id: ulid(), refundedBy: session?.user.email ?? null, refundedAt: now }
+        : undefined,
       stamp: targetOrder.status === "pending" && input.status === "preparing" && targetOrder.userId
         ? { id: ulid(), userId: targetOrder.userId, circleId: targetOrder.circleId }
         : undefined,
@@ -920,7 +1055,10 @@ orderRoutes.patch(
       }).catch(() => console.warn("order_completion_notification_failed")));
     }
 
-    return c.json({ success: true });
+    return c.json({
+      success: true,
+      refund: needsRefund ? { amount: targetOrder.totalPrice, refundedAt: new Date(now).toISOString() } : null,
+    });
   }
 );
 
@@ -945,10 +1083,13 @@ orderRoutes.post("/:id/complete", async (c) => {
     apiError("FORBIDDEN", "権限がありません");
   }
 
-  await db
+  // 2026-10-22: 返金・取消済み注文を完了扱いへ戻さず、取消を終端状態として守る。
+  const completedOrders = await db
     .update(order)
     .set({ status: "completed", completed: true, completedAt: new Date() })
-    .where(eq(order.id, id));
+    .where(and(eq(order.id, id), ne(order.status, "cancelled")))
+    .returning({ id: order.id });
+  if (completedOrders.length === 0) apiError("CONFLICT", "キャンセル済み注文は完了にできません");
 
   if (targetOrder.status !== "completed" && targetOrder.userId && targetOrder.eventId) {
     c.executionCtx.waitUntil(notifyVisitorOrderComplete(db, c.env, {
@@ -1071,7 +1212,8 @@ orderRoutes.get("/stats/sales", async (c) => {
   let query = db
     .select()
     .from(order)
-    .where(and(eq(order.circleId, circleId), eq(order.status, "completed")));
+    // 2026-10-22: 売上統計は調理完了ではなく実会計を基準にし、取消注文を除く。
+    .where(and(eq(order.circleId, circleId), ne(order.status, "cancelled"), eq(order.paymentStatus, "paid")));
 
   const orders = await query;
 
@@ -1080,12 +1222,12 @@ orderRoutes.get("/stats/sales", async (c) => {
   if (dateFrom) {
     const from = new Date(dateFrom);
     filteredOrders = filteredOrders.filter(
-      (o) => new Date(o.createdAt!) >= from
+      (o) => (o.paidAt ?? o.createdAt) >= from
     );
   }
   if (dateTo) {
     const to = new Date(dateTo);
-    filteredOrders = filteredOrders.filter((o) => new Date(o.createdAt!) <= to);
+    filteredOrders = filteredOrders.filter((o) => (o.paidAt ?? o.createdAt) <= to);
   }
 
   const totalSales = filteredOrders.reduce(

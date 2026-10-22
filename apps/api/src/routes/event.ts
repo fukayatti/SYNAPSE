@@ -7,6 +7,7 @@ import {
   membership,
   circle,
   order,
+  orderRefund,
   orderItem,
   orderItemTopping,
   eventUser,
@@ -19,7 +20,7 @@ import {
   contractPayment,
   eventAnnouncement,
 } from "@fesflow/db";
-import { eq, and, inArray, isNull, isNotNull, desc } from "drizzle-orm";
+import { eq, and, inArray, isNull, isNotNull, desc, gte, lt } from "drizzle-orm";
 import { ulid } from "ulidx";
 import { getAdminSession, getSession, hasPermission } from "../utils/auth";
 import type { AppEnv } from "../types";
@@ -594,36 +595,81 @@ eventRoutes.get("/:id/daily-close", async (c) => {
   const orders = circleIds.length
     ? await db.select().from(order).where(inArray(order.circleId, circleIds))
     : [];
-  const dayOrders = orders.filter(
-    (o) => o.status !== "cancelled" && o.createdAt.getTime() >= dayStart && o.createdAt.getTime() < dayEnd
-  );
+  // 2026-10-22: 日次精算は注文受付日ではなく入金日で締め、旧会計済み注文だけ作成日へフォールバックする。
+  // 2026-10-22: 返金後も元の入金を売上履歴に残し、返金日側で別取引として差し引く。
+  const dayOrders = orders.filter((o) => {
+    const settledAt = (o.paidAt ?? o.createdAt).getTime();
+    // 2026-10-22: 旧取消注文には返金記録がないため、入金済みとも返金済みとも推定しない。
+    const isRecordedSettlement = o.paymentStatus === "refunded" ||
+      (o.paymentStatus === "paid" && o.status !== "cancelled");
+    return isRecordedSettlement && settledAt >= dayStart && settledAt < dayEnd;
+  });
+  const dayRefunds = circleIds.length
+    ? await db.select({
+        circleId: order.circleId,
+        amount: orderRefund.amount,
+        originalPaymentMethod: orderRefund.originalPaymentMethod,
+        refundedAt: orderRefund.refundedAt,
+      }).from(orderRefund)
+        .innerJoin(order, eq(orderRefund.orderId, order.id))
+        .where(and(
+          inArray(order.circleId, circleIds),
+          gte(orderRefund.refundedAt, new Date(dayStart)),
+          lt(orderRefund.refundedAt, new Date(dayEnd)),
+        ))
+    : [];
 
   const payAgg = new Map<string, { orders: number; revenue: number }>();
-  const circleAgg = new Map<string, { orders: number; revenue: number }>();
+  const circleAgg = new Map<string, { orders: number; grossRevenue: number; refundAmount: number; refundedOrders: number }>();
   for (const o of dayOrders) {
     const pk = o.paymentMethod || "未設定";
     const pa = payAgg.get(pk) || { orders: 0, revenue: 0 };
     pa.orders += 1;
     pa.revenue += o.totalPrice;
     payAgg.set(pk, pa);
-    const ca = circleAgg.get(o.circleId) || { orders: 0, revenue: 0 };
+    const ca = circleAgg.get(o.circleId) || { orders: 0, grossRevenue: 0, refundAmount: 0, refundedOrders: 0 };
     ca.orders += 1;
-    ca.revenue += o.totalPrice;
+    ca.grossRevenue += o.totalPrice;
     circleAgg.set(o.circleId, ca);
   }
+  const refundAgg = new Map<string, { orders: number; amount: number }>();
+  for (const refund of dayRefunds) {
+    const method = refund.originalPaymentMethod || "未設定";
+    const agg = refundAgg.get(method) || { orders: 0, amount: 0 };
+    agg.orders += 1;
+    agg.amount += refund.amount;
+    refundAgg.set(method, agg);
+    const ca = circleAgg.get(refund.circleId) || { orders: 0, grossRevenue: 0, refundAmount: 0, refundedOrders: 0 };
+    ca.refundAmount += refund.amount;
+    ca.refundedOrders += 1;
+    circleAgg.set(refund.circleId, ca);
+  }
+  const grossRevenue = dayOrders.reduce((sum, o) => sum + o.totalPrice, 0);
+  const refundAmount = dayRefunds.reduce((sum, refund) => sum + refund.amount, 0);
 
   return c.json({
     date: resolvedDate,
     totals: {
       orders: dayOrders.length,
-      revenue: dayOrders.reduce((s, o) => s + o.totalPrice, 0),
+      grossRevenue,
+      refundOrders: dayRefunds.length,
+      refundAmount,
+      revenue: grossRevenue - refundAmount,
       customers: dayOrders.reduce((s, o) => s + o.peopleCount, 0),
     },
     paymentBreakdown: Array.from(payAgg.entries())
       .map(([method, a]) => ({ method, ...a }))
       .sort((a, b) => b.revenue - a.revenue),
+    refundBreakdown: Array.from(refundAgg.entries())
+      .map(([method, a]) => ({ method, ...a }))
+      .sort((a, b) => b.amount - a.amount),
     circleBreakdown: Array.from(circleAgg.entries())
-      .map(([id, a]) => ({ circleId: id, name: circleName.get(id) || "", ...a }))
+      .map(([id, a]) => ({
+        circleId: id,
+        name: circleName.get(id) || "",
+        ...a,
+        revenue: a.grossRevenue - a.refundAmount,
+      }))
       .sort((a, b) => b.revenue - a.revenue),
   });
 });
@@ -983,7 +1029,23 @@ eventRoutes.get("/:id/analytics", async (c) => {
     ? await db.select().from(order).where(inArray(order.circleId, circleIds))
     : [];
   const liveOrders = orders.filter((o) => o.status !== "cancelled");
-  const orderIds = liveOrders.map((o) => o.id);
+  // 2026-10-22: 購買数・メニューは返金済み注文を除き、会計総額と返金額は別々に集計する。
+  const paidOrders = liveOrders.filter((o) => o.paymentStatus === "paid");
+  // 2026-10-22: 返金記録のない旧取消注文を売上・返金へ推定計上しない。
+  const settledOrders = orders.filter((o) =>
+    o.paymentStatus === "refunded" || (o.paymentStatus === "paid" && o.status !== "cancelled"),
+  );
+  const refunds = circleIds.length
+    ? await db.select({
+        circleId: order.circleId,
+        amount: orderRefund.amount,
+        originalPaymentMethod: orderRefund.originalPaymentMethod,
+        refundedAt: orderRefund.refundedAt,
+      }).from(orderRefund)
+        .innerJoin(order, eq(orderRefund.orderId, order.id))
+        .where(inArray(order.circleId, circleIds))
+    : [];
+  const orderIds = paidOrders.map((o) => o.id);
 
   // 注文明細 (人気メニュー集計用)
   const items = orderIds.length
@@ -1026,8 +1088,10 @@ eventRoutes.get("/:id/analytics", async (c) => {
   // JST の時刻に補正してから時間帯バケットを取る (文化祭は JST 前提)。
   const jstHour = (ms: number) => new Date(ms + 9 * 3600 * 1000).getUTCHours();
 
-  const revenue = liveOrders.reduce((s, o) => s + o.totalPrice, 0);
-  const customers = liveOrders.reduce((s, o) => s + o.peopleCount, 0);
+  const grossRevenue = settledOrders.reduce((sum, o) => sum + o.totalPrice, 0);
+  const refundAmount = refunds.reduce((sum, refund) => sum + refund.amount, 0);
+  const revenue = grossRevenue - refundAmount;
+  const customers = paidOrders.reduce((s, o) => s + o.peopleCount, 0);
   const completed = liveOrders.filter((o) => o.status === "completed" || o.completed).length;
 
   // 時間帯別 (0-23)
@@ -1035,12 +1099,18 @@ eventRoutes.get("/:id/analytics", async (c) => {
     hour: h,
     orders: 0,
     revenue: 0,
+    refunds: 0,
     visitors: 0,
   }));
-  for (const o of liveOrders) {
-    const h = jstHour(o.createdAt.getTime());
+  for (const o of settledOrders) {
+    // 2026-10-22: 時間帯別の入金額は実会計時刻に帰属し、返金は独立した系列で返す。
+    const h = jstHour((o.paidAt ?? o.createdAt).getTime());
     byHour[h]!.orders += 1;
     byHour[h]!.revenue += o.totalPrice;
+  }
+  for (const refund of refunds) {
+    const h = jstHour(refund.refundedAt.getTime());
+    byHour[h]!.refunds += refund.amount;
   }
   for (const v of registeredVisitors) {
     const h = jstHour(v.onboardedAt!.getTime());
@@ -1048,14 +1118,26 @@ eventRoutes.get("/:id/analytics", async (c) => {
   }
 
   // サークル別ランキング
-  const circleAgg = new Map<string, { revenue: number; orders: number; ratingSum: number; reviews: number }>();
-  for (const id of circleIds) circleAgg.set(id, { revenue: 0, orders: 0, ratingSum: 0, reviews: 0 });
-  for (const o of liveOrders) {
+  const circleAgg = new Map<string, { grossRevenue: number; refundAmount: number; revenue: number; orders: number; ratingSum: number; reviews: number }>();
+  for (const id of circleIds) circleAgg.set(id, { grossRevenue: 0, refundAmount: 0, revenue: 0, orders: 0, ratingSum: 0, reviews: 0 });
+  for (const o of settledOrders) {
     const a = circleAgg.get(o.circleId);
     if (a) {
-      a.revenue += o.totalPrice;
+      a.grossRevenue += o.totalPrice;
+    }
+  }
+  for (const o of paidOrders) {
+    const a = circleAgg.get(o.circleId);
+    if (a) {
       a.orders += 1;
     }
+  }
+  for (const refund of refunds) {
+    const a = circleAgg.get(refund.circleId);
+    if (a) a.refundAmount += refund.amount;
+  }
+  for (const aggregate of circleAgg.values()) {
+    aggregate.revenue = aggregate.grossRevenue - aggregate.refundAmount;
   }
   for (const r of reviews) {
     const a = circleAgg.get(r.circleId);
@@ -1071,6 +1153,8 @@ eventRoutes.get("/:id/analytics", async (c) => {
         circleId: id,
         name: circleName.get(id) || "",
         revenue: a.revenue,
+        grossRevenue: a.grossRevenue,
+        refundAmount: a.refundAmount,
         orders: a.orders,
         reviews: a.reviews,
         avgRating: a.reviews ? Math.round((a.ratingSum / a.reviews) * 10) / 10 : null,
@@ -1120,18 +1204,29 @@ eventRoutes.get("/:id/analytics", async (c) => {
   const uniqueVisitFrom = new Set(visits.map((v) => v.eventUserId)).size;
   const entryRate = visitors.length ? Math.round((registeredVisitors.length / visitors.length) * 100) : 0;
 
-  // 支払い方法別の集計 (2026-07-12)。未記録は「未設定」にまとめる。
+  // 支払い方法別の入金集計。返金は元の支払い方法別に独立して照合する。
   const payAgg = new Map<string, { orders: number; revenue: number }>();
-  for (const o of liveOrders) {
+  for (const o of settledOrders) {
     const key = o.paymentMethod || "未設定";
     const a = payAgg.get(key) || { orders: 0, revenue: 0 };
     a.orders += 1;
     a.revenue += o.totalPrice;
     payAgg.set(key, a);
   }
+  const refundAgg = new Map<string, { orders: number; amount: number }>();
+  for (const refund of refunds) {
+    const key = refund.originalPaymentMethod || "未設定";
+    const a = refundAgg.get(key) || { orders: 0, amount: 0 };
+    a.orders += 1;
+    a.amount += refund.amount;
+    refundAgg.set(key, a);
+  }
   const paymentBreakdown = Array.from(payAgg.entries())
     .map(([method, a]) => ({ method, ...a }))
     .sort((a, b) => b.revenue - a.revenue);
+  const refundBreakdown = Array.from(refundAgg.entries())
+    .map(([method, a]) => ({ method, ...a }))
+    .sort((a, b) => b.amount - a.amount);
 
   return c.json({
     totals: {
@@ -1142,7 +1237,10 @@ eventRoutes.get("/:id/analytics", async (c) => {
       // 2026-10-19: 旧クライアント互換のため、従来の項目名も入場処理済み数/率として残す。
       onboarded: registeredVisitors.length,
       onboardedRate: entryRate,
-      orders: liveOrders.length,
+      orders: paidOrders.length,
+      grossRevenue,
+      refundOrders: refunds.length,
+      refundAmount,
       revenue,
       customers,
       avgSpend: customers ? Math.round(revenue / customers) : 0,
@@ -1160,6 +1258,7 @@ eventRoutes.get("/:id/analytics", async (c) => {
     menuRanking,
     ageBuckets,
     paymentBreakdown,
+    refundBreakdown,
   });
 });
 
@@ -1188,6 +1287,7 @@ eventRoutes.get("/:id/behavior", async (c) => {
     ? await db.select().from(order).where(inArray(order.circleId, circleIds))
     : [];
   const liveOrders = orders.filter((o) => o.status !== "cancelled");
+  const paidOrders = liveOrders.filter((o) => o.paymentStatus === "paid");
   const accountRows = await db.select().from(eventUser).where(eq(eventUser.eventId, eventId));
   // 2026-10-19: 発行済みアカウント数ではなく、入場確定済みの家族アカウントを行動分析の母数にする。
   const visitors = accountRows.filter((visitor) => visitor.onboardedAt != null);
@@ -1252,7 +1352,8 @@ eventRoutes.get("/:id/behavior", async (c) => {
       j.spend += spend;
     }
   };
-  for (const o of liveOrders) touch(o.userId, o.circleId, o.createdAt.getTime(), true, o.totalPrice);
+  // 2026-10-22: 未会計モバイル注文を購入転換・消費額へ含めない。厨房の完了率は注文の進行状況として別に数える。
+  for (const o of paidOrders) touch(o.userId, o.circleId, o.createdAt.getTime(), true, o.totalPrice);
   for (const v of visits) touch(v.eventUserId, v.circleId, v.createdAt.getTime(), false, 0);
   for (const s of stamps) touch(s.userId, s.circleId, s.createdAt.getTime(), false, 0);
 
