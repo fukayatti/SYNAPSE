@@ -20,6 +20,14 @@ export interface SwipeableOrder {
   status: string;
   receivedAt?: string | Date | null;
   source?: "pos" | "mobile";
+  paymentStatus?: "paid" | "unpaid" | "refunded";
+  paymentMethod?: string | null;
+  refund?: {
+    amount: number;
+    originalPaymentMethod: string | null;
+    refundedBy: string | null;
+    refundedAt: string | Date;
+  } | null;
   totalPrice?: number;
   peopleCount?: number;
   items: Array<{
@@ -48,7 +56,7 @@ interface SwipeableOrderStackProps {
   onStart: (id: string) => Promise<unknown>;
   onComplete: (id: string) => Promise<unknown>;
   onMarkReceived: (id: string) => Promise<unknown>;
-  onCancelRequest: (id: string, orderNumber: string) => void;
+  onCancelRequest: (order: SwipeableOrder) => void;
   cancelAnimationOrderId?: string | null;
   isUpdating?: boolean;
 }
@@ -125,7 +133,8 @@ function KitchenOrderCard({
     : order.status === "completed"
       ? { label: "受け取り待ち", variant: "active" as const }
       : statusBadge(order.status);
-  const canCancel = order.status === "pending" || order.status === "preparing";
+  // 2026-10-22: APIと同じく受け取り待ちでも取消を選べるようにし、会計済みなら返金確認を通す。
+  const canCancel = order.status === "pending" || order.status === "preparing" || order.status === "ready";
 
   const performAction = async () => {
     try {
@@ -274,6 +283,14 @@ function KitchenOrderCard({
           <span className="text-xs font-bold uppercase">合計</span>
           <span className="font-headline text-xl tabular-nums">¥{(order.totalPrice ?? 0).toLocaleString()}</span>
         </div>
+        {order.paymentStatus === "refunded" && order.refund && (
+          <div role="status" className="space-y-1 border-thick border-warning bg-warning/10 p-3 text-xs">
+            <p className="font-black">返金済み · ¥{order.refund.amount.toLocaleString()}</p>
+            <p>返金日時: {new Date(order.refund.refundedAt).toLocaleString("ja-JP")}</p>
+            {order.refund.originalPaymentMethod && <p>元の決済方法: {order.refund.originalPaymentMethod}</p>}
+            {order.refund.refundedBy && <p>返金記録者: {order.refund.refundedBy}</p>}
+          </div>
+        )}
       </CardContent>
 
       <CardFooter className="grid grid-cols-1 gap-2 border-t-thin border-border p-3 sm:grid-cols-2 sm:p-4">
@@ -475,7 +492,7 @@ export function SwipeableOrderStack({
               onStart={() => onStart(order.id)}
               onComplete={() => onComplete(order.id)}
               onMarkReceived={() => onMarkReceived(order.id)}
-              onCancelRequest={() => onCancelRequest(order.id, displayOrderNumber(order.orderNumber))}
+              onCancelRequest={() => onCancelRequest(order)}
               cancelAnimationOrderId={cancelAnimationOrderId}
             />
           </div>

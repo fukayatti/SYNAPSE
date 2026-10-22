@@ -17,6 +17,7 @@ import { ErrorState } from "@/components/ui/ErrorState";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useSessionState } from "@/hooks/useSessionState";
 import { queryCachePolicy } from "@/lib/query-cache-policy";
+import { allocateOrderRevenueByItem } from "@/features/orders/sales-allocation";
 
 // ローカルタイムの YYYY-MM-DD キー (日付ごとの集計・切り替えに使用)
 const dayKey = (d: Date) =>
@@ -56,9 +57,14 @@ function SalesManagementContent() {
     ...queryCachePolicy.live,
   });
 
-  // 注文が存在する日付の一覧 (新しい順)。切り替え用のセレクト・前後ナビに使う。
+  // 2026-10-22: 会計日と返金日を営業日一覧へ含め、別日の返金も照合できるようにする。
   const availableDates = Array.from(
-    new Set((orders ?? []).filter((o) => o.createdAt).map((o) => dayKey(new Date(o.createdAt!))))
+    new Set((orders ?? []).flatMap((order) => [
+      order.paidAt ?? order.createdAt,
+      order.refund?.refundedAt ?? null,
+    ])
+      .filter((timestamp): timestamp is Date => timestamp != null)
+      .map((timestamp) => dayKey(new Date(timestamp))))
   ).sort((a, b) => (a < b ? 1 : -1));
 
   // 2026-10-16: スペース切り替え後に前サークルの選択日が残ると、新しい注文があるのに空表示になる。
@@ -73,9 +79,14 @@ function SalesManagementContent() {
     }
   }, [availableDates, selectedDate]);
 
-  // 選択中の日付の注文のみを対象に集計する。
+  // 選択日の会計または返金に関係する注文を履歴へ表示する。
   const ordersForDay = (orders ?? []).filter(
-    (o) => o.createdAt && dayKey(new Date(o.createdAt)) === selectedDate
+    (order) => {
+      const settlementDate = order.paidAt ?? order.createdAt;
+      const matchesSettlement = settlementDate != null && dayKey(new Date(settlementDate)) === selectedDate;
+      const matchesRefund = order.refund?.refundedAt != null && dayKey(new Date(order.refund.refundedAt)) === selectedDate;
+      return matchesSettlement || matchesRefund;
+    },
   );
 
   const currentIndex = availableDates.indexOf(selectedDate);
@@ -89,11 +100,19 @@ function SalesManagementContent() {
     if (currentIndex > 0) setSelectedDate(availableDates[currentIndex - 1]);
   };
 
-  const completedOrders = ordersForDay.filter((order) => order.status === "completed");
-  const completedSales = completedOrders.reduce(
-    (sum, order) => sum + (order.totalPrice || 0),
-    0
+  // 2026-10-22: 入金は会計日、返金は返金日に計上し、純売上を照合可能にする。
+  const settledOrders = (orders ?? []).filter((order) => {
+    const settlementDate = order.paidAt ?? order.createdAt;
+    return (order.paymentStatus === "paid" || order.paymentStatus === "refunded") &&
+      settlementDate != null && dayKey(new Date(settlementDate)) === selectedDate;
+  });
+  const refundOrders = (orders ?? []).filter((order) =>
+    order.refund?.refundedAt != null && dayKey(new Date(order.refund.refundedAt)) === selectedDate,
   );
+  const recognizedOrders = settledOrders.filter((order) => order.paymentStatus === "paid");
+  const grossSales = settledOrders.reduce((sum, order) => sum + (order.totalPrice || 0), 0);
+  const refundAmount = refundOrders.reduce((sum, order) => sum + (order.refund?.amount || 0), 0);
+  const netSales = grossSales - refundAmount;
 
   // 時間帯別 (9:00 - 18:00) の売上集計
   const hourlyData = Array.from({ length: 10 }, (_, i) => {
@@ -105,10 +124,10 @@ function SalesManagementContent() {
     };
   });
 
-  completedOrders.forEach((order) => {
-    if (!order.createdAt) return;
-    const date = new Date(order.createdAt);
-    const hour = date.getHours();
+  settledOrders.forEach((order) => {
+    const settledAt = order.paidAt ?? order.createdAt;
+    if (!settledAt) return;
+    const hour = new Date(new Date(settledAt).getTime() + 9 * 60 * 60 * 1000).getUTCHours();
     if (hour >= 9 && hour <= 18) {
       hourlyData[hour - 9].sales += order.totalPrice || 0;
       hourlyData[hour - 9].count += 1;
@@ -119,10 +138,12 @@ function SalesManagementContent() {
 
   // 商品（メニュー）別の売上集計
   const itemSalesMap: Record<string, { name: string; sales: number; count: number }> = {};
-  completedOrders.forEach((order) => {
-    order.items?.forEach((item) => {
+  recognizedOrders.forEach((order) => {
+    const items = order.items ?? [];
+    const allocatedRevenue = allocateOrderRevenueByItem({ totalPrice: order.totalPrice, items });
+    items.forEach((item, index) => {
       const menuName = item.menuName || "不明な商品";
-      const itemTotalPrice = (item.menuPrice || 0) * (item.quantity || 1);
+      const itemTotalPrice = allocatedRevenue[index] ?? 0;
       if (!itemSalesMap[menuName]) {
         itemSalesMap[menuName] = { name: menuName, sales: 0, count: 0 };
       }
@@ -157,10 +178,8 @@ function SalesManagementContent() {
       <DashboardLayout title={circleName} subtitle="売上管理" type="circle">
         <div className="space-y-4">
           <Skeleton className="h-12 w-64" />
-          <div className="grid gap-4 md:grid-cols-3">
-            <Skeleton className="h-32" />
-            <Skeleton className="h-32" />
-            <Skeleton className="h-32" />
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+            {Array.from({ length: 5 }, (_, index) => <Skeleton key={index} className="h-32" />)}
           </div>
         </div>
       </DashboardLayout>
@@ -222,10 +241,11 @@ function SalesManagementContent() {
         </Card>
 
         {/* サマリーカード */}
-        <div className="grid gap-5 md:grid-cols-3">
+        {/* 2026-10-22: 注文日と返金日を区別し、総額・返金額・純売上を同じ日付で照合する。 */}
+        <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-5">
           <Card className="rounded-none shadow-none">
             <CardHeader className="pb-1">
-              <CardTitle className="font-mono text-xs uppercase tracking-widest text-muted-foreground">総注文数</CardTitle>
+              <CardTitle className="font-mono text-xs uppercase tracking-widest text-muted-foreground">関連注文</CardTitle>
             </CardHeader>
             <CardContent>
               <p className="font-headline text-3xl tabular-nums">{ordersForDay.length}<span className="ml-2 text-base">件</span></p>
@@ -234,20 +254,39 @@ function SalesManagementContent() {
 
           <Card className="rounded-none shadow-none">
             <CardHeader className="pb-1">
-              <CardTitle className="font-mono text-xs uppercase tracking-widest text-muted-foreground">完了注文数</CardTitle>
+              <CardTitle className="font-mono text-xs uppercase tracking-widest text-muted-foreground">会計件数</CardTitle>
             </CardHeader>
             <CardContent>
-              <p className="font-headline text-3xl tabular-nums">{completedOrders.length}<span className="ml-2 text-base">件</span></p>
+              <p className="font-headline text-3xl tabular-nums">{settledOrders.length}<span className="ml-2 text-base">件</span></p>
+            </CardContent>
+          </Card>
+
+          <Card className="rounded-none shadow-none">
+            <CardHeader className="pb-1">
+              <CardTitle className="font-mono text-xs uppercase tracking-widest text-muted-foreground">会計売上</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="font-headline text-3xl tabular-nums">¥{grossSales.toLocaleString()}</p>
+            </CardContent>
+          </Card>
+
+          <Card className="rounded-none shadow-none">
+            <CardHeader className="pb-1">
+              <CardTitle className="font-mono text-xs uppercase tracking-widest text-muted-foreground">返金</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="font-headline text-3xl tabular-nums">−¥{refundAmount.toLocaleString()}</p>
+              <p className="font-mono text-[10px] text-muted-foreground">{refundOrders.length}件</p>
             </CardContent>
           </Card>
 
           <Card className="rounded-none shadow-none bg-primary text-primary-foreground">
             <CardHeader className="pb-1">
-              <CardTitle className="font-mono text-xs uppercase tracking-widest text-primary-foreground/75">完了売上</CardTitle>
+              <CardTitle className="font-mono text-xs uppercase tracking-widest text-primary-foreground/75">純売上</CardTitle>
             </CardHeader>
             <CardContent>
               <p className="font-headline text-3xl tabular-nums">
-                ¥{completedSales.toLocaleString()}
+                ¥{netSales.toLocaleString()}
               </p>
             </CardContent>
           </Card>
@@ -258,8 +297,8 @@ function SalesManagementContent() {
           {/* 時間帯別売上グラフ (SVG) */}
           <Card className="rounded-none shadow-none">
             <CardHeader>
-              <CardTitle className="text-base font-bold uppercase tracking-wide">時間帯別売上推移</CardTitle>
-              <CardDescription className="text-xs">9:00 - 18:00 の時間帯別売上 (円)</CardDescription>
+              <CardTitle className="text-base font-bold uppercase tracking-wide">会計時刻別売上推移</CardTitle>
+              <CardDescription className="text-xs">9:00 - 18:00 の会計売上（返金前・円）</CardDescription>
             </CardHeader>
             <CardContent className="flex justify-center">
               {/* 2026-10-16: グラフ拡大をマウスだけでなくキーボードからも開けるよう共通Buttonにする。 */}
@@ -344,7 +383,7 @@ function SalesManagementContent() {
           <Card className="rounded-none shadow-none">
             <CardHeader>
               <CardTitle className="text-base font-bold uppercase tracking-wide">メニュー別売上構成</CardTitle>
-              <CardDescription className="text-xs">完了したメニューごとの合計売上</CardDescription>
+              <CardDescription className="text-xs">返金済み注文を除く会計商品の売上</CardDescription>
             </CardHeader>
             <CardContent>
               {menuSalesData.length > 0 ? (
@@ -389,8 +428,8 @@ function SalesManagementContent() {
                   <div>
                     <p className="font-bold">{order.orderNumber}</p>
                     <p className="text-xs text-muted-foreground">
-                      {order.createdAt
-                        ? new Date(order.createdAt).toLocaleString("ja-JP")
+                      {order.paymentStatus === "paid" ? "会計" : "注文"}: {(order.paidAt ?? order.createdAt)
+                        ? new Date((order.paidAt ?? order.createdAt)!).toLocaleString("ja-JP")
                         : "-"}
                     </p>
                     {/* 2026-07-16: レジ担当者 (cashierId) の閲覧導線。誰が処理したか追跡できるよう表示する。
@@ -398,13 +437,19 @@ function SalesManagementContent() {
                     <p className="text-xs text-muted-foreground">
                       担当: {order.cashierId || "-"}
                     </p>
+                    {order.refund && (
+                      <p className="max-w-[34rem] text-xs font-bold text-destructive">
+                        返金記録: {new Date(order.refund.refundedAt).toLocaleString("ja-JP")} · ¥{order.refund.amount.toLocaleString()}
+                        · 元の方法 {order.refund.originalPaymentMethod || "未設定"} · 担当 {order.refund.refundedBy || "未記録"}
+                      </p>
+                    )}
                   </div>
                   <div className="text-right">
                     <p className="font-black">
                       ¥{(order.totalPrice ?? 0).toLocaleString()}
                     </p>
                     <p className="text-xs uppercase font-bold text-muted-foreground">
-                      {order.status}
+                      {order.status} · {order.paymentStatus === "paid" ? "会計済み" : order.paymentStatus === "refunded" ? "返金済み" : "未会計"}
                     </p>
                   </div>
                 </div>

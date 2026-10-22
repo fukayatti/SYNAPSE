@@ -80,6 +80,9 @@ export const order = sqliteTable(
     // 支払い方法 (2026-07-12): レジで選択された方法。集計・日次締めに使う。
     // null=未記録 (支払い方法機能を使う前の注文 / 単一方法で省略された場合はサーバが補完)。
     paymentMethod: text("payment_method"),
+    // 2026-10-22: 厨房状態から独立し、モバイル注文の入金と返金を区別する。
+    paymentStatus: text("payment_status").notNull().default("paid"), // paid / unpaid / refunded
+    paidAt: integer("paid_at", { mode: "timestamp_ms" }),
     createdAt: integer("created_at", { mode: "timestamp_ms" })
       .default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
       .notNull(),
@@ -94,7 +97,25 @@ export const order = sqliteTable(
     // 2026-10-03 (#81): 表示番号は店舗内の受付番号なので、重複を防ぐ範囲も店舗内に限定する。
     uniqueIndex("orders_circle_order_number_unique").on(table.circleId, table.orderNumber),
     index("orders_circle_status_created_idx").on(table.circleId, table.status, table.createdAt),
+    index("orders_circle_user_payment_idx").on(table.circleId, table.userId, table.paymentStatus),
   ]
+);
+
+// 2026-10-22: 手動の全額返金と注文取消を追跡し、売上から除外しても会計証跡を残す。
+export const orderRefund = sqliteTable(
+  "order_refund",
+  {
+    id: text("id").primaryKey().$defaultFn(() => ulid()),
+    orderId: text("order_id").notNull().references(() => order.id, { onDelete: "restrict" }),
+    amount: integer("amount").notNull(),
+    originalPaymentMethod: text("original_payment_method"),
+    refundedBy: text("refunded_by"),
+    refundedAt: integer("refunded_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("order_refund_order_unique").on(table.orderId),
+    index("order_refund_refundedAt_idx").on(table.refundedAt),
+  ],
 );
 
 // 注文アイテムテーブル

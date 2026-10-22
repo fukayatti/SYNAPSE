@@ -225,7 +225,7 @@ export default function OrdersPage() {
         <section aria-labelledby="mobile-order-receipt-heading" role="status" className="space-y-3 border-heavy border-success bg-success/10 p-4 sm:p-6">
           <div>
             <h2 id="mobile-order-receipt-heading" className="text-lg font-black">注文を受け付けました</h2>
-            <p className="mt-1 text-sm">店頭では、この番号をお伝えください。</p>
+            <p className="mt-1 text-sm">店頭でリストバンドとこの番号を見せて、お支払いください。注文を作り直す必要はありません。</p>
           </div>
           <div className="flex flex-wrap items-end justify-between gap-4 border-y-thick border-border py-3">
             <div>
@@ -390,6 +390,12 @@ export default function OrdersPage() {
                       <div className="flex flex-col items-start gap-2">
                         <span className={`px-2 py-0.5 text-xs font-black uppercase flex items-center gap-1 ${badge.cls}`}>
                           <Icon className="h-3.5 w-3.5" /> {badge.label}
+                        </span>
+                        <span className={`border-thin border-border px-2 py-0.5 text-xs font-black ${o.paymentStatus === "unpaid" ? "bg-warning text-foreground" : o.paymentStatus === "refunded" ? "bg-muted text-muted-foreground" : "bg-success text-success-foreground"}`}>
+                          {o.paymentStatus === "unpaid"
+                            ? o.status === "cancelled" ? "未会計 · 注文取消済み" : "店頭未会計 · お支払いください"
+                            : o.paymentStatus === "refunded" ? "全額返金済み"
+                            : "会計済み"}
                         </span>
                         <span className="text-xs text-muted-foreground">
                           {new Date(o.createdAt).toLocaleTimeString("ja-JP")}

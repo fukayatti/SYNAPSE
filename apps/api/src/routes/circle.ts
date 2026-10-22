@@ -131,7 +131,9 @@ circleRoutes.get("/:id/analytics", async (c) => {
 
   const orders = await db.select().from(order).where(eq(order.circleId, circleId));
   const liveOrders = orders.filter((o) => o.status !== "cancelled");
-  const orderIds = liveOrders.map((o) => o.id);
+  // 2026-10-22: 売上・購買数には店頭会計まで終わった注文だけを含める。
+  const paidOrders = liveOrders.filter((o) => o.paymentStatus === "paid");
+  const orderIds = paidOrders.map((o) => o.id);
   const items = orderIds.length
     ? await db.select().from(orderItem).where(inArray(orderItem.orderId, orderIds))
     : [];
@@ -150,8 +152,8 @@ circleRoutes.get("/:id/analytics", async (c) => {
   const menus = await db.select({ id: menu.id }).from(menu).where(eq(menu.circleId, circleId));
 
   const jstHour = (ms: number) => new Date(ms + 9 * 3600 * 1000).getUTCHours();
-  const revenue = liveOrders.reduce((s, o) => s + o.totalPrice, 0);
-  const customers = liveOrders.reduce((s, o) => s + o.peopleCount, 0);
+  const revenue = paidOrders.reduce((s, o) => s + o.totalPrice, 0);
+  const customers = paidOrders.reduce((s, o) => s + o.peopleCount, 0);
   const completed = liveOrders.filter((o) => o.status === "completed" || o.completed);
   // 平均調理時間 (完成注文の completedAt - createdAt の平均、分)
   const prepMins = completed
@@ -163,8 +165,9 @@ circleRoutes.get("/:id/analytics", async (c) => {
     : null;
 
   const byHour = Array.from({ length: 24 }, (_, h) => ({ hour: h, orders: 0, revenue: 0 }));
-  for (const o of liveOrders) {
-    const h = jstHour(o.createdAt.getTime());
+  for (const o of paidOrders) {
+    // 2026-10-22: 日を跨ぐモバイル注文も、時間帯別売上を実会計時刻へ計上する。
+    const h = jstHour((o.paidAt ?? o.createdAt).getTime());
     byHour[h]!.orders += 1;
     byHour[h]!.revenue += o.totalPrice;
   }
@@ -182,7 +185,7 @@ circleRoutes.get("/:id/analytics", async (c) => {
     .slice(0, 20);
 
   const payAgg = new Map<string, { orders: number; revenue: number }>();
-  for (const o of liveOrders) {
+  for (const o of paidOrders) {
     const key = o.paymentMethod || "未設定";
     const a = payAgg.get(key) || { orders: 0, revenue: 0 };
     a.orders += 1;
@@ -195,7 +198,7 @@ circleRoutes.get("/:id/analytics", async (c) => {
 
   return c.json({
     totals: {
-      orders: liveOrders.length,
+      orders: paidOrders.length,
       revenue,
       customers,
       avgSpend: customers ? Math.round(revenue / customers) : 0,

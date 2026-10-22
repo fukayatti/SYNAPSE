@@ -24,24 +24,26 @@ export function SalesTab({
 }: SalesTabProps) {
   const [isChartExpanded, setIsChartExpanded] = useState(false);
 
-  // Sales Aggregations
+  // 2026-10-22: 会計総額と返金額を分け、サークル別・全体の純売上を照合する。
   const salesStats = (() => {
-    if (!allCirclesOrders) return { totalSales: 0, completedOrdersCount: 0, totalOrdersCount: 0 };
-    let totalSales = 0;
-    let completedOrdersCount = 0;
+    if (!allCirclesOrders) return { grossSales: 0, refundAmount: 0, netSales: 0, settledOrdersCount: 0, totalOrdersCount: 0 };
+    let grossSales = 0;
+    let refundAmount = 0;
+    let settledOrdersCount = 0;
     let totalOrdersCount = 0;
 
     allCirclesOrders.forEach((item) => {
       totalOrdersCount += item.orders.length;
       item.orders.forEach((o) => {
-        if (o.status === "completed") {
-          totalSales += o.totalPrice || 0;
-          completedOrdersCount += 1;
+        if (o.paymentStatus === "paid" || o.paymentStatus === "refunded") {
+          grossSales += o.totalPrice || 0;
+          settledOrdersCount += 1;
         }
+        refundAmount += o.refund?.amount || 0;
       });
     });
 
-    return { totalSales, completedOrdersCount, totalOrdersCount };
+    return { grossSales, refundAmount, netSales: grossSales - refundAmount, settledOrdersCount, totalOrdersCount };
   })();
 
   // サークル別の売上構成
@@ -49,9 +51,11 @@ export function SalesTab({
     if (!allCirclesOrders) return [];
     return allCirclesOrders
       .map((item) => {
-        const sales = item.orders
-          .filter((o) => o.status === "completed")
-          .reduce((sum: number, o: any) => sum + (o.totalPrice || 0), 0);
+        const grossSales = item.orders
+          .filter((o) => o.paymentStatus === "paid" || o.paymentStatus === "refunded")
+          .reduce((sum, o) => sum + (o.totalPrice || 0), 0);
+        const refundAmount = item.orders.reduce((sum, o) => sum + (o.refund?.amount || 0), 0);
+        const sales = grossSales - refundAmount;
         return { name: item.circleName, sales };
       })
       .sort((a, b) => b.sales - a.sales);
@@ -69,8 +73,9 @@ export function SalesTab({
     if (allCirclesOrders) {
       allCirclesOrders.forEach((item) => {
         item.orders.forEach((o) => {
-          if (o.status === "completed" && o.createdAt) {
-            const hour = new Date(o.createdAt).getHours();
+          if ((o.paymentStatus === "paid" || o.paymentStatus === "refunded") && (o.paidAt || o.createdAt)) {
+            // 2026-10-22: 売上の時間帯は会計時刻を基準にし、旧注文だけ作成時刻を使う。
+            const hour = new Date(new Date(o.paidAt ?? o.createdAt!).getTime() + 9 * 60 * 60 * 1000).getUTCHours();
             if (hour >= 9 && hour <= 18) {
               data[hour - 9].sales += o.totalPrice || 0;
             }
@@ -119,7 +124,7 @@ export function SalesTab({
       ) : (
         <div className="space-y-6">
           {/* 売上概要カード */}
-          <div className="grid gap-4 md:grid-cols-3 font-mono">
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5 font-mono">
             <Card className="rounded-none shadow-none">
               <CardHeader className="p-3 pb-1 bg-muted/20 border-b-thin border-border">
                 <CardTitle className="text-xs uppercase font-bold text-muted-foreground">総注文数</CardTitle>
@@ -131,19 +136,37 @@ export function SalesTab({
 
             <Card className="rounded-none shadow-none">
               <CardHeader className="p-3 pb-1 bg-muted/20 border-b-thin border-border">
-                <CardTitle className="text-xs uppercase font-bold text-muted-foreground">完了取引数</CardTitle>
+                <CardTitle className="text-xs uppercase font-bold text-muted-foreground">会計件数</CardTitle>
               </CardHeader>
               <CardContent className="p-3 pt-4">
-                <p className="text-xl font-black">{salesStats.completedOrdersCount}件</p>
+                <p className="text-xl font-black">{salesStats.settledOrdersCount}件</p>
+              </CardContent>
+            </Card>
+
+            <Card className="rounded-none shadow-none">
+              <CardHeader className="p-3 pb-1 bg-muted/20 border-b-thin border-border">
+                <CardTitle className="text-xs uppercase font-bold text-muted-foreground">会計売上</CardTitle>
+              </CardHeader>
+              <CardContent className="p-3 pt-4">
+                <p className="text-xl font-black">¥{salesStats.grossSales.toLocaleString()}</p>
+              </CardContent>
+            </Card>
+
+            <Card className="rounded-none shadow-none">
+              <CardHeader className="p-3 pb-1 bg-muted/20 border-b-thin border-border">
+                <CardTitle className="text-xs uppercase font-bold text-muted-foreground">返金</CardTitle>
+              </CardHeader>
+              <CardContent className="p-3 pt-4">
+                <p className="text-xl font-black">−¥{salesStats.refundAmount.toLocaleString()}</p>
               </CardContent>
             </Card>
 
             <Card className="rounded-none shadow-none bg-primary text-primary-foreground">
               <CardHeader className="p-3 pb-1 bg-primary border-b-thin border-primary-foreground/30">
-                <CardTitle className="text-xs uppercase font-bold text-primary-foreground/75">イベント総売上</CardTitle>
+                <CardTitle className="text-xs uppercase font-bold text-primary-foreground/75">イベント純売上</CardTitle>
               </CardHeader>
               <CardContent className="p-3 pt-4">
-                <p className="text-xl font-black">¥{salesStats.totalSales.toLocaleString()}</p>
+                <p className="text-xl font-black">¥{salesStats.netSales.toLocaleString()}</p>
               </CardContent>
             </Card>
           </div>
@@ -185,7 +208,7 @@ export function SalesTab({
             {/* 時間帯別売上推移 (折れ線SVG) */}
             <Card className="rounded-none shadow-none">
               <CardHeader className="p-4 border-b-thin border-border bg-muted/20">
-                <CardTitle className="text-sm font-bold uppercase">[イベント時間帯別売上]</CardTitle>
+              <CardTitle className="text-sm font-bold uppercase">[会計時刻別売上]</CardTitle>
               </CardHeader>
               <CardContent className="p-4 pt-4 flex justify-center">
                 <div 
@@ -264,7 +287,7 @@ export function SalesTab({
       <Modal
         isOpen={isChartExpanded}
         onClose={() => setIsChartExpanded(false)}
-        title="[イベント時間帯別売上]"
+        title="[会計時刻別売上]"
         maxWidth="xl"
       >
         <div className="w-full">

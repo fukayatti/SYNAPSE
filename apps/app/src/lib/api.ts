@@ -345,6 +345,13 @@ export const orderApi = {
       method: "DELETE",
     }),
   get: (id: string) => fetchApi<OrderWithItems>(`/api/orders/${id}`),
+  getUnpaidMobileByUser: (circleId: string, userId: string) =>
+    fetchApi<OrderWithItems[]>(`/api/orders/mobile/unpaid?circleId=${encodeURIComponent(circleId)}&userId=${encodeURIComponent(userId)}`),
+  settleMobile: (id: string, paymentMethod: string) =>
+    fetchApi<{ success: true; alreadyPaid: boolean; paidAt: string }>(`/api/orders/${encodeURIComponent(id)}/settle`, {
+      method: "POST",
+      body: { paymentMethod },
+    }),
   // 来場者本人の注文履歴 (レジを通った注文)。code = eventUser.id or リストバンドID。
   // 旧実装 (getByCode) の .catch(()=>[]) は 500 を空表示に握り潰し障害を隠していたため、
   // ここでは握り潰さず react-query の isError → ErrorState に流して可視化する。
@@ -370,10 +377,10 @@ export const orderApi = {
       body: data,
       headers: { "Idempotency-Key": idempotencyKey },
     })),
-  updateStatus: (id: string, status: OrderStatus) =>
-    fetchApi<{ success: boolean }>(`/api/orders/${id}/status`, {
+  updateStatus: (id: string, status: OrderStatus, options?: { refundConfirmed?: boolean }) =>
+    fetchApi<{ success: boolean; refund: { amount: number; refundedAt: string } | null }>(`/api/orders/${id}/status`, {
       method: "PATCH",
-      body: { status },
+      body: { status, ...options },
     }),
   complete: (id: string) =>
     fetchApi<{ success: boolean }>(`/api/orders/${id}/complete`, {
@@ -938,6 +945,9 @@ export interface EventAnalytics {
     /** @deprecated 2026-10-19: use entryRate. */
     onboardedRate: number;
     orders: number;
+    grossRevenue: number;
+    refundOrders: number;
+    refundAmount: number;
     revenue: number;
     customers: number;
     avgSpend: number;
@@ -948,11 +958,13 @@ export interface EventAnalytics {
     circleVisits: number;
     visitingUsers: number;
   };
-  byHour: { hour: number; orders: number; revenue: number; visitors: number }[];
+  byHour: { hour: number; orders: number; revenue: number; refunds: number; visitors: number }[];
   circleRanking: {
     circleId: string;
     name: string;
     revenue: number;
+    grossRevenue: number;
+    refundAmount: number;
     orders: number;
     reviews: number;
     avgRating: number | null;
@@ -960,6 +972,7 @@ export interface EventAnalytics {
   menuRanking: { menuName: string; quantity: number; revenue: number }[];
   ageBuckets: { label: string; count: number }[];
   paymentBreakdown: { method: string; orders: number; revenue: number }[];
+  refundBreakdown: { method: string; orders: number; amount: number }[];
 }
 
 // 来場者行動・混雑・スタッフ分析 (GET /api/festivals/:id/behavior) のレスポンス (2026-07-14)
@@ -1010,9 +1023,25 @@ export interface CircleAnalytics {
 // 日次締め (GET /api/festivals/:id/daily-close)
 export interface DailyClose {
   date: string;
-  totals: { orders: number; revenue: number; customers: number };
+  totals: {
+    orders: number;
+    grossRevenue: number;
+    refundOrders: number;
+    refundAmount: number;
+    revenue: number;
+    customers: number;
+  };
   paymentBreakdown: { method: string; orders: number; revenue: number }[];
-  circleBreakdown: { circleId: string; name: string; orders: number; revenue: number }[];
+  refundBreakdown: { method: string; orders: number; amount: number }[];
+  circleBreakdown: {
+    circleId: string;
+    name: string;
+    orders: number;
+    grossRevenue: number;
+    refundAmount: number;
+    refundedOrders: number;
+    revenue: number;
+  }[];
 }
 
 // 進行中注文モニタの1件 (GET /api/festivals/:id/orders/live)
@@ -1304,6 +1333,14 @@ export interface Order {
   receivedAt: Date | null;
   peopleCount: number;
   paymentMethod: string | null;
+  paymentStatus: "paid" | "unpaid" | "refunded";
+  paidAt: Date | null;
+  refund?: {
+    amount: number;
+    originalPaymentMethod: string | null;
+    refundedBy: string | null;
+    refundedAt: Date;
+  } | null;
   // レジ担当者 (order.cashier_id)。スタッフ向け一覧 (orderApi.list) にのみ含まれる想定で、
   // 来場者向け履歴 API (orders/user/:code) は意図的にこの項目を返さない。
   cashierId: string | null;
@@ -1346,6 +1383,7 @@ export interface VisitorOrderHistory {
   id: string;
   orderNumber: string;
   status: string;
+  paymentStatus: "paid" | "unpaid" | "refunded";
   totalPrice: number;
   peopleCount: number;
   circleId: string;

@@ -18,6 +18,7 @@ export async function sendEndedEventReviewReminders(env: WorkerEnv) {
     ));
 
   for (const endedEvent of endedEvents) {
+    // 2026-10-22: 注文登録だけでレビュー依頼を送らず、店頭会計済みの購入を対象にする。
     const completedOrders = await db.select({
       visitorId: eventUser.id,
       eventId: eventUser.eventId,
@@ -30,6 +31,7 @@ export async function sendEndedEventReviewReminders(env: WorkerEnv) {
         eq(eventUser.eventId, endedEvent.id),
         eq(eventUser.status, "available"),
         isNull(circle.deletedAt),
+        eq(order.paymentStatus, "paid"),
         or(eq(order.status, "completed"), eq(order.completed, true)),
       ));
 

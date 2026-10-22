@@ -3,7 +3,7 @@ import { useState, useEffect, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { CircleAuthGuard, getAuthInfo, useAuth } from "@/hooks/useCircleAuth";
-import { menuApi, toppingApi, orderApi, circleApi, eventApi, wristbandApi, preOrderApi, couponApi, discountApi, parseCircleSettings, parseEventPaymentMethods, activeWaitTimeReport, type MenuWithToppings, type Topping, type RegisterDiscountOption, type RegisterDisplaySession } from "@/lib/api";
+import { menuApi, toppingApi, orderApi, circleApi, eventApi, wristbandApi, preOrderApi, couponApi, discountApi, parseCircleSettings, parseEventPaymentMethods, activeWaitTimeReport, type MenuWithToppings, type Topping, type OrderWithItems, type RegisterDiscountOption, type RegisterDisplaySession } from "@/lib/api";
 import { extractIdFromCode, cn } from "@/lib/utils";
 import { undoableAction } from "@/lib/toast-undo";
 import { ModSandbox } from "@/components/ModSandbox";
@@ -21,7 +21,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState } from "@/components/ui/ErrorState";
 import { Modal } from "@/components/ui/Modal";
 import { toast } from "sonner";
-import { Minus, Plus, ShoppingCart, Trash2, QrCode, X, ScanLine, Monitor, Copy } from "lucide-react";
+import { Minus, Plus, ShoppingCart, Trash2, QrCode, X, ScanLine, Monitor, Copy, Receipt, RefreshCw } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { ApiError } from "@/lib/api-error";
 import { resolveAssetUrl } from "@/lib/asset-url";
@@ -548,6 +548,7 @@ function RegisterPageContent() {
   }, [isCartPanelOpen]);
   const [scannedCode, setScannedCode] = useState("");
   const [activeCustomer, setActiveCustomer] = useSessionState<{ userId: string; wristbandId: string | null; familyBandCount: number; allergies: JapaneseAllergen[] | null } | null>(`${registerStateKey}:customer`, null);
+  const [mobilePaymentMethods, setMobilePaymentMethods] = useState<Record<string, string>>({});
   const [activePreOrderId, setActivePreOrderId] = useSessionState<string | null>(`${registerStateKey}:preorder`, null);
   const [activePreOrderTotalPrice, setActivePreOrderTotalPrice] = useSessionState<number | null>(`${registerStateKey}:preorder-total`, null);
   const [registerCouponId, setRegisterCouponId] = useSessionState(`${registerStateKey}:coupon`, "");
@@ -598,6 +599,34 @@ function RegisterPageContent() {
     const list = accepted.length > 0 ? accepted.filter((p) => eventMethods.includes(p)) : eventMethods;
     return list.length > 0 ? list : eventMethods;
   })();
+  // 2026-10-22: 注文登録済みのモバイル注文はカートへ複製せず、読み取った来場者の未会計分として別表示する。
+  const unpaidMobileQueryKey = ["unpaidMobileOrders", circleId, activeCustomer?.userId] as const;
+  const unpaidMobileOrders = useQuery({
+    queryKey: unpaidMobileQueryKey,
+    queryFn: () => orderApi.getUnpaidMobileByUser(circleId, activeCustomer!.userId),
+    enabled: !!circleId && !!activeCustomer?.userId,
+    refetchInterval: 15_000,
+    retry: false,
+  });
+  const settleMobileOrder = useMutation({
+    mutationFn: ({ orderId, userId, paymentMethod }: { orderId: string; userId: string; paymentMethod: string }) =>
+      orderApi.settleMobile(orderId, paymentMethod),
+    onSuccess: (result, variables) => {
+      setMobilePaymentMethods((current) => {
+        const next = { ...current };
+        delete next[variables.orderId];
+        return next;
+      });
+      toast.success(result.alreadyPaid ? "別のレジで会計済みでした" : "未会計注文の会計を確定しました");
+      void queryClient.invalidateQueries({ queryKey: ["unpaidMobileOrders", circleId, variables.userId] });
+      void queryClient.invalidateQueries({ queryKey: ["myOrders", variables.userId] });
+      void queryClient.invalidateQueries({ queryKey: ["orders", circleId] });
+    },
+    onError: (error: any, variables) => {
+      toast.error(error?.message || "会計状態を確認できませんでした。一覧を更新してください");
+      void queryClient.invalidateQueries({ queryKey: ["unpaidMobileOrders", circleId, variables.userId] });
+    },
+  });
   const [paymentMethod, setPaymentMethod] = useSessionState(`${registerStateKey}:payment`, "");
   // 対応が1つだけなら自動採用。選択肢が変わって現在値が無効になったらリセット。
   useEffect(() => {
@@ -1308,6 +1337,121 @@ function RegisterPageContent() {
                 </div>
               </CardContent>
             </Card>
+          )}
+
+          {/* 2026-10-22: 既存のモバイル注文は新規カートと分け、注文番号と支払状態を確認して会計する。 */}
+          {activeCustomer && (
+            <section aria-labelledby="unpaid-mobile-orders-title" className="mb-5 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b-thick border-border pb-2">
+                <h2 id="unpaid-mobile-orders-title" className="flex items-center gap-2 text-sm font-black uppercase tracking-wider">
+                  <Receipt className="h-4 w-4" /> 未会計のモバイル注文
+                </h2>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => void unpaidMobileOrders.refetch()}
+                  disabled={unpaidMobileOrders.isFetching}
+                  className="h-9 border-thick border-border font-mono text-xs"
+                >
+                  <RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${unpaidMobileOrders.isFetching ? "animate-spin" : ""}`} />
+                  {unpaidMobileOrders.isFetching ? "更新中…" : "一覧を更新"}
+                </Button>
+              </div>
+              <p className="border-l-4 border-warning bg-warning/10 px-3 py-2 text-xs leading-relaxed">
+                注文はすでに厨房へ登録されています。下の明細を会計してください。注文をカートに入れ直す必要はありません。
+              </p>
+
+              {unpaidMobileOrders.isError ? (
+                <ErrorState error={unpaidMobileOrders.error} onRetry={() => void unpaidMobileOrders.refetch()} />
+              ) : unpaidMobileOrders.isLoading ? (
+                <div className="space-y-2" aria-label="未会計注文を読み込み中">
+                  <Skeleton className="h-28 w-full" />
+                </div>
+              ) : (unpaidMobileOrders.data ?? []).length === 0 ? (
+                <div className="border-thick border-border bg-background px-4 py-5 text-center text-sm text-muted-foreground">
+                  この来場者の未会計モバイル注文はありません。
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {(unpaidMobileOrders.data ?? []).map((mobileOrder: OrderWithItems) => {
+                    const savedMethod = mobilePaymentMethods[mobileOrder.id];
+                    const preferredMethod = paymentMethod && effectivePayments.includes(paymentMethod) ? paymentMethod : "";
+                    const selectedMethod = savedMethod && effectivePayments.includes(savedMethod)
+                      ? savedMethod
+                      : effectivePayments.length === 1 ? effectivePayments[0]! : preferredMethod;
+                    const kitchenStatus = ({
+                      pending: "受付済み",
+                      preparing: "調理中",
+                      ready: "受取可能",
+                      completed: "受け取り待ち",
+                      cancelled: "キャンセル",
+                    } as Record<string, string>)[mobileOrder.status] ?? mobileOrder.status;
+                    return (
+                      <Card key={mobileOrder.id} className="rounded-none border-heavy shadow-none">
+                        <CardHeader className="flex-row items-start justify-between gap-3 border-b-thin border-border bg-muted/20 p-3">
+                          <div className="min-w-0 space-y-2">
+                            <CardTitle className="text-base font-black">注文 #{displayOrderNumber(mobileOrder.orderNumber)}</CardTitle>
+                            <div className="flex flex-wrap items-center gap-2 text-xs">
+                              <span className="border-thin border-warning bg-warning px-2 py-0.5 font-bold text-foreground">未会計</span>
+                              <span className="border-thin border-border bg-background px-2 py-0.5 text-muted-foreground">厨房: {kitchenStatus}</span>
+                              {mobileOrder.createdAt && (
+                                <span className="text-muted-foreground">{new Date(mobileOrder.createdAt).toLocaleString("ja-JP")}</span>
+                              )}
+                            </div>
+                          </div>
+                          <span className="shrink-0 text-lg font-black tabular-nums">¥{mobileOrder.totalPrice.toLocaleString()}</span>
+                        </CardHeader>
+                        <CardContent className="space-y-3 p-3">
+                          <ul className="divide-y divide-border/30 text-sm">
+                            {mobileOrder.items.map((item) => (
+                              <li key={item.id} className="py-2">
+                                <div className="flex justify-between gap-3">
+                                  <span className="font-bold">{item.menuName}</span>
+                                  <span className="shrink-0">× {item.quantity}</span>
+                                </div>
+                                {(item.toppings ?? []).length > 0 && (
+                                  <p className="mt-1 text-xs text-muted-foreground">{(item.toppings ?? []).map((topping) => topping.toppingName).join("・")}</p>
+                                )}
+                              </li>
+                            ))}
+                          </ul>
+                          {effectivePayments.length > 0 ? (
+                            <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+                              <div className="space-y-1.5">
+                                <Label htmlFor={`mobile-order-payment-${mobileOrder.id}`} className="font-mono text-xs">支払い方法</Label>
+                                <select
+                                  id={`mobile-order-payment-${mobileOrder.id}`}
+                                  value={selectedMethod}
+                                  onChange={(event) => setMobilePaymentMethods((current) => ({ ...current, [mobileOrder.id]: event.target.value }))}
+                                  disabled={settleMobileOrder.isPending}
+                                  className="h-11 w-full border-thick border-border bg-background px-3 text-sm font-bold"
+                                >
+                                  {effectivePayments.length > 1 && <option value="">支払い方法を選択</option>}
+                                  {effectivePayments.map((method) => <option key={method} value={method}>{method}</option>)}
+                                </select>
+                              </div>
+                              <Button
+                                type="button"
+                                onClick={() => settleMobileOrder.mutate({ orderId: mobileOrder.id, userId: activeCustomer.userId, paymentMethod: selectedMethod })}
+                                disabled={!selectedMethod || effectivePayments.length === 0 || settleMobileOrder.isPending}
+                                aria-label={`注文番号 ${displayOrderNumber(mobileOrder.orderNumber)} の会計を確定`}
+                                className="h-11 border-thick border-border px-5 font-mono font-black"
+                              >
+                                {settleMobileOrder.isPending && settleMobileOrder.variables?.orderId === mobileOrder.id ? "会計中…" : "会計を確定"}
+                              </Button>
+                            </div>
+                          ) : (
+                            <p role="alert" className="border-thick border-warning bg-warning/10 p-3 text-xs font-bold">
+                              利用できる支払い方法がありません。イベントとサークルの支払い方法設定を確認してください。
+                            </p>
+                          )}
+                        </CardContent>
+                      </Card>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
           )}
 
           {/* メニューグリッド */}

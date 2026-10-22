@@ -9,7 +9,7 @@ import { ErrorState } from "@/components/ui/ErrorState";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { toast } from "sonner";
 import { Monitor } from "lucide-react";
-import { SwipeableOrderStack, type KitchenOrderView } from "@/components/pos/SwipeableOrderStack";
+import { SwipeableOrderStack, type KitchenOrderView, type SwipeableOrder } from "@/components/pos/SwipeableOrderStack";
 import { useSessionState } from "@/hooks/useSessionState";
 import { queryCachePolicy } from "@/lib/query-cache-policy";
 
@@ -24,7 +24,7 @@ function BackyardPageContent() {
   const [selectedStatus, setSelectedStatus] = useSessionState<string | undefined>(`fesflow:backyard:${circleId || "unselected"}:status`, "actionable");
   const [view, setView] = useSessionState<KitchenOrderView>(`fesflow:backyard:${circleId || "unselected"}:view`, "horizontal");
   // 注文キャンセルの確認ダイアログ用
-  const [pendingCancel, setPendingCancel] = useState<{ id: string; orderNumber: string } | null>(
+  const [pendingCancel, setPendingCancel] = useState<Pick<SwipeableOrder, "id" | "orderNumber" | "totalPrice" | "paymentStatus" | "paymentMethod"> | null>(
     null
   );
   const [cancelAnimationOrderId, setCancelAnimationOrderId] = useState<string | null>(null);
@@ -57,15 +57,17 @@ function BackyardPageContent() {
     mutationFn: async (input: {
       id: string;
       status: "pending" | "preparing" | "ready" | "completed" | "cancelled";
+      refundConfirmed?: boolean;
     }) => {
-      return await orderApi.updateStatus(input.id, input.status);
+      return await orderApi.updateStatus(input.id, input.status, { refundConfirmed: input.refundConfirmed });
     },
-    onSuccess: () => {
-      toast.success("注文ステータスを更新しました");
+    onSuccess: (_result, input) => {
+      toast.success(input.refundConfirmed ? "全額返金を記録し、注文を取り消しました" : "注文ステータスを更新しました");
       queryClient.invalidateQueries({ queryKey: ["orders"] });
     },
     onError: (error: any) => {
       toast.error(error.message || "更新に失敗しました");
+      queryClient.invalidateQueries({ queryKey: ["orders"] });
     },
   });
 
@@ -119,10 +121,11 @@ function BackyardPageContent() {
   const handleCancel = () => {
     if (!pendingCancel) return;
     const orderId = pendingCancel.id;
+    const refundConfirmed = pendingCancel.paymentStatus === "paid";
     setCancelAnimationOrderId(orderId);
     setPendingCancel(null);
     window.setTimeout(() => updateStatus.mutate(
-      { id: orderId, status: "cancelled" },
+      { id: orderId, status: "cancelled", ...(refundConfirmed ? { refundConfirmed: true } : {}) },
       { onSettled: () => setCancelAnimationOrderId(null) }
     ), 300);
   };
@@ -260,16 +263,25 @@ function BackyardPageContent() {
         onStart={handleStartPreparing}
         onComplete={handleComplete}
         onMarkReceived={(id) => markReceived.mutateAsync({ id })}
-        onCancelRequest={(id, orderNumber) => setPendingCancel({ id, orderNumber })}
+        onCancelRequest={(order) => setPendingCancel({
+          id: order.id,
+          orderNumber: order.orderNumber,
+          totalPrice: order.totalPrice,
+          paymentStatus: order.paymentStatus,
+          paymentMethod: order.paymentMethod,
+        })}
         cancelAnimationOrderId={cancelAnimationOrderId}
         isUpdating={updateStatus.isPending || completeOrder.isPending || markReceived.isPending}
       />
 
       <ConfirmDialog
         isOpen={!!pendingCancel}
-        title="[注文のキャンセル]"
-        description={`注文 #${pendingCancel?.orderNumber ?? ""} をキャンセルしますか？この操作は元に戻せません。`}
-        confirmLabel="注文を取り消す"
+        isPending={updateStatus.isPending}
+        title={pendingCancel?.paymentStatus === "paid" ? "[返金を記録してキャンセル]" : "[注文のキャンセル]"}
+        description={pendingCancel?.paymentStatus === "paid"
+          ? `注文 #${pendingCancel.orderNumber} の全額 ¥${(pendingCancel.totalPrice ?? 0).toLocaleString()} を返金記録に残して取り消します。FesFlowは送金しません。実際に返金を済ませてから確定してください。元の決済方法: ${pendingCancel.paymentMethod ?? "未記録"}。`
+          : `注文 #${pendingCancel?.orderNumber ?? ""} をキャンセルしますか？この操作は元に戻せません。`}
+        confirmLabel={pendingCancel?.paymentStatus === "paid" ? "全額返金を記録して取り消す" : "注文を取り消す"}
         cancelLabel="戻る"
         onConfirm={handleCancel}
         onCancel={() => setPendingCancel(null)}

@@ -20,12 +20,13 @@ import {
 // 2026-10-18: 開催後の振り返り専用にし、開催中の自動更新は運営画面へ集約する。
 // 2026-10-19: 来場者数と時間帯の来場系列は入場処理済みアカウントを基準にし、事前発行分と区別する。
 
-type TrendMetric = "visitors" | "orders" | "revenue";
+type TrendMetric = "visitors" | "orders" | "revenue" | "refunds";
 
 const trendMetrics: { key: TrendMetric; label: string }[] = [
   { key: "visitors", label: "入場処理" },
   { key: "orders", label: "注文数" },
-  { key: "revenue", label: "売上" },
+  { key: "revenue", label: "会計売上" },
+  { key: "refunds", label: "返金" },
 ];
 
 function yen(value: number): string {
@@ -41,7 +42,9 @@ function hourLabel(hour: number): string {
 }
 
 function metricValue(value: number, metric: TrendMetric): string {
-  return metric === "revenue" ? yen(value) : `${integer(value)}${metric === "visitors" ? "アカウント" : "件"}`;
+  return metric === "revenue" || metric === "refunds"
+    ? yen(value)
+    : `${integer(value)}${metric === "visitors" ? "アカウント" : "件"}`;
 }
 
 function getPeak<T extends { hour: number }>(
@@ -71,12 +74,14 @@ function downloadCsv(eventLabel: string, analytics: EventAnalytics) {
   ]);
   const lines: (string | number | null)[][] = [
     ["イベント統計サマリ"],
-    ["入場処理済みアカウント数（家族単位）", "来場プロフィール数", "事前登録アカウント数", "入場処理率", "売上", "注文数", "注文完了率", "注文記録上の延べ人数"],
+    ["入場処理済みアカウント数（家族単位）", "来場プロフィール数", "事前登録アカウント数", "入場処理率", "会計売上", "返金額", "純売上", "注文数", "注文完了率", "注文記録上の延べ人数"],
     [
       totals.visitors,
       totals.visitorProfiles,
       totals.preRegisteredAccounts,
       `${totals.entryRate}%`,
+      totals.grossRevenue,
+      totals.refundAmount,
       totals.revenue,
       totals.orders,
       `${totals.completedRate}%`,
@@ -84,18 +89,24 @@ function downloadCsv(eventLabel: string, analytics: EventAnalytics) {
     ],
     [],
     ["時間帯別 (日本時間・全開催日の合算)"],
-    ["時刻", "入場処理済みアカウント数", "注文数", "売上"],
-    ...analytics.byHour.map((row) => [hourLabel(row.hour), row.visitors, row.orders, row.revenue]),
+    ["時刻", "入場処理済みアカウント数", "会計件数", "会計売上", "返金額"],
+    ...analytics.byHour.map((row) => [hourLabel(row.hour), row.visitors, row.orders, row.revenue, row.refunds]),
     [],
     ["年代構成 (リストバンド/プロフィール単位)"],
     ["年齢回答ありプロフィール", ageTotal, "未回答プロフィール", Math.max(0, totals.visitorProfiles - ageTotal)],
     ["年代", "年齢登録プロフィール数", "回答者内の構成比"],
     ...ageRows,
     [],
-    ["サークル別売上"],
-    ["サークル名", "売上", "注文数", "レビュー数", "平均評価"],
+    ["返金（元の支払い方法別）"],
+    ["元の支払い方法", "件数", "返金額"],
+    ...analytics.refundBreakdown.map((row) => [row.method, row.orders, row.amount]),
+    [],
+    ["サークル別会計・返金・純売上"],
+    ["サークル名", "会計売上", "返金額", "純売上", "有効注文数", "レビュー数", "平均評価"],
     ...analytics.circleRanking.map((circle) => [
       circle.name,
+      circle.grossRevenue,
+      circle.refundAmount,
       circle.revenue,
       circle.orders,
       circle.reviews,
@@ -253,7 +264,7 @@ function HourlyTrend({
       </div>
 
       <p className="mb-2 flex flex-wrap items-baseline justify-between gap-2 text-[10px] text-muted-foreground">
-        <span>全期間を日本時間で集計 · アカウントは作成時刻、注文と売上は注文時刻</span>
+        <span>全期間を日本時間で集計 · 会計売上は入金時刻、返金は返金記録時刻</span>
         <span>
           合計 <strong className="font-mono text-foreground">{format(total)}</strong>
           {peak && valueFor(peak) > 0 && (
@@ -376,14 +387,21 @@ export function AnalyticsTab({ eventId, eventName }: { eventId: string; eventNam
     label: payment.method,
     value: payment.revenue,
     valueLabel: yen(payment.revenue),
-    detail: `${integer(payment.orders)}件 · 売上構成 ${totals.revenue ? Math.round((payment.revenue / totals.revenue) * 100) : 0}%`,
+    detail: `${integer(payment.orders)}件 · 会計売上構成 ${totals.grossRevenue ? Math.round((payment.revenue / totals.grossRevenue) * 100) : 0}%`,
+  }));
+  const refundRows = analytics.refundBreakdown.slice(0, 5).map((refund) => ({
+    key: refund.method,
+    label: refund.method,
+    value: refund.amount,
+    valueLabel: `−${yen(refund.amount)}`,
+    detail: `${integer(refund.orders)}件 · 元の支払い方法`,
   }));
   const circleRows = analytics.circleRanking.slice(0, 6).map((circle) => ({
     key: circle.circleId,
     label: circle.name || "名称未設定",
     value: circle.revenue,
     valueLabel: yen(circle.revenue),
-    detail: `${integer(circle.orders)}注文 · ${circle.avgRating == null ? "評価なし" : `★${circle.avgRating} / ${circle.reviews}件`}`,
+    detail: `会計 ${yen(circle.grossRevenue)} − 返金 ${yen(circle.refundAmount)} · ${integer(circle.orders)}注文 · ${circle.avgRating == null ? "評価なし" : `★${circle.avgRating} / ${circle.reviews}件`}`,
   }));
 
   return (
@@ -424,7 +442,8 @@ export function AnalyticsTab({ eventId, eventName }: { eventId: string; eventNam
         </div>
       </header>
 
-      <section aria-label="イベントの主要指標" className="grid grid-cols-2 gap-x-4 gap-y-5 lg:grid-cols-4 lg:gap-x-6">
+      {/* 2026-10-22: 会計総額と返金を独立表示し、イベント全体の純売上を照合できるようにする。 */}
+      <section aria-label="イベントの主要指標" className="grid grid-cols-2 gap-x-4 gap-y-5 lg:grid-cols-5 lg:gap-x-6">
         <StatCard
           label="登録アカウント"
           value={`${integer(totals.visitors)}件`}
@@ -439,9 +458,15 @@ export function AnalyticsTab({ eventId, eventName }: { eventId: string; eventNam
           icon={Users}
         />
         <StatCard
-          label="売上"
+          label="純売上"
           value={yen(totals.revenue)}
-          note={`キャンセルを除く ${integer(totals.orders)}注文`}
+          note={`会計 ${yen(totals.grossRevenue)} − 返金 ${yen(totals.refundAmount)}`}
+          icon={Coins}
+        />
+        <StatCard
+          label="返金額"
+          value={`−${yen(totals.refundAmount)}`}
+          note={`${integer(totals.refundOrders)}件 · 記録日時で集計`}
           icon={Coins}
         />
         <StatCard
@@ -528,9 +553,15 @@ export function AnalyticsTab({ eventId, eventName }: { eventId: string; eventNam
               <h4 className="mb-3 font-mono text-[10px] font-bold uppercase tracking-widest text-muted-foreground">人気メニュー · 個数</h4>
               <RankingBars rows={menuRows} max={maxMenuQuantity} />
             </div>
-            <div>
-              <h4 className="mb-3 font-mono text-[10px] font-bold uppercase tracking-widest text-muted-foreground">支払い方法 · 売上</h4>
-              <RankingBars rows={paymentRows} max={maxPaymentRevenue} />
+            <div className="space-y-6">
+              <div>
+                <h4 className="mb-3 font-mono text-[10px] font-bold uppercase tracking-widest text-muted-foreground">支払い方法 · 会計売上</h4>
+                <RankingBars rows={paymentRows} max={maxPaymentRevenue} />
+              </div>
+              <div>
+                <h4 className="mb-3 font-mono text-[10px] font-bold uppercase tracking-widest text-muted-foreground">返金 · 元の支払い方法</h4>
+                {refundRows.length ? <RankingBars rows={refundRows} max={Math.max(1, ...refundRows.map((row) => row.value))} /> : <p className="text-xs text-muted-foreground">返金記録はありません。</p>}
+              </div>
             </div>
           </div>
         </section>
@@ -586,7 +617,7 @@ export function AnalyticsTab({ eventId, eventName }: { eventId: string; eventNam
       </div>
 
       <section aria-labelledby="event-circle-ranking-title" className="min-w-0">
-        <SectionTitle id="event-circle-ranking-title" label="サークル別の実績" note={`売上上位 ${Math.min(6, analytics.circleRanking.length)} / ${integer(totals.circles)}サークル`} />
+        <SectionTitle id="event-circle-ranking-title" label="サークル別の実績" note={`純売上上位 ${Math.min(6, analytics.circleRanking.length)} / ${integer(totals.circles)}サークル`} />
         {analytics.circleRanking.length === 0 ? (
           <p className="py-2 text-xs text-muted-foreground">サークルの販売実績がまだありません。</p>
         ) : (
@@ -611,7 +642,7 @@ export function AnalyticsTab({ eventId, eventName }: { eventId: string; eventNam
       </section>
 
       <footer className="border-t-thin border-border pt-3 text-[10px] leading-4 text-muted-foreground">
-        登録アカウント数・注文者数・回遊は入場処理済みアカウント（家族単位）で集計します。プロフィール数・年代は有効バンドごとに家族分も含め、バンド未紐付けの場合はアカウントプロフィールを1件として扱います。年代の未回答は {integer(ageUnansweredCount)}人です。家族で注文を共有するため、注文・売上を年代別には配賦しません。売上・注文はキャンセルを除外し、注文完了率は完了済みの注文数から計算しています。時間帯は日本時間で、全開催日の同じ時刻を合算しています。
+        登録アカウント数・注文者数・回遊は入場処理済みアカウント（家族単位）で集計します。プロフィール数・年代は有効バンドごとに家族分も含め、バンド未紐付けの場合はアカウントプロフィールを1件として扱います。年代の未回答は {integer(ageUnansweredCount)}人です。家族で注文を共有するため、注文・売上を年代別には配賦しません。純売上は会計売上から返金記録額を差し引き、注文数・メニュー数は返金済み注文を除いて集計しています。時間帯は日本時間で、全開催日の同じ時刻を合算し、返金は返金記録時刻に集計しています。
         {behaviorQuery.isError && (
           <span className="mt-1 block">
             回遊・注文者の補足データを取得できませんでした。{" "}
