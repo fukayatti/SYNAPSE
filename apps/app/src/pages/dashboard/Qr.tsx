@@ -33,6 +33,17 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
+// 2026-10-23: POP は画面上で mx-auto により中央寄せしている。html-to-image は複製した要素にも
+// 計算済みのマージンを残すため、広い画面では余白ぶん内容が右へずれ、PNG/PDF の右側と下が見切れる。
+// 画像化の対象だけマージンを 0 にして、POP 自体の大きさでちょうど切り出す。
+const POP_EXPORT_OPTIONS = {
+  cacheBust: true,
+  pixelRatio: 4,
+  backgroundColor: "#ffffff",
+  skipFonts: true,
+  style: { margin: "0" },
+} as const;
+
 function CircleQrContent() {
   // 2026-07-16: circleName も circleId 同様、localStorage(circleAuth) を mount 時に
   // 一度だけ読む独自 state だと、同一パス上でのスペース切り替え後に古いサークル名の
@@ -87,12 +98,7 @@ function CircleQrContent() {
     setIsExporting(true);
     toast.info("超高画質PNG画像を生成中...");
     try {
-      const dataUrl = await toPng(popRef.current, {
-        cacheBust: true,
-        pixelRatio: 4,
-        backgroundColor: "#ffffff",
-        skipFonts: true,
-      });
+      const dataUrl = await toPng(popRef.current, POP_EXPORT_OPTIONS);
       const link = document.createElement("a");
       link.download = `${circle?.name || "POP"}_MobileOrder.png`;
       link.href = dataUrl;
@@ -111,12 +117,7 @@ function CircleQrContent() {
     setIsExporting(true);
     toast.info("超高画質PDFファイルを生成中...");
     try {
-      const dataUrl = await toPng(popRef.current, {
-        cacheBust: true,
-        pixelRatio: 4,
-        backgroundColor: "#ffffff",
-        skipFonts: true,
-      });
+      const dataUrl = await toPng(popRef.current, POP_EXPORT_OPTIONS);
 
       const pdf = new jsPDF({
         orientation: "portrait",
@@ -125,8 +126,10 @@ function CircleQrContent() {
       });
 
       const pdfWidth = pdf.internal.pageSize.getWidth();
+      const pdfHeight = pdf.internal.pageSize.getHeight();
       const margin = 10;
       const availableWidth = pdfWidth - margin * 2;
+      const availableHeight = pdfHeight - margin * 2;
 
       const img = new window.Image();
       img.src = dataUrl;
@@ -134,10 +137,13 @@ function CircleQrContent() {
         img.onload = resolve;
       });
 
-      const imgWidth = availableWidth;
-      const imgHeight = (img.height * imgWidth) / img.width;
+      // 2026-10-23: スマホ幅で出力すると POP が縦長になり、幅だけに合わせると A4 の高さを超えて下が見切れる。
+      // 幅と高さの両方に収まる倍率で縮小し、余った幅は中央に寄せる。
+      const scale = Math.min(availableWidth / img.width, availableHeight / img.height);
+      const imgWidth = img.width * scale;
+      const imgHeight = img.height * scale;
 
-      pdf.addImage(dataUrl, "PNG", margin, margin, imgWidth, imgHeight);
+      pdf.addImage(dataUrl, "PNG", (pdfWidth - imgWidth) / 2, margin, imgWidth, imgHeight);
       pdf.save(`${circle?.name || "POP"}_MobileOrder.pdf`);
       toast.success("PDFファイルをダウンロードしました");
     } catch (err) {
@@ -222,14 +228,14 @@ function CircleQrContent() {
         {/* 店頭掲示用 POP シート (印刷対象) */}
         <div
           ref={popRef}
-          className="print:m-0 print:p-0 print:border-none print:shadow-none border-thick border-border bg-background p-6 space-y-6 text-center text-foreground max-w-2xl mx-auto rounded-none"
+          className="print:m-0 print:p-0 print:border-none print:shadow-none border-thick border-border bg-background p-4 sm:p-6 space-y-6 text-center text-foreground max-w-2xl mx-auto rounded-none"
         >
           {/* POP ヘッダー */}
           <div className="bg-primary text-primary-foreground p-5 border-thin border-border space-y-1 rounded-none">
             <span className="bg-background text-foreground px-3 py-0.5 font-mono text-[10px] font-black uppercase tracking-widest inline-block rounded-none border border-border">
               MOBILE ORDER AVAILABLE
             </span>
-            <h2 className="text-3xl sm:text-4xl font-black uppercase tracking-wider font-mono leading-none pt-1">
+            <h2 className="text-2xl sm:text-4xl font-black uppercase tracking-wider font-mono leading-tight pt-1 break-words">
               {circle?.name || "店舗名"}
             </h2>
             <p className="font-mono text-[10px] text-primary-foreground/80 uppercase tracking-widest pt-1">
@@ -239,12 +245,13 @@ function CircleQrContent() {
 
           {/* メイン QR 描画エリア */}
           <div className="my-6 flex flex-col items-center justify-center space-y-4">
-            <div className="relative border-thick border-border bg-background p-5 rounded-none shadow-[4px_4px_0px_0px_var(--border)]">
+            {/* 2026-10-23: 220px 固定だと狭い端末で枠から見切れるため、幅に合わせて縮め最大 220px にする。 */}
+            <div className="relative w-full max-w-[17rem] border-thick border-border bg-background p-3 sm:p-5 rounded-none shadow-[4px_4px_0px_0px_var(--border)]">
               <QRCodeSVG
                 value={mobileOrderUrl}
                 size={220}
                 level="H"
-                className="mx-auto block"
+                className="mx-auto block h-auto w-full max-w-[220px]"
               />
             </div>
 
